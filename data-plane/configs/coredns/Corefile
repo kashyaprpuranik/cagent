@@ -1,0 +1,136 @@
+# =============================================================================
+# CoreDNS Configuration - DNS Filtering
+# Only resolves allowlisted domains, blocks everything else
+# =============================================================================
+
+# Health check endpoint
+. {
+    # Health check
+    health :8080
+    
+    # Prometheus metrics
+    prometheus :9153
+    
+    # Logging - log all queries for audit
+    log . {
+        class all
+    }
+    
+    # Error logging
+    errors
+}
+
+# Allowlisted domains - forward to upstream DNS
+github.com {
+    forward . 8.8.8.8 8.8.4.4 {
+        max_fails 3
+        expire 10s
+        health_check 5s
+    }
+    log . {
+        class all
+    }
+    cache 300
+}
+
+api.github.com {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 300
+}
+
+raw.githubusercontent.com {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 300
+}
+
+objects.githubusercontent.com {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 300
+}
+
+pypi.org {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 300
+}
+
+files.pythonhosted.org {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 300
+}
+
+huggingface.co {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 300
+}
+
+cdn-lfs.huggingface.co {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 300
+}
+
+api.openai.com {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 60
+}
+
+api.anthropic.com {
+    forward . 8.8.8.8 8.8.4.4
+    log
+    cache 60
+}
+
+# =============================================================================
+# Devbox Local - Magic domains for credential injection
+# *.devbox.local resolves to Envoy proxy for HTTP→HTTPS upgrade
+# =============================================================================
+devbox.local {
+    template IN A {
+        answer "{{ .Name }} 60 IN A 172.30.0.10"
+    }
+    template IN AAAA {
+        rcode NOERROR
+    }
+    log
+}
+
+# Internal services (Docker DNS)
+vault {
+    forward . 127.0.0.11
+    log
+}
+
+control-plane {
+    forward . 127.0.0.11
+    log
+}
+
+opa {
+    forward . 127.0.0.11
+    log
+}
+
+envoy {
+    forward . 127.0.0.11
+    log
+}
+
+# Block everything else with NXDOMAIN
+. {
+    # Log blocked queries
+    log . {
+        class denial
+    }
+    
+    # Return NXDOMAIN for non-allowlisted domains
+    template ANY ANY {
+        rcode NXDOMAIN
+    }
+}

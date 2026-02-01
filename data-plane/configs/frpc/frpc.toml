@@ -1,0 +1,26 @@
+# FRP Client Configuration
+# Connects outbound to control plane FRP server
+# Exposes SSH access to this agent
+
+serverAddr = "{{ .Envs.FRP_SERVER_ADDR }}"
+serverPort = 7000
+
+# Authentication (must match server)
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_AUTH_TOKEN }}"
+
+# Logging
+log.to = "console"
+log.level = "info"
+
+# Connection settings
+transport.poolCount = 2
+transport.tcpMux = true
+
+# SSH tunnel - exposes agent's SSH to control plane
+[[proxies]]
+name = "{{ .Envs.AGENT_ID }}-ssh"
+type = "tcp"
+localIP = "172.30.0.20"
+localPort = 22
+remotePort = {{ .Envs.FRP_REMOTE_PORT }}

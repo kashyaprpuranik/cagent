@@ -1,0 +1,28 @@
+# FRP Server Configuration
+# Accepts connections from data plane agents and exposes SSH tunnels
+
+bindPort = 7000
+
+# Authentication
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_AUTH_TOKEN }}"
+
+# Web dashboard (optional, for monitoring)
+webServer.addr = "0.0.0.0"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "{{ .Envs.FRP_DASHBOARD_PASSWORD }}"
+
+# Port range for dynamic SSH tunnels (one per agent)
+# Each agent gets a unique port: 6000 + hash(agent_id) % 1000
+allowPorts = [
+  { start = 6000, end = 6999 }
+]
+
+# Logging
+log.to = "console"
+log.level = "info"
+
+# Connection settings
+transport.maxPoolCount = 5
+transport.tcpMux = true
