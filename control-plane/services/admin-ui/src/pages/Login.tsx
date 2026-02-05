@@ -37,7 +37,7 @@ export function Login() {
           </div>
 
           <h1 className="text-2xl font-bold text-dark-100 text-center mb-2">
-            Control Plane
+            Maltbox
           </h1>
           <p className="text-dark-500 text-center mb-6">
             Enter your API token to continue

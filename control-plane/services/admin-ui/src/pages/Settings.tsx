@@ -100,14 +100,14 @@ export function Settings() {
           <Card title="External Services">
             <div className="space-y-2">
               <a
-                href="/grafana/"
+                href="/openobserve/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-between p-3 rounded-lg bg-dark-900/50 hover:bg-dark-700 transition-colors"
               >
                 <div>
-                  <p className="text-dark-200">Grafana</p>
-                  <p className="text-dark-500 text-sm">Metrics and dashboards</p>
+                  <p className="text-dark-200">OpenObserve</p>
+                  <p className="text-dark-500 text-sm">Logs and dashboards</p>
                 </div>
                 <ExternalLink size={16} className="text-dark-500" />
               </a>
@@ -119,9 +119,8 @@ export function Settings() {
         <Card title="About">
           <div className="space-y-3 text-dark-400">
             <p>
-              Control Plane Admin Console provides a web interface for managing
-              your development environment containers, secrets, and security
-              policies.
+              Maltbox Admin Console provides a web interface for managing
+              your AI agent containers, secrets, and security policies.
             </p>
             <div className="pt-2 border-t border-dark-700">
               <p className="text-dark-500 text-sm">

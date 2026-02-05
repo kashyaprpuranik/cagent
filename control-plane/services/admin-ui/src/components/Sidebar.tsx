@@ -30,7 +30,7 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-dark-900 border-r border-dark-700 flex flex-col">
       <div className="p-4 border-b border-dark-700">
-        <h1 className="text-xl font-bold text-dark-100">Control Plane</h1>
+        <h1 className="text-xl font-bold text-dark-100">Maltbox</h1>
         <p className="text-sm text-dark-500">Admin Console</p>
       </div>
       <nav className="flex-1 p-4 space-y-1">
@@ -54,12 +54,12 @@ export function Sidebar() {
       {user?.is_super_admin && (
         <div className="p-4 border-t border-dark-700">
           <a
-            href="/grafana/"
+            href="/openobserve/"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-sm text-dark-500 hover:text-dark-300"
           >
-            Open Grafana
+            Open OpenObserve
           </a>
         </div>
       )}
