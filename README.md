@@ -2,7 +2,64 @@
 
 Secure development environment for AI agents with isolated networking and centralized control.
 
-## Architecture
+## Quick Start
+
+### Standalone Mode
+
+Run the data plane without a control plane. Uses local admin UI for management.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     DATA PLANE (standalone)                      │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                 Local Admin UI (:8080)                      ││
+│  │  • Structured config editor    • Health checks              ││
+│  │  • Log viewer + analytics      • Web terminal               ││
+│  │  • SSH tunnel setup                                         ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                              │                                   │
+│                              ▼                                   │
+│  ┌──────────────┐    ┌─────────────┐                            │
+│  │Agent Manager │    │ maltbox.yaml│ ─── generates ──┐          │
+│  │(config sync) │    │  (config)   │                 │          │
+│  └──────────────┘    └─────────────┘                 │          │
+│                                                      ▼          │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                    agent-net (isolated)                     ││
+│  │  ┌─────────────────────────────────────────────────────┐   ││
+│  │  │                  Agent Container                     │   ││
+│  │  │  • Isolated network (no direct internet)             │   ││
+│  │  │  • All HTTP(S) via Envoy    • DNS via CoreDNS        │   ││
+│  │  └─────────────────────────────────────────────────────┘   ││
+│  │              │                         │                    ││
+│  │              ▼                         ▼                    ││
+│  │       ┌───────────┐             ┌───────────┐              ││
+│  │       │   Envoy   │             │  CoreDNS  │              ││
+│  │       │ (+ creds) │             │ (filter)  │              ││
+│  │       └───────────┘             └───────────┘              ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+```bash
+cd data-plane
+
+# Start with local admin UI
+docker-compose --profile admin up -d
+
+# Access local admin at http://localhost:8080
+# Features:
+#   - Structured config editor (domains, rate limits, credentials)
+#   - Container status with health checks
+#   - Log viewer with traffic analytics
+#   - Browser-based web terminal
+#   - SSH tunnel setup
+```
+
+### Connected Mode
+
+Run with centralized management via the control plane.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -58,58 +115,6 @@ Secure development environment for AI agents with isolated networking and centra
                                               (via Admin UI)
 ```
 
-## Security Model
-
-### Network Isolation
-- **agent-net**: Internal network, no external access. Agent can only reach Envoy and CoreDNS.
-- **infra-net**: Can reach external services. Used by Envoy (credentials), Vector (logs → OpenObserve), and Agent Manager (polls CP).
-- **IPv6 disabled**: Prevents bypass of IPv4 egress controls.
-
-### Polling Architecture (No Inbound Ports)
-- Data plane has **no inbound ports** - control plane cannot initiate connections
-- Agent Manager polls control plane every 30s for commands (wipe, restart, stop, start)
-- Vector pushes logs directly to OpenObserve (not through CP API)
-- Allowlist synced from CP to CoreDNS every 5 minutes
-
-### Agent Container Hardening
-- Read-only root filesystem
-- Dropped all capabilities
-- No privilege escalation (`no-new-privileges`)
-- Resource limits (CPU, memory, pids)
-- DNS forced through CoreDNS filter
-- All HTTP(S) traffic forced through Envoy proxy
-- Optional [gVisor](https://gvisor.dev) kernel isolation (`CONTAINER_RUNTIME=runsc`)
-
-### Credential Security
-- Secrets encrypted with Fernet (AES) and stored in Postgres
-- Envoy Lua filter fetches and injects credentials (cached for 5 min)
-- Agent never sees the actual credentials
-
-## Quick Start
-
-### Standalone Mode
-
-Run the data plane without a control plane. Uses local admin UI for management.
-
-```bash
-cd data-plane
-
-# Start with local admin UI
-docker-compose --profile admin up -d
-
-# Access local admin at http://localhost:8080
-# Features:
-#   - Structured config editor (domains, rate limits, credentials)
-#   - Container status with health checks
-#   - Log viewer with traffic analytics
-#   - Browser-based web terminal
-#   - SSH tunnel setup
-```
-
-### Connected Mode
-
-Run with centralized management via the control plane.
-
 **1. Start Control Plane**
 
 ```bash
@@ -159,9 +164,36 @@ Setup:
    SSH_AUTHORIZED_KEYS="ssh-rsa AAAA... user@host"
    ```
 3. Start with SSH profile: `docker-compose --profile ssh up -d`
-4. Access terminal from Admin UI Dashboard (requires `developer` role)
+4. Access terminal from Admin UI Dashboard
 
-See [control-plane/README.md](control-plane/README.md#web-terminal) and [data-plane/README.md](data-plane/README.md#ssh-access-via-frp) for details.
+See [control-plane/README.md](control-plane/README.md#web-terminal) and [data-plane/README.md](data-plane/README.md#ssh-access) for details.
+
+## Security Model
+
+### Network Isolation
+- **agent-net**: Internal network, no external access. Agent can only reach Envoy and CoreDNS.
+- **infra-net**: Can reach external services. Used by Envoy (credentials), Vector (logs → OpenObserve), and Agent Manager (polls CP).
+- **IPv6 disabled**: Prevents bypass of IPv4 egress controls.
+
+### Polling Architecture (No Inbound Ports)
+- Data plane has **no inbound ports** - control plane cannot initiate connections
+- Agent Manager polls control plane every 30s for commands (wipe, restart, stop, start)
+- Vector pushes logs directly to OpenObserve (not through CP API)
+- Allowlist synced from CP to CoreDNS every 5 minutes
+
+### Agent Container Hardening
+- Read-only root filesystem
+- Dropped all capabilities
+- No privilege escalation (`no-new-privileges`)
+- Resource limits (CPU, memory, pids)
+- DNS forced through CoreDNS filter
+- All HTTP(S) traffic forced through Envoy proxy
+- Optional [gVisor](https://gvisor.dev) kernel isolation (`CONTAINER_RUNTIME=runsc`)
+
+### Credential Security
+- Secrets encrypted with Fernet (AES) and stored in Postgres
+- Envoy Lua filter fetches and injects credentials (cached for 5 min)
+- Agent never sees the actual credentials
 
 ## Features
 
@@ -185,7 +217,7 @@ See [control-plane/README.md](control-plane/README.md#web-terminal) and [data-pl
 | **Rate Limiting** | Per-domain rate limits to control API usage |
 | **IP ACLs** | Restrict control plane access by IP range per tenant |
 | **Audit Logs** | Full audit trail of all actions |
-| **RBAC** | Role-based access control (admin, developer roles) |
+| **RBAC** | Role-based access control (superadmin, admin, dev) |
 | **STCP Tunnels** | Secure tunnels via single port (no port-per-agent allocation) |
 | **Auto-STCP Setup** | Configure SSH tunnels from local admin UI |
 | **gVisor Isolation** | Optional kernel-level syscall isolation (`CONTAINER_RUNTIME=runsc`) |
@@ -230,135 +262,29 @@ See [docs/configuration.md](docs/configuration.md) for detailed configuration in
 
 ## Authentication & API Tokens
 
-### Token Types & Roles
+### Token Types
 
-| Type | Role | Access |
-|------|------|--------|
-| `admin` | `admin` | Full API access (secrets, allowlist, agents, tokens, rate-limits, audit-logs) |
-| `admin` | `developer` | Read access + web terminal access |
-| `agent` | - | Heartbeat, secrets/for-domain, allowlist/export, rate-limits/for-domain (scoped to agent_id) |
+| Type | Description | Access |
+|------|-------------|--------|
+| `superadmin` | Platform operator | All tenants, all endpoints, OpenObserve link |
+| `admin` | Tenant administrator | Secrets, allowlist, agents, tokens, rate-limits, IP ACLs, audit-logs (tenant-scoped) |
+| `dev` | Developer | Dashboard, agent logs, web terminal, settings only |
+| `agent` | Data plane token | Heartbeat, secrets/for-domain, rate-limits/for-domain (agent-scoped) |
 
 ### Default Development Tokens
 
-The following tokens are automatically seeded for development:
+| Token Name | Raw Token | Type |
+|------------|-----------|------|
+| `super-admin-token` | `super-admin-test-token-do-not-use-in-production` | superadmin |
+| `admin-token` | `admin-test-token-do-not-use-in-production` | admin |
+| `dev-token` | `dev-test-token-do-not-use-in-production` | dev |
 
-| Token Name | Raw Token | Role | Super Admin |
-|------------|-----------|------|-------------|
-| `super-admin-token` | `super-admin-test-token-do-not-use-in-production` | admin | Yes |
-| `admin-token` | `admin-test-token-do-not-use-in-production` | admin | No |
-| `dev-token` | `dev-test-token-do-not-use-in-production` | developer | No |
+Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md](docs/development.md) for details.
 
-### Creating API Tokens
+## Documentation
 
-Tokens are managed via the Admin UI (`/tokens`) or API:
-
-```bash
-# Create an admin token
-curl -X POST http://localhost:8002/api/v1/tokens \
-  -H "Authorization: Bearer admin-token" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-admin-token", "token_type": "admin", "roles": "admin"}'
-
-# Create a developer token (can access web terminal)
-curl -X POST http://localhost:8002/api/v1/tokens \
-  -H "Authorization: Bearer admin-token" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-dev-token", "token_type": "admin", "roles": "developer"}'
-
-# Create an agent token (scoped to specific agent)
-curl -X POST http://localhost:8002/api/v1/tokens \
-  -H "Authorization: Bearer admin-token" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "prod-agent-token", "token_type": "agent", "agent_id": "prod-agent-01"}'
-
-# Create token with expiry
-curl -X POST http://localhost:8002/api/v1/tokens \
-  -H "Authorization: Bearer admin-token" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "temp-token", "token_type": "admin", "roles": "admin", "expires_in_days": 30}'
-```
-
-**Important**: The raw token is only returned once on creation. Store it securely!
-
-### Agent Approval Workflow
-
-New agents that connect via heartbeat start in a "pending" state and must be approved before they receive commands:
-
-```bash
-# List agents (shows approval status)
-curl http://localhost:8002/api/v1/agents \
-  -H "Authorization: Bearer dev-token"
-
-# Approve an agent
-curl -X POST http://localhost:8002/api/v1/agents/my-agent/approve \
-  -H "Authorization: Bearer admin-token"
-
-# Reject an agent (removes it)
-curl -X POST http://localhost:8002/api/v1/agents/my-agent/reject \
-  -H "Authorization: Bearer admin-token"
-
-# Revoke approval (agent must be re-approved)
-curl -X POST http://localhost:8002/api/v1/agents/my-agent/revoke \
-  -H "Authorization: Bearer admin-token"
-```
-
-Unapproved agents can still send heartbeats but will not receive commands (wipe, restart, etc.).
-
-## Database Seeding
-
-The database is **automatically seeded on first startup** if empty. The control plane API checks for existing agents and seeds default data if none exist.
-
-For manual seeding (e.g., to reset or re-seed):
-
-```bash
-cd control-plane/services/control-plane
-
-# Seed with default data (test agents, allowlist entries, rate limits)
-python seed.py
-
-# Seed and show generated tokens
-python seed.py --show-token
-
-# Reset database and re-seed
-python seed.py --reset --show-token
-```
-
-This creates:
-- `test-agent` - An approved agent for UI testing (with agent-specific config examples)
-- `pending-agent` - A pending agent to test the approval flow
-- `admin-token` - Admin role token (super admin)
-- `dev-token` - Developer role token (terminal access)
-- Sample allowlist entries and rate limits (both global and agent-specific)
-
-## Testing
-
-### Control Plane Tests
-
-```bash
-cd control-plane/services/control-plane
-./run_tests.sh
-
-# Or with pytest directly:
-pip install -r requirements-test.txt
-pytest -v
-
-# Run specific test class:
-pytest -v tests/test_api.py::TestSecrets
-```
-
-### Data Plane Tests
-
-```bash
-cd data-plane
-./run_tests.sh
-
-# Unit tests only (no containers needed):
-pytest tests/ -v --ignore=tests/test_e2e.py
-
-# E2E tests (requires data plane running):
-docker-compose up -d
-pytest tests/test_e2e.py -v
-```
+- [Configuration Guide](docs/configuration.md) - Domains, secrets, rate limits, per-agent config
+- [Development Guide](docs/development.md) - Database seeding, testing, API token creation
 
 ## Roadmap
 
