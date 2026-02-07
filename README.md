@@ -178,7 +178,7 @@ Run with centralized management via the control plane. Supports multiple tenants
 │                │                     │                 ▼                        │
 │  ┌─────────────┴────────-───┐  ┌─────┴─-──────┐  ┌─────────────────┐            │
 │  │      Agent Manager       │  │    Vector    │  │   FRP Client    │            │
-│  │  (polls CP, syncs DNS)   │  │   (logs)     │  │ (STCP to CP)    │            │
+│  │ polls CP, syncs configs  │  │    (logs)    │  │ (STCP to CP)    │            │
 │  └──────────────────────────┘  └──────────────┘  └────────-┬───────┘            │
 │                                                            │                    │
 │  ┌─────────────────────────────────────────────────────────┼──────────────────┐ │
