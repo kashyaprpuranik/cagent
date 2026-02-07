@@ -306,6 +306,7 @@ Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md
 
 ## Roadmap
 
+- [ ] Egress data volume limits (per-domain byte budgets, in-memory initially, Redis for persistence)
 - [ ] Improved secret management in standalone mode (encrypted local storage)
 - [ ] mTLS for data plane ↔ control plane communication (step-ca)
 - [ ] Package registry proxy/allowlist (npm, pip, cargo)
