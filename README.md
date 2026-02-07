@@ -71,7 +71,7 @@ The `secure` profile enables:
 
 ### Standalone Mode
 
-Run the data plane without a control plane. Uses local admin UI for management.
+Run the data plane without a control plane. Uses a stateless local admin UI for management.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -127,17 +127,17 @@ docker-compose --profile secure --profile admin up -d
 
 ### Control Plane Mode
 
-Run with centralized management via the control plane.
+Run with centralized management via the control plane. Supports multiple tenants and agents.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           CONTROL PLANE (control-net)                            │
-│                           (runs on provider/cloud)                               │
-│                                                                                  │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────────┐                │
-│  │ Postgres  │  │ Admin UI  │  │OpenObserve│  │  FRP Server   │                │
-│  │ (secrets) │  │  (:9080)  │  │  (:5080)  │  │    (:7000)    │                │
-│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘  └───────┬───────┘                │
+│                          CONTROL PLANE (control-net)                            │
+│                          (can run on provider/cloud)                            │
+│                                                                                 │
+│   ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────────┐                │
+│   │ Postgres  │  │ Admin UI  │  │OpenObserve│  │  FRP Server   │                │
+│   │ (secrets) │  │  (:9080)  │  │  (:5080)  │  │    (:7000)    │                │
+│   └────┬────-─┘  └────┬─-────┘  └────┬─-────┘  └───────┬───────┘                │
 │        │              │              │                 │                        │
 │        ▼              ▼              │                 │                        │
 │  ┌────────────────────────────────┐  │                 │                        │
@@ -148,26 +148,26 @@ Run with centralized management via the control plane.
 │  │  /api/v1/agents     Agent Mgmt │  │                 │                        │
 │  │  /api/v1/terminal   Web Term   │  │                 │                        │
 │  └────────────────────────────────┘  │                 │                        │
-│                 ▲                     │                 │                        │
-└─────────────────┼─────────────────────┼─────────────────┼────────────────────────┘
-                  │                     │                 │
-                  │ Heartbeat/Commands  │ Logs            │ STCP Tunnels
-                  │                     │                 │
-┌─────────────────┼─────────────────────┼─────────────────┼────────────────────────┐
-│                 │          DATA PLANE │                 │                        │
-│                 │     (runs on client)│                 │                        │
-│                 │                     │                 ▼                        │
-│  ┌──────────────┴───────────┐  ┌──────┴───────┐  ┌─────────────────┐           │
-│  │      Agent Manager       │  │    Vector    │  │   FRP Client    │           │
-│  │  (polls CP, syncs DNS)   │  │   (logs)     │  │ (STCP to CP)    │           │
-│  └──────────────────────────┘  └──────────────┘  └────────┬────────┘           │
+│                ▲                     │                 │                        │
+└────────────────┼─────────────────────┼─────────────────┼────────────────────────┘
+                 │ Heartbeat/Commands  │ Logs            │ STCP Tunnels
+                 │                     │                 │
+┌────────────────┼─────────────────────┼─────────────────┼────────────────────────┐
+│                │          DATA PLANE │                 │                        │
+|                |                     |                 |                        |
+│             (can run on client laptop or server or provider servers)            │
+│                │                     │                 ▼                        │
+│  ┌─────────────┴────────-───┐  ┌─────┴─-──────┐  ┌─────────────────┐            │
+│  │      Agent Manager       │  │    Vector    │  │   FRP Client    │            │
+│  │  (polls CP, syncs DNS)   │  │   (logs)     │  │ (STCP to CP)    │            │
+│  └──────────────────────────┘  └──────────────┘  └────────-┬───────┘            │
 │                                                            │                    │
 │  ┌─────────────────────────────────────────────────────────┼──────────────────┐ │
 │  │                        agent-net (isolated)             │                  │ │
 │  │  ┌──────────────────────────────────────────────────────┼────────────────┐ │ │
 │  │  │                     Agent Container                  │                │ │ │
 │  │  │  • Isolated network (no direct internet access)      │                │ │ │
-│  │  │  • All HTTP(S) via Envoy proxy                    SSH:22             │ │ │
+│  │  │  • All HTTP(S) via Envoy proxy (allowlist enforced) SSH:22            │ │ │
 │  │  │  • DNS via CoreDNS filter (allowlist enforced)       │                │ │ │
 │  │  └──────────────────────────────────────────────────────┼────────────────┘ │ │
 │  │              │                           │              │                  │ │
