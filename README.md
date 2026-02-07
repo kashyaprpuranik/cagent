@@ -6,8 +6,7 @@ Secure development environment for AI agents with isolated networking and centra
 
 AI agents need network access to be useful—fetching documentation, calling APIs, installing packages. But unrestricted access creates serious risks:
 
-- **Data exfiltration**: Agent sends proprietary code or secrets to unauthorized endpoints. Example: [Google's Gemini exfiltrating data via markdown image rendering](https://www.promptarmor.com/resources/google-antigravity-exfiltrates-data)
-- **Credential theft**: Agent extracts API keys from environment and leaks them
+- **Data exfiltration**: Agent sends proprietary code or leaks secrets (credential theft) to unauthorized endpoints. Example: [Google's Gemini exfiltrating data via markdown image rendering](https://www.promptarmor.com/resources/google-antigravity-exfiltrates-data)
 - **Supply chain attacks**: Agent installs malicious packages, compromised plugins, or executes untrusted code. Example: [Hundreds of malicious MCP skills discovered in ClawHub](https://www.esecurityplanet.com/threats/hundreds-of-malicious-skills-found-in-openclaws-clawhub/)
 - **Runaway costs**: Agent makes unlimited API calls, racking up unexpected bills
 - **Lateral movement**: Compromised agent pivots to internal services
@@ -38,7 +37,7 @@ Maltbox assumes the AI agent is **untrusted by default**. The agent may be:
 - Data plane has **no inbound ports** - control plane cannot initiate connections
 - Agent Manager polls control plane every 30s for commands (wipe, restart, stop, start)
 - Vector pushes logs directly to OpenObserve (not through CP API)
-- Allowlist synced from CP to CoreDNS every 5 minutes
+- Allowlist synced from CP to CoreDNS and Envoy every 5 minutes
 
 ### Agent Container Hardening
 - Read-only root filesystem
@@ -101,9 +100,9 @@ cd data-plane
 docker-compose --profile standard up -d
 ```
 
-#### Managed (With Admin UI)
+#### Locally Managed (With Admin UI)
 
-Adds agent-manager (watches `maltbox.yaml`) and local admin UI for browser-based management.
+Adds agent-manager (watches `maltbox.yaml`) and local admin UI for browser-based management and observability.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
