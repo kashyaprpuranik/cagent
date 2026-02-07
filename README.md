@@ -138,7 +138,7 @@ Run the data plane without a control plane.
 
 #### Minimal (Static Config)
 
-Lightweight setup with just 3 containers. Edit `coredns/Corefile` and `envoy/envoy.yaml` directly.
+Lightweight setup with just 3 containers. Edit `cagent.yaml` and run the config generator, or edit raw `coredns/Corefile` and `envoy/envoy.yaml` directly for advanced use.
 
 ```
 ┌───────────────────────────────────────────────────────┐

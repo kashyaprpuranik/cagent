@@ -119,7 +119,7 @@ export function Settings() {
         <Card title="About">
           <div className="space-y-3 text-dark-400">
             <p>
-              Maltbox Admin Console provides a web interface for managing
+              Cagent Admin Console provides a web interface for managing
               your AI agent containers, secrets, and security policies.
             </p>
             <div className="pt-2 border-t border-dark-700">

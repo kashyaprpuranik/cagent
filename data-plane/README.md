@@ -126,14 +126,24 @@ docker-compose --profile standard --profile managed up -d  # or --profile dev if
 
 #### Minimal (Static Config)
 
-Lightweight 3-container setup. Edit `coredns/Corefile` and `envoy/envoy.yaml` directly.
+Lightweight 3-container setup with two config options:
 
+**Option A: Edit cagent.yaml and regenerate** (recommended)
 ```bash
-# With gVisor (recommended)
-docker-compose --profile standard up -d
+# Edit configs/cagent.yaml, then generate CoreDNS and Envoy configs
+python services/config-generator/config_generator.py \
+  --config configs/cagent.yaml \
+  --coredns configs/coredns/Corefile \
+  --envoy configs/envoy/envoy.yaml
 
-# Without gVisor (development)
-docker-compose --profile dev up -d
+# Start containers
+docker-compose --profile standard up -d  # or --profile dev if no gVisor
+```
+
+**Option B: Edit raw configs directly** (advanced)
+```bash
+# Edit configs/coredns/Corefile and configs/envoy/envoy-enhanced.yaml directly
+docker-compose --profile standard up -d  # or --profile dev if no gVisor
 ```
 
 #### Managed (With Admin UI)

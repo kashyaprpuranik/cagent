@@ -42,9 +42,9 @@ export function Sidebar() {
   const { user, refresh } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     api.clearToken();
-    refresh();
+    await refresh();
     navigate('/login');
   };
 
@@ -63,7 +63,7 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-dark-900 border-r border-dark-700 flex flex-col">
       <div className="p-4 border-b border-dark-700">
-        <h1 className="text-xl font-bold text-dark-100">Maltbox</h1>
+        <h1 className="text-xl font-bold text-dark-100">Cagent</h1>
         <p className="text-sm text-dark-500">
           {user?.is_super_admin ? 'Super Admin' : hasAdminRole ? 'Admin' : 'Developer'}
         </p>
