@@ -110,20 +110,23 @@ Run the data plane without a control plane. Uses a stateless local admin UI for 
 ```bash
 cd data-plane
 
-# Start with local admin UI (standard mode)
+# Headless (no UI) - edit maltbox.yaml directly
+docker-compose --profile standard up -d
+
+# With local admin UI
 docker-compose --profile standard --profile admin up -d
 
-# Or with gVisor for stronger isolation (requires gVisor installed)
+# With gVisor for stronger isolation (requires gVisor installed)
 docker-compose --profile secure --profile admin up -d
-
-# Access local admin at http://localhost:8080
-# Features:
-#   - Structured config editor (domains, rate limits, credentials)
-#   - Container status with health checks
-#   - Log viewer with traffic analytics
-#   - Browser-based web terminal
-#   - SSH tunnel setup
 ```
+
+Both modes run agent-manager, which watches `maltbox.yaml` and regenerates CoreDNS/Envoy configs on changes.
+
+**Local Admin UI** (http://localhost:8080):
+- Structured config editor (domains, rate limits, credentials)
+- Container status with health checks
+- Log viewer with traffic analytics
+- Browser-based web terminal
 
 ### Control Plane Mode
 
