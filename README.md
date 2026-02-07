@@ -56,6 +56,14 @@ Maltbox assumes the AI agent is **untrusted by default**. The agent may be:
 | IPv6 disabled | Prevents bypass of IPv4 egress controls |
 | Allowlist enforcement | CoreDNS blocks resolution of non-allowed domains |
 | Egress proxy | All HTTP(S) routed through Envoy |
+| Egress volume limits | Per-domain byte budgets (in-memory, see note) |
+
+**Egress Volume Limits**: Prevents large-scale data exfiltration by tracking bytes sent per domain per hour. Configure via `STATIC_EGRESS_LIMITS` environment variable:
+```bash
+# Format: domain:bytes_per_hour (comma-separated)
+STATIC_EGRESS_LIMITS="api.openai.com:10485760,default:104857600"  # 10MB for OpenAI, 100MB default
+```
+**Limitation**: Byte counts are in-memory and reset when Envoy restarts. See roadmap for persistent state.
 
 ### Kernel Isolation (Production)
 
@@ -306,7 +314,7 @@ Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md
 
 ## Roadmap
 
-- [ ] Egress data volume limits (per-domain byte budgets, in-memory initially, Redis for persistence)
+- [ ] Persistent egress volume tracking (Redis backend for byte counts across restarts)
 - [ ] Improved secret management in standalone mode (encrypted local storage)
 - [ ] mTLS for data plane ↔ control plane communication (step-ca)
 - [ ] Package registry proxy/allowlist (npm, pip, cargo)
