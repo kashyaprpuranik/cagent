@@ -240,13 +240,12 @@ See [data-plane/README.md](data-plane/README.md#ssh-access) for details.
 | **Credential Injection** | API keys injected by proxy, never exposed to agent |
 | **Domain Aliases** | Use `*.devbox.local` shortcuts (e.g., `openai.devbox.local`) |
 | **Rate Limiting** | Per-domain rate limits to control API usage |
-| **Centralized Logging** | All agent activity logged to OpenObserve (Vector) |
+| **Centralized Logging** | HTTP requests, DNS queries, and gVisor syscalls logged to OpenObserve |
 | **Traffic Analytics** | Requests/sec, top domains, error rates in log viewer |
 | **Web Terminal** | Browser-based shell access to agents (xterm.js) |
-| **Multi-Agent Support** | Manage multiple data planes from a single control plane |
-| **Agent Control** | Start/stop/restart/wipe agent containers from UI |
+| **Multi-Agent Management** | Manage multiple data planes with start/stop/restart/wipe from UI |
 | **IP ACLs** | Restrict control plane access by IP range per tenant |
-| **STCP Tunnels** | Secure tunnels via single port (no port-per-agent allocation) |
+| **STCP Tunnels** | Secure remote access via single port with auto-configuration |
 | **gVisor Isolation** | Optional kernel-level syscall isolation for defense in depth |
 
 ## Configuration
