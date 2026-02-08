@@ -151,7 +151,7 @@ Lightweight setup with just 3 containers. Edit `cagent.yaml` and run the config 
 ```
 
 ```bash
-cd data-plane
+cd data_plane
 
 # Recommended: with gVisor (requires installation: https://gvisor.dev/docs/user_guide/install/)
 docker-compose --profile standard up -d
@@ -191,7 +191,7 @@ Adds agent-manager (watches `cagent.yaml`) and local admin UI for browser-based 
 ```
 
 ```bash
-cd data-plane
+cd data_plane
 
 # Recommended: with gVisor (requires installation)
 docker-compose --profile standard --profile admin up -d
@@ -268,10 +268,12 @@ Run with centralized management via the control plane. Ideal for multiple tenant
 **1. Start Control Plane**
 
 ```bash
-cd control-plane
+cd control_plane
 
-# Generate encryption key (first time only)
+# Create .env with encryption key
+cp .env.example .env
 export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+# Add ENCRYPTION_KEY to .env
 
 docker-compose up -d
 
@@ -281,20 +283,27 @@ docker-compose up -d
 # - OpenObserve:  http://localhost:5080 (admin@cagent.local/admin)
 ```
 
-**2. Start Data Plane**
+**2. Create an API Token**
+
+Use the Admin UI or API to create an agent token for the data plane. See [control_plane/README.md](control_plane/README.md#api-token-management).
+
+**3. Start Data Plane**
 
 ```bash
-cd data-plane
+cd data_plane
 
 export CONTROL_PLANE_URL=http://<control-plane-ip>:8002
-export CONTROL_PLANE_TOKEN=dev-token
-export AGENT_ID=my-agent-01  # Unique ID for this data plane
+export CONTROL_PLANE_TOKEN=<agent-token>  # Token created in step 2
+export AGENT_ID=my-agent-01               # Unique ID for this data plane
 
-docker-compose up -d
+# Recommended: with gVisor
+docker-compose --profile standard up -d
+
+# Development: without gVisor
+docker-compose --profile dev up -d
 
 # Log shipping is automatic - logs are sent to CP which forwards to OpenObserve
 # No OPENOBSERVE credentials needed on data plane (CP-mediated for security)
-docker-compose --profile standard up -d
 ```
 
 **3. Accessing the Agent**
@@ -309,16 +318,16 @@ The web terminal is the easiest - just open the Admin UI and click Terminal.
 
 For SSH access in Control Plane Mode (remote data planes):
 ```bash
-cd data-plane
+cd data_plane
 ./scripts/setup-ssh-tunnel.sh --control-plane http://<cp-ip>:8002 --token admin-token
 ```
 
 Or manually:
 1. Generate STCP secret: `curl -X POST http://localhost:8002/api/v1/agents/my-agent/stcp-secret -H "Authorization: Bearer admin-token"`
-2. Add to `data-plane/.env`: `STCP_SECRET_KEY=<secret>`, `FRP_SERVER_ADDR=<control-plane-ip>`
+2. Add to `data_plane/.env`: `STCP_SECRET_KEY=<secret>`, `FRP_SERVER_ADDR=<control-plane-ip>`
 3. Start with SSH profile: `docker-compose --profile standard --profile ssh up -d`
 
-See [data-plane/README.md](data-plane/README.md#ssh-access) for details.
+See [data_plane/README.md](data_plane/README.md#ssh-access) for details.
 
 ## Features
 
@@ -338,9 +347,9 @@ See [data-plane/README.md](data-plane/README.md#ssh-access) for details.
 ## Configuration
 
 See [docs/configuration.md](docs/configuration.md) for detailed configuration including:
-- Domain policies
+- Domain policies (allowlist, path filtering, rate limits, egress limits, credentials)
 - Agent management commands
-- Per-agent configuration (agent-specific secrets, allowlists, rate limits)
+- Per-agent configuration (agent-specific domain policies)
 
 ## Authentication & API Tokens
 
@@ -348,12 +357,12 @@ See [docs/configuration.md](docs/configuration.md) for detailed configuration in
 
 | Type | Description | Access |
 |------|-------------|--------|
-| `superadmin` | Platform operator | All tenants, all endpoints, OpenObserve link |
-| `admin` | Tenant administrator | Secrets, allowlist, agents, tokens, rate-limits, IP ACLs, audit-logs (tenant-scoped) |
-| `dev` | Developer | Dashboard, agent logs, web terminal, settings only |
-| `agent` | Data plane token | Heartbeat, secrets/for-domain, rate-limits/for-domain (agent-scoped) |
+| `admin` (super) | Platform operator | All tenants, all endpoints, OpenObserve link |
+| `admin` | Tenant administrator | Domain policies, agents, tokens, IP ACLs, audit-logs (tenant-scoped) |
+| `developer` | Developer | Dashboard (read-only), agent logs, web terminal, settings |
+| `agent` | Data plane token | Heartbeat, domain-policies/for-domain (agent-scoped) |
 
-Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md](docs/development.md) for default development tokens.
+Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md](docs/development.md) for dev environment setup.
 
 ## Documentation
 
@@ -367,6 +376,8 @@ Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md
 - [ ] mTLS for data plane ↔ control plane communication (step-ca)
 - [ ] Package registry proxy/allowlist (npm, pip, cargo)
 - [ ] Alert rules for security events (gVisor syscall denials, rate limit hits)
+- [ ] Per-path rate limits and credential injection (path-level policies within a domain)
+- [ ] Search and filtering on Tenants, Tokens, and IP ACLs pages
 
 ## License
 

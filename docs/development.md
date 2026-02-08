@@ -1,54 +1,75 @@
 # Development Guide
 
-This guide covers database seeding, testing, and local development setup.
+This guide covers local development setup, database seeding, testing, and dev tooling.
+
+## Quick Start (Dev Environment)
+
+The `dev_up.sh` script automates a clean dev environment:
+
+```bash
+cd control_plane
+bash dev_up.sh
+```
+
+This script:
+1. Generates `.env` from `.env.example` (with a real Fernet encryption key)
+2. Stops and removes existing containers (wipes volumes for clean state)
+3. Builds all images from scratch
+4. Starts services with `SEED_TOKENS=true`
+5. Waits for the API to become healthy
+6. Runs `post_seed.py` to create domain policies and set up IP ACLs via the API (so all actions are audit-logged)
+
+After it completes:
+- Admin UI: http://localhost:9080
+- API Docs: http://localhost:8002/docs
 
 ## Database Seeding
 
-The database is automatically seeded on first startup (when no agents exist). You can also seed manually:
+Seeding is split into two phases to ensure audit log coverage.
 
-```bash
-cd control-plane/services/control-plane
+### Bootstrap (`seed_bootstrap`)
 
-# Seed with defaults
-python seed.py
+Always runs on startup. Creates the super-admin token (direct DB insert, no audit log needed). This is the only direct DB write — everything else goes through the API.
 
-# Reset and reseed
-python seed.py --reset
+### Pre-Seed (`seed_test_data`)
 
-# Show generated tokens
-python seed.py --show-token
-```
-
-### Default Seed Data
+Runs before uvicorn starts when `SEED_TOKENS=true`. Creates tenants and tokens with deterministic values (needed by tests and dev scripts):
 
 | Type | Name | Description |
 |------|------|-------------|
 | Tenant | `default` | Default tenant (slug: `default`) |
-| Agent | `__default__` | Virtual agent for tenant-global config |
-| Agent | `test-agent` | Test agent (approved) |
-| Agent | `pending-agent` | Test agent (pending approval) |
+| Tenant | `Acme Corp` | Test tenant for multi-tenancy (slug: `acme`) |
+| Token | `admin-token` | Admin token scoped to default tenant |
+| Token | `dev-token` | Developer token scoped to default tenant |
+| Token | `acme-admin-token` | Admin token scoped to Acme Corp tenant |
 
-### Default Development Tokens
+These must be direct DB inserts because the API generates random tokens. The super-admin token value is written to `/tmp/seed-token` for post-seed to use.
 
-| Token Name | Raw Token | Type | Super Admin |
-|------------|-----------|------|-------------|
-| `super-admin-token` | `super-admin-test-token-do-not-use-in-production` | superadmin | Yes |
-| `admin-token` | `admin-test-token-do-not-use-in-production` | admin | No |
-| `dev-token` | `dev-test-token-do-not-use-in-production` | dev | No |
+### Post-Seed (`post_seed.py`)
 
-### Sample Configuration
+Runs after uvicorn is healthy (called by `dev_up.sh`). Creates all resources via the API so actions are audit-logged:
 
-The seeder also creates:
-- Sample allowlist entries (api.openai.com, api.anthropic.com, github.com)
-- Sample rate limits (60 req/min for OpenAI, 120 for Anthropic)
-- Sample secrets with domain aliases
+| Tenant | Type | Resource | Details |
+|--------|------|----------|---------|
+| default | Domain policy | `api.openai.com` | 60 rpm, path filtering |
+| default | Domain policy | `api.anthropic.com` | 60 rpm, path filtering |
+| default | Domain policy | `api.github.com` | 100 rpm |
+| default | Domain policy | `pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org` | Package registries |
+| default | Domain policy | `*.githubusercontent.com` | GitHub raw content |
+| default | Domain policy | `huggingface.co` | Agent-specific (test-agent), with credential |
+| default | Domain policy | `*.aws.amazon.com` | Agent-specific (test-agent) |
+| acme | Domain policy | `api.openai.com`, `api.stripe.com`, `api.twilio.com` | Acme Corp APIs |
+| both | IP ACL | `0.0.0.0/0` | Allow all (development default) |
+| default | IP ACL | `10.0.0.0/8`, `203.0.113.50/32` | Sample ACLs |
+
+Post-seed reads the super-admin token from `/tmp/seed-token`, uses it for all API calls, then deletes the file.
 
 ## Testing
 
 ### Control Plane Tests
 
 ```bash
-cd control-plane/services/control-plane
+cd control_plane/services/backend
 
 # Install test dependencies
 pip install -r requirements.txt
@@ -67,19 +88,19 @@ pytest tests/ -v --cov=. --cov-report=html
 ### Data Plane Tests
 
 ```bash
-cd data-plane
+cd data_plane
 
 # Unit tests for config generator
-pytest services/config-generator/tests/ -v
+pytest services/config_generator/tests/ -v
 
 # Unit tests for agent manager
-pytest services/agent-manager/tests/ -v
+pytest services/agent_manager/tests/ -v
 ```
 
 ### End-to-End Tests
 
 ```bash
-cd data-plane/tests
+cd data_plane/tests
 
 # Run E2E tests (requires running services)
 pytest e2e/ -v
@@ -96,7 +117,7 @@ pytest e2e/ -v
 ### Control Plane
 
 ```bash
-cd control-plane/services/control-plane
+cd control_plane/services/backend
 
 # Create virtual environment
 python -m venv venv
@@ -116,7 +137,7 @@ uvicorn main:app --reload --port 8002
 ### Admin UI
 
 ```bash
-cd control-plane/services/admin-ui
+cd control_plane/services/frontend
 
 # Install dependencies
 npm install
@@ -131,7 +152,7 @@ npm run build
 ### Local Admin UI (Standalone Mode)
 
 ```bash
-cd data-plane/services/local-admin
+cd data_plane/services/local_admin
 
 # Backend
 cd backend
@@ -148,13 +169,15 @@ npm run dev
 
 ### Authentication
 
-All API endpoints require Bearer token authentication:
+All API endpoints require Bearer token authentication. Use `--show-token` when seeding to get the admin token:
 
 ```bash
-# Use super admin token for full access
-export TOKEN="super-admin-test-token-do-not-use-in-production"
+python seed.py --show-token
+# Admin Token: <random-token>
 
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/secrets
+export TOKEN="<paste-token-here>"
+
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/domain-policies
 ```
 
 ### Common Operations
@@ -163,33 +186,36 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/secrets
 # List agents
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/agents
 
-# Create a secret
-curl -X POST http://localhost:8002/api/v1/secrets \
+# Create a domain policy (allowlist + rate limit + credential in one call)
+curl -X POST http://localhost:8002/api/v1/domain-policies \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "test-api-key",
-    "value": "sk-test-12345",
-    "domain_pattern": "api.example.com",
-    "header_name": "Authorization",
-    "header_format": "Bearer {value}"
-  }'
-
-# Add domain to allowlist
-curl -X POST http://localhost:8002/api/v1/allowlist \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"entry_type": "domain", "value": "api.example.com"}'
-
-# Create rate limit
-curl -X POST http://localhost:8002/api/v1/rate-limits \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain_pattern": "api.example.com",
+    "domain": "api.example.com",
+    "alias": "example",
+    "description": "Example API",
+    "allowed_paths": ["/v1/*"],
     "requests_per_minute": 60,
-    "burst_size": 10
+    "burst_size": 10,
+    "bytes_per_hour": 10485760,
+    "credential": {
+      "header": "Authorization",
+      "format": "Bearer {value}",
+      "value": "sk-..."
+    }
   }'
+
+# List domain policies
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/domain-policies
+
+# Rotate a credential
+curl -X POST http://localhost:8002/api/v1/domain-policies/1/rotate-credential \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"value": "sk-new-..."}'
+
+# View audit logs
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/audit-logs
 ```
 
 ## Docker Development
@@ -197,7 +223,7 @@ curl -X POST http://localhost:8002/api/v1/rate-limits \
 ### Rebuild Single Service
 
 ```bash
-cd control-plane
+cd control_plane
 docker-compose build control-plane-api
 docker-compose up -d control-plane-api
 ```
@@ -225,23 +251,27 @@ docker-compose exec admin-ui /bin/sh
 # Stop and remove volumes
 docker-compose down -v
 
-# Restart (will auto-seed)
-docker-compose up -d
+# Restart (will auto-seed if SEED_TOKENS=true)
+SEED_TOKENS=true docker-compose up -d
 ```
 
 ## Directory Structure
 
 ```
 .
-├── control-plane/
+├── control_plane/
 │   ├── docker-compose.yml      # Control plane services
+│   ├── dev_up.sh               # Dev environment setup (not for production)
 │   ├── configs/
 │   │   └── frps/               # FRP server config (STCP tunnels)
 │   └── services/
-│       ├── control-plane/      # Control plane API (secrets, allowlist, audit, IP ACLs)
-│       └── admin-ui/           # React admin console with web terminal
+│       ├── backend/            # Control plane API (domain policies, audit, IP ACLs)
+│       │   ├── control_plane/  # Python package (routes, models, auth, etc.)
+│       │   ├── seed.py         # Pre-seed (auth infrastructure, direct DB)
+│       │   └── post_seed.py    # Post-seed (domain policies, IP ACLs, via API)
+│       └── frontend/           # React admin console with web terminal
 │
-└── data-plane/
+└── data_plane/
     ├── docker-compose.yml          # Data plane services
     ├── configs/
     │   ├── cagent.yaml        # Unified config (generates CoreDNS + Envoy)
@@ -250,10 +280,10 @@ docker-compose up -d
     │   ├── vector/             # Log collection & forwarding
     │   └── frpc/               # FRP client config (STCP tunnels)
     ├── services/
-    │   ├── agent-manager/      # Container lifecycle + config generation
-    │   ├── local-admin/        # Local admin UI (standalone mode)
+    │   ├── agent_manager/      # Container lifecycle + config generation
+    │   ├── local_admin/        # Local admin UI (standalone mode)
     │   │   ├── frontend/       # React app with web terminal
     │   │   └── backend/        # FastAPI backend
-    │   └── config-generator/   # cagent.yaml → CoreDNS/Envoy configs
+    │   └── config_generator/   # cagent.yaml → CoreDNS/Envoy configs
     └── tests/                  # Unit and E2E tests
 ```
