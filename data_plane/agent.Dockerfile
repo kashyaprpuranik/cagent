@@ -182,6 +182,11 @@ COPY configs/agent/bin/session /usr/local/bin/session
 RUN chmod +x /usr/local/bin/session
 
 # =============================================================================
+# Seed traffic script (for dev_up.sh log seeding)
+# =============================================================================
+COPY seed_traffic.py /seed_traffic.py
+
+# =============================================================================
 # Entrypoint
 # =============================================================================
 COPY agent_entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -102,9 +102,9 @@ function HealthPanel() {
           <>
             <HealthStatus check={data.checks.agent || { status: 'missing' }} label="Agent Container" />
             <HealthStatus check={data.checks['dns-filter'] || { status: 'missing' }} label="DNS Filter" />
-            <HealthStatus check={data.checks['envoy-proxy'] || { status: 'missing' }} label="Envoy Proxy" />
+            <HealthStatus check={data.checks['http-proxy'] || { status: 'missing' }} label="HTTP Proxy" />
             <HealthStatus check={data.checks.dns_resolution || { status: 'missing' }} label="DNS Resolution" />
-            <HealthStatus check={data.checks.envoy_ready || { status: 'missing' }} label="Envoy Ready" />
+            <HealthStatus check={data.checks.envoy_ready || { status: 'missing' }} label="HTTP Proxy Ready" />
           </>
         )}
       </div>
@@ -131,7 +131,7 @@ function ContainerCard({ container }: { container: ContainerInfo }) {
   const getIcon = () => {
     if (container.name.includes('agent')) return Server;
     if (container.name.includes('dns')) return Globe;
-    if (container.name.includes('envoy')) return Shield;
+    if (container.name.includes('proxy')) return Shield;
     return Server;
   };
   const Icon = getIcon();

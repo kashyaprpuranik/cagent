@@ -272,8 +272,8 @@ class TerminalTicketResponse(BaseModel):
 class LogEntry(BaseModel):
     """Single log entry from data plane."""
     timestamp: Optional[datetime] = None  # Defaults to server time if not provided
-    message: str
-    source: str  # envoy, agent, coredns, gvisor
+    message: str = ""
+    source: str = "unknown"
     level: Optional[str] = "info"
     extra: Optional[dict] = None  # Additional fields passed through
 

@@ -51,8 +51,8 @@ def write_env_file(env_vars: dict):
     env_path.write_text("\n".join(lines) + "\n")
 
 
-def get_frpc_status() -> dict:
-    """Get FRP client container status."""
+def get_tunnel_client_status() -> dict:
+    """Get tunnel client container status."""
     try:
         container = docker_client.containers.get(FRPC_CONTAINER_NAME)
         container.reload()
@@ -71,15 +71,15 @@ def get_frpc_status() -> dict:
 async def get_ssh_tunnel_status():
     """Get SSH tunnel status and configuration."""
     env_vars = read_env_file()
-    frpc_status = get_frpc_status()
+    tunnel_status = get_tunnel_client_status()
 
     return {
-        "enabled": frpc_status.get("exists", False) and frpc_status.get("status") == "running",
-        "connected": frpc_status.get("status") == "running",
+        "enabled": tunnel_status.get("exists", False) and tunnel_status.get("status") == "running",
+        "connected": tunnel_status.get("status") == "running",
         "stcp_proxy_name": env_vars.get("STCP_PROXY_NAME"),
         "frp_server": env_vars.get("FRP_SERVER_ADDR"),
         "frp_server_port": env_vars.get("FRP_SERVER_PORT", "7000"),
-        "container_status": frpc_status.get("status"),
+        "container_status": tunnel_status.get("status"),
         "stcp_secret_key": env_vars.get("STCP_SECRET_KEY"),
         "configured": bool(env_vars.get("FRP_SERVER_ADDR") and env_vars.get("STCP_SECRET_KEY"))
     }
@@ -120,8 +120,8 @@ async def configure_ssh_tunnel(config: SshTunnelConfig):
     }
 
 
-def create_frpc_container(env_vars: dict):
-    """Create the frpc container using Docker SDK."""
+def create_tunnel_client_container(env_vars: dict):
+    """Create the tunnel client container using Docker SDK."""
     # Get or create networks
     try:
         agent_net = docker_client.networks.get("data_plane_agent-net")
@@ -152,15 +152,15 @@ def create_frpc_container(env_vars: dict):
     )
 
     # Connect to networks with specific IPs
-    agent_net.connect(container, ipv4_address="172.30.0.30")
-    infra_net.connect(container, ipv4_address="172.31.0.30")
+    agent_net.connect(container, ipv4_address="10.200.1.30")
+    infra_net.connect(container, ipv4_address="10.200.2.30")
 
     return container
 
 
 @router.post("/ssh-tunnel/start")
 async def start_ssh_tunnel():
-    """Start SSH tunnel by bringing up frpc container."""
+    """Start SSH tunnel by bringing up tunnel client container."""
     # Check if configured
     env_vars = read_env_file()
     required = ["FRP_SERVER_ADDR", "FRP_AUTH_TOKEN", "STCP_PROXY_NAME", "STCP_SECRET_KEY"]
@@ -170,41 +170,41 @@ async def start_ssh_tunnel():
         raise HTTPException(400, f"Missing configuration: {', '.join(missing)}. Configure tunnel first.")
 
     # Try to start existing container or create new one
-    frpc_status = get_frpc_status()
+    tunnel_status = get_tunnel_client_status()
 
     try:
-        if frpc_status.get("exists"):
+        if tunnel_status.get("exists"):
             container = docker_client.containers.get(FRPC_CONTAINER_NAME)
             if container.status != "running":
                 container.start()
-            return {"status": "started", "message": "FRP client container started"}
+            return {"status": "started", "message": "Tunnel client container started"}
         else:
             # Container doesn't exist - create it using Docker SDK
-            container = create_frpc_container(env_vars)
+            container = create_tunnel_client_container(env_vars)
             container.start()
-            return {"status": "started", "message": "FRP client container created and started"}
+            return {"status": "started", "message": "Tunnel client container created and started"}
     except docker.errors.ImageNotFound:
         # Pull the image first
         docker_client.images.pull("snowdreamtech/frpc:latest")
-        container = create_frpc_container(env_vars)
+        container = create_tunnel_client_container(env_vars)
         container.start()
-        return {"status": "started", "message": "FRP client image pulled and container started"}
+        return {"status": "started", "message": "Tunnel client image pulled and container started"}
     except docker.errors.APIError as e:
         raise HTTPException(500, f"Docker error: {e}")
 
 
 @router.post("/ssh-tunnel/stop")
 async def stop_ssh_tunnel():
-    """Stop SSH tunnel by stopping frpc container."""
-    frpc_status = get_frpc_status()
+    """Stop SSH tunnel by stopping tunnel client container."""
+    tunnel_status = get_tunnel_client_status()
 
-    if not frpc_status.get("exists"):
+    if not tunnel_status.get("exists"):
         return {"status": "ok", "message": "Tunnel not running"}
 
     try:
         container = docker_client.containers.get(FRPC_CONTAINER_NAME)
         container.stop(timeout=10)
-        return {"status": "stopped", "message": "FRP client container stopped"}
+        return {"status": "stopped", "message": "Tunnel client container stopped"}
     except docker.errors.NotFound:
         return {"status": "ok", "message": "Container not found"}
     except Exception as e:

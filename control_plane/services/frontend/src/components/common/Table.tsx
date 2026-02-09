@@ -46,7 +46,7 @@ export function Table<T>({
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`px-4 py-3 text-left text-sm font-medium text-dark-400 ${
+                className={`px-3 py-2 text-left text-xs font-medium text-dark-400 ${
                   col.className || ''
                 }`}
               >
@@ -64,7 +64,7 @@ export function Table<T>({
               {columns.map((col) => (
                 <td
                   key={col.key}
-                  className={`px-4 py-3 text-sm text-dark-200 ${
+                  className={`px-3 py-1.5 text-sm text-dark-200 ${
                     col.className || ''
                   }`}
                 >

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 DATAPLANE_MODE = os.environ.get("DATAPLANE_MODE", "standalone")  # 'standalone' or 'connected'
-CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://control-plane-api:8000")
+CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://backend:8000")
 CONTROL_PLANE_TOKEN = os.environ.get("CONTROL_PLANE_TOKEN", "")
 AGENT_CONTAINER_NAME = "agent"
 AGENT_WORKSPACE_VOLUME = "data_plane_agent-workspace"
@@ -210,7 +210,7 @@ def execute_command(command: str, args: Optional[dict] = None) -> tuple:
 
 
 COREDNS_CONTAINER_NAME = "dns-filter"
-ENVOY_CONTAINER_NAME = "envoy-proxy"
+ENVOY_CONTAINER_NAME = "http-proxy"
 
 
 def restart_coredns():
@@ -408,10 +408,14 @@ def main_loop():
     # Track time since last config sync
     heartbeat_count = 0
 
-    # Initial config generation from cagent.yaml
+    # Initial config generation from cagent.yaml (always write on startup)
     logger.info("Generating initial configs from cagent.yaml...")
     config_generator.load_config()
-    regenerate_configs()
+    config_generator.write_corefile(COREDNS_COREFILE_PATH)
+    config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
+    restart_coredns()
+    reload_envoy()
+    logger.info("Initial config generation complete")
 
     while True:
         try:

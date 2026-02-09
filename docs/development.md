@@ -224,35 +224,35 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/audit-logs
 
 ```bash
 cd control_plane
-docker-compose build control-plane-api
-docker-compose up -d control-plane-api
+docker compose build backend
+docker compose up -d backend
 ```
 
 ### View Logs
 
 ```bash
 # All services
-docker-compose logs -f
+docker compose logs -f
 
 # Specific service
-docker-compose logs -f control-plane-api
+docker compose logs -f backend
 ```
 
 ### Enter Container Shell
 
 ```bash
-docker-compose exec control-plane-api /bin/bash
-docker-compose exec admin-ui /bin/sh
+docker compose exec backend /bin/bash
+docker compose exec frontend /bin/sh
 ```
 
 ### Reset Database
 
 ```bash
 # Stop and remove volumes
-docker-compose down -v
+docker compose down -v
 
 # Restart (will auto-seed if SEED_TOKENS=true)
-SEED_TOKENS=true docker-compose up -d
+SEED_TOKENS=true docker compose up -d
 ```
 
 ## Directory Structure

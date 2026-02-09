@@ -113,7 +113,7 @@ domains:
 # =============================================================================
 # These resolve via Docker's internal DNS (127.0.0.11)
 internal_services:
-  - control-plane-api
+  - backend
   - envoy
   - dns-filter
   - vector

@@ -82,20 +82,10 @@ class ConfigGenerator:
             "# DO NOT EDIT - changes will be overwritten",
             "# =============================================================================",
             "",
-            "# Health check and metrics",
-            ". {",
-            "    health :8080",
-            "    prometheus :9153",
-            "    log . {",
-            "        class all",
-            "    }",
-            "    errors",
-            "}",
-            "",
-            "# Devbox.local aliases -> Envoy proxy (172.30.0.10)",
+            "# Devbox.local aliases -> Envoy proxy (10.200.1.10)",
             "devbox.local {",
             '    template IN A {',
-            '        answer "{{ .Name }} 60 IN A 172.30.0.10"',
+            '        answer "{{ .Name }} 60 IN A 10.200.1.10"',
             '    }',
             '    template IN AAAA {',
             '        rcode NOERROR',
@@ -141,13 +131,19 @@ class ConfigGenerator:
                 "",
             ])
 
-        # Catch-all block
+        # Catch-all block (single . {} block: health, metrics, logging, and NXDOMAIN)
         lines.extend([
-            "# Block everything else with NXDOMAIN",
+            "# Catch-all: health, metrics, and block non-allowlisted domains",
             ". {",
+            "    health :8080",
+            "    prometheus :9153",
+            "",
             "    log . {",
-            "        class denial",
+            "        class all",
             "    }",
+            "    errors",
+            "",
+            "    # Return NXDOMAIN for non-allowlisted domains",
             "    template ANY ANY {",
             "        rcode NXDOMAIN",
             "    }",
@@ -363,7 +359,7 @@ class ConfigGenerator:
                         'endpoint': {
                             'address': {
                                 'socket_address': {
-                                    'address': 'control-plane-api',
+                                    'address': 'backend',
                                     'port_value': 8002
                                 }
                             }

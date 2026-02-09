@@ -103,16 +103,16 @@ The `standard` profile uses [gVisor](https://gvisor.dev) to intercept syscalls i
 
 ```bash
 # Requires gVisor installation: https://gvisor.dev/docs/user_guide/install/
-docker-compose --profile standard --profile admin up -d
+docker compose --profile standard --profile admin up -d
 
 # Use --profile dev if gVisor is not installed (development only)
-docker-compose --profile dev --profile admin up -d
+docker compose --profile dev --profile admin up -d
 ```
 
 | Control | Implementation |
 |---------|----------------|
 | gVisor runtime | `runsc` - syscalls never reach host kernel |
-| Stricter limits | 1 CPU, 2GB memory, 128 PIDs |
+| Stricter limits | 1 CPU, 2GB memory |
 
 ### Credential Security
 | Control | Implementation |
@@ -154,10 +154,10 @@ Lightweight setup with just 3 containers. Edit `cagent.yaml` and run the config 
 cd data_plane
 
 # Recommended: with gVisor (requires installation: https://gvisor.dev/docs/user_guide/install/)
-docker-compose --profile standard up -d
+docker compose --profile standard up -d
 
 # Development: without gVisor (if not installed)
-docker-compose --profile dev up -d
+docker compose --profile dev up -d
 ```
 
 #### Locally Managed (With Admin UI)
@@ -194,10 +194,10 @@ Adds agent-manager (watches `cagent.yaml`) and local admin UI for browser-based 
 cd data_plane
 
 # Recommended: with gVisor (requires installation)
-docker-compose --profile standard --profile admin up -d
+docker compose --profile standard --profile admin up -d
 
 # Development: without gVisor
-docker-compose --profile dev --profile admin up -d
+docker compose --profile dev --profile admin up -d
 ```
 
 **Local Admin UI** (http://localhost:8080):
@@ -275,12 +275,12 @@ cp .env.example .env
 export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 # Add ENCRYPTION_KEY to .env
 
-docker-compose up -d
+docker compose up -d
 
 # Access points:
 # - Admin UI:     http://localhost:9080
 # - API docs:     http://localhost:8002/docs
-# - OpenObserve:  http://localhost:5080 (admin@cagent.local/admin)
+# - Log Store:    http://localhost:5080 (admin@cagent.local/admin)
 ```
 
 **2. Create an API Token**
@@ -296,10 +296,10 @@ export CONTROL_PLANE_URL=http://<control-plane-ip>:8002
 export CONTROL_PLANE_TOKEN=<agent-token>  # Token created in step 2
 
 # Recommended: with gVisor
-docker-compose --profile standard up -d
+docker compose --profile standard up -d
 
 # Development: without gVisor
-docker-compose --profile dev up -d
+docker compose --profile dev up -d
 
 # Log shipping is automatic - logs are sent to CP which forwards to OpenObserve
 # No OPENOBSERVE credentials needed on data plane (CP-mediated for security)
@@ -324,7 +324,7 @@ cd data_plane
 Or manually:
 1. Generate STCP secret: `curl -X POST http://localhost:8002/api/v1/agents/my-agent/stcp-secret -H "Authorization: Bearer admin-token"`
 2. Add to `data_plane/.env`: `STCP_SECRET_KEY=<secret>`, `FRP_SERVER_ADDR=<control-plane-ip>`
-3. Start with SSH profile: `docker-compose --profile standard --profile ssh up -d`
+3. Start with SSH profile: `docker compose --profile standard --profile ssh up -d`
 
 See [data_plane/README.md](data_plane/README.md#ssh-access) for details.
 
@@ -373,7 +373,6 @@ Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md
 - [ ] Persistent egress volume tracking (Redis backend for byte counts across restarts)
 - [ ] Improved secret management in standalone mode (encrypted local storage)
 - [ ] mTLS for data plane ↔ control plane communication (step-ca)
-- [ ] Package registry proxy/allowlist (npm, pip, cargo)
 - [ ] Alert rules for security events (gVisor syscall denials, rate limit hits)
 - [ ] Per-path rate limits and credential injection (path-level policies within a domain)
 - [ ] Search and filtering on Tenants, Tokens, and IP ACLs pages

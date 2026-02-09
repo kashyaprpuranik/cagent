@@ -56,12 +56,12 @@ The control plane provides centralized management, policy enforcement, secrets s
 
 | Service | Port | Description |
 |---------|------|-------------|
-| control-plane-api | 8002 | FastAPI REST API |
-| admin-ui | 9080 | React admin console |
-| openobserve | 5080 | Log storage & UI |
-| postgres | 5432 | State storage (internal) |
-| redis | 6379 | Rate limiting store (internal) |
-| frps | 7000 | FRP server for STCP tunnels |
+| backend | 8002 | FastAPI REST API |
+| frontend | 9080 | React admin console |
+| log-store | 5080 | Log storage & UI (OpenObserve) |
+| db | 5432 | State storage (internal) |
+| cache | 6379 | Rate limiting store (internal) |
+| tunnel-server | 7000 | Tunnel server for STCP access |
 
 ## Web Terminal
 
@@ -109,12 +109,12 @@ export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print
 # Add ENCRYPTION_KEY to .env
 
 # Start control plane
-docker-compose up -d
+docker compose up -d
 
 # Access services:
 # - Admin UI:     http://localhost:9080
 # - API Docs:     http://localhost:8002/docs
-# - OpenObserve:  http://localhost:5080 (admin@cagent.local/admin)
+# - Log Store:    http://localhost:5080 (admin@cagent.local/admin)
 ```
 
 ## API Documentation
@@ -259,8 +259,8 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/domain-polic
 | `DATABASE_URL` | - | PostgreSQL connection string |
 | `ENCRYPTION_KEY` | - | Fernet key for secret encryption (required) |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins (comma-separated) |
-| `OPENOBSERVE_URL` | `http://openobserve:5080` | OpenObserve URL for log queries |
-| `REDIS_URL` | `redis://redis:6379` | Redis URL for rate limiting |
+| `OPENOBSERVE_URL` | `http://log-store:5080` | OpenObserve URL for log queries |
+| `REDIS_URL` | `redis://cache:6379` | Redis URL for rate limiting |
 | `DEFAULT_RATE_LIMIT_RPM` | `120` | Default requests per minute for unlisted domains |
 | `DEFAULT_RATE_LIMIT_BURST` | `20` | Default burst size for unlisted domains |
 

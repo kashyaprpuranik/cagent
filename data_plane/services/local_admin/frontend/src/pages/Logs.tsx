@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { getContainerLogs, createLogStream } from '../api/client';
 
-const CONTAINERS = ['envoy-proxy', 'dns-filter', 'agent'];
+const CONTAINERS = ['http-proxy', 'dns-filter', 'agent'];
 
 interface EnvoyLogEntry {
   timestamp: string;
@@ -165,7 +165,7 @@ function StatCard({
 }
 
 export default function LogsPage() {
-  const [selectedContainer, setSelectedContainer] = useState('envoy-proxy');
+  const [selectedContainer, setSelectedContainer] = useState('http-proxy');
   const [logs, setLogs] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -207,7 +207,7 @@ export default function LogsPage() {
 
   // Compute traffic stats for Envoy logs
   const trafficStats = useMemo(() => {
-    if (selectedContainer === 'envoy-proxy') {
+    if (selectedContainer === 'http-proxy') {
       return computeTrafficStats(logs);
     }
     return null;
@@ -308,7 +308,7 @@ export default function LogsPage() {
             ))}
           </select>
 
-          {selectedContainer === 'envoy-proxy' && (
+          {selectedContainer === 'http-proxy' && (
             <button
               onClick={() => setShowStats(!showStats)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
@@ -367,7 +367,7 @@ export default function LogsPage() {
       </div>
 
       {/* Traffic Stats (Envoy only) */}
-      {selectedContainer === 'envoy-proxy' && showStats && trafficStats && (
+      {selectedContainer === 'http-proxy' && showStats && trafficStats && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
             <StatCard label="Total Requests" value={trafficStats.totalRequests} icon={Globe} color="blue" />

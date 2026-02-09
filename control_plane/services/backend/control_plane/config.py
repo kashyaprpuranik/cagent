@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///./control_plane.db')
 
 # OpenObserve settings
-OPENOBSERVE_URL = os.environ.get('OPENOBSERVE_URL', 'http://openobserve:5080')
+OPENOBSERVE_URL = os.environ.get('OPENOBSERVE_URL', 'http://log-store:5080')
 OPENOBSERVE_USER = os.environ.get('OPENOBSERVE_USER', 'admin@cagent.local')
 OPENOBSERVE_PASSWORD = os.environ.get('OPENOBSERVE_PASSWORD', 'admin')
 

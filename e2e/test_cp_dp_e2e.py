@@ -71,7 +71,7 @@ def exec_in_agent(command: str) -> subprocess.CompletedProcess:
 def get_envoy_access_logs(tail: int = 100) -> list[dict]:
     """Get recent Envoy access log entries (JSON lines from stdout)."""
     result = subprocess.run(
-        ["docker", "logs", "--tail", str(tail), "envoy-proxy"],
+        ["docker", "logs", "--tail", str(tail), "http-proxy"],
         capture_output=True,
         text=True,
         timeout=10,

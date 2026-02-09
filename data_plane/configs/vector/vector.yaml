@@ -6,6 +6,10 @@
 
 data_dir: /var/lib/vector
 
+api:
+  enabled: true
+  address: "0.0.0.0:8686"
+
 # =============================================================================
 # SOURCES
 # =============================================================================
@@ -15,7 +19,7 @@ sources:
     type: docker_logs
     include_containers:
       - "agent"
-      - "envoy-proxy"
+      - "http-proxy"
       - "dns-filter"
       - "agent-manager"
 
@@ -46,44 +50,38 @@ transforms:
     inputs:
       - docker_logs
     source: |
-      # Extract container name
-      container = get(.container_name) ?? "unknown"
+      container = to_string(.container_name) ?? "unknown"
 
-      # Determine source from container name
-      .source = if contains(string!(container), "envoy") {
+      .source = if contains(container, "http-proxy") {
         "envoy"
-      } else if contains(string!(container), "agent-manager") {
+      } else if contains(container, "agent-manager") {
         "agent-manager"
-      } else if contains(string!(container), "agent") {
+      } else if contains(container, "agent") {
         "agent"
-      } else if contains(string!(container), "dns") {
+      } else if contains(container, "dns") {
         "coredns"
       } else {
         "unknown"
       }
 
-      # Set log type based on stream
       .log_type = if .stream == "stderr" { "stderr" } else { "stdout" }
 
-      # Try to parse as JSON (Envoy access logs are JSON)
-      msg = string(.message) ?? ""
+      msg = to_string(.message) ?? ""
       parsed, err = parse_json(msg)
       if err == null {
-        # Envoy access log fields
-        .method = get(parsed, "method") ?? ""
-        .path = get(parsed, "path") ?? ""
-        .upstream_host = get(parsed, "upstream_host") ?? ""
-        .response_code = get(parsed, "response_code") ?? 0
-        .duration_ms = get(parsed, "duration") ?? 0
-        .bytes_sent = get(parsed, "bytes_sent") ?? 0
-        .request_id = get(parsed, "request_id") ?? ""
+        .method = parsed.method
+        .path = parsed.path
+        .upstream_host = parsed.upstream_host
+        .response_code = parsed.response_code
+        .duration_ms = parsed.duration
+        .bytes_sent = parsed.bytes_sent
+        .request_id = parsed.request_id
 
         if .source == "envoy" && .method != "" {
           .log_type = "access"
         }
       }
 
-      # Add metadata (agent_id is injected by CP from token)
       .hostname = get_env_var("HOSTNAME") ?? "unknown"
       .environment = get_env_var("ENVIRONMENT") ?? "development"
 
@@ -97,26 +95,28 @@ transforms:
       .hostname = get_env_var("HOSTNAME") ?? "unknown"
       .environment = get_env_var("ENVIRONMENT") ?? "development"
 
-      msg = string(.message) ?? ""
+      msg = to_string(.message) ?? ""
 
-      # Parse gVisor log format
-      # Example: I0215 10:30:45.123456 12345 strace.go:123] [pid 1] openat(...)
       parsed, err = parse_regex(msg, r'^(?P<level>[IWEF])(?P<date>\d{4}) (?P<time>[\d:.]+)\s+(?P<pid>\d+)\s+(?P<file>[^:]+):(?P<line>\d+)\]\s*(?P<content>.*)$')
 
       if err == null {
-        .level = if parsed.level == "I" { "info" }
-                 else if parsed.level == "W" { "warning" }
-                 else if parsed.level == "E" { "error" }
-                 else { "fatal" }
+        lvl = parsed.level
+        .level = if lvl == "I" {
+          "info"
+        } else if lvl == "W" {
+          "warning"
+        } else if lvl == "E" {
+          "error"
+        } else {
+          "fatal"
+        }
 
-        content = string(parsed.content) ?? ""
+        content = parsed.content
 
-        # Extract syscall info if present
         syscall_match, serr = parse_regex(content, r'\[.*?\]\s+(?P<syscall>\w+)\(.*\)\s*=\s*(?P<result>.+)')
         if serr == null {
           .syscall = syscall_match.syscall
-          result_str = string(syscall_match.result) ?? ""
-          # Check if denied (EPERM, EACCES, etc.)
+          result_str = string!(syscall_match.result)
           .syscall_result = if contains(result_str, "EPERM") || contains(result_str, "EACCES") || contains(result_str, "denied") {
             "denied"
           } else if contains(result_str, "errno") {
@@ -144,42 +144,27 @@ transforms:
       .hostname = get_env_var("HOSTNAME") ?? "unknown"
       .environment = get_env_var("ENVIRONMENT") ?? "development"
 
-      # Try JSON parsing
-      msg = string(.message) ?? ""
+      msg = to_string(.message) ?? ""
       parsed, err = parse_json(msg)
       if err == null {
-        .level = get(parsed, "level") ?? "info"
+        .level = parsed.level
       } else {
         .level = "info"
       }
-
-  # Combine all parsed logs
-  all_logs:
-    type: route
-    inputs:
-      - parse_docker
-      - parse_gvisor
-      - parse_agent_app
-    route:
-      security: '.source == "gvisor" && .syscall_result == "denied"'
-      access: '.source == "envoy" && .log_type == "access"'
-      _default: true
 
   # Format events for CP log ingestion API (POST /api/v1/logs/ingest)
   format_for_cp:
     type: remap
     inputs:
-      - all_logs._default
-      - all_logs.security
-      - all_logs.access
+      - parse_docker
+      - parse_gvisor
+      - parse_agent_app
     source: |
-      # Save core fields expected by LogBatch schema
       ts = .timestamp
-      msg = string!(.message)
-      src = string(.source) ?? "unknown"
-      lvl = string(.level) ?? "info"
+      msg = to_string!(.message)
+      src = to_string(.source) ?? "unknown"
+      lvl = to_string(.level) ?? "info"
 
-      # Collect additional fields into extra
       extra = {}
       if exists(.log_type) { extra.log_type = .log_type }
       if exists(.hostname) { extra.hostname = .hostname }
@@ -194,8 +179,6 @@ transforms:
       if exists(.syscall) { extra.syscall = .syscall }
       if exists(.syscall_result) { extra.syscall_result = .syscall_result }
 
-      # Wrap in LogBatch schema: {"logs": [{...}]}
-      # batch.max_events=1 ensures one LogBatch per request
       . = {"logs": [compact({"timestamp": ts, "message": msg, "source": src, "level": lvl, "extra": extra})]}
 
 # =============================================================================

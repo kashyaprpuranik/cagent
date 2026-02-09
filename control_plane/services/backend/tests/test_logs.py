@@ -198,8 +198,8 @@ class TestMultiTenantIngestion:
         post_calls = [c for c in mock_openobserve if c["method"] == "POST"]
         ingest_calls = [c for c in post_calls if "/_json" in c["url"]]
         assert len(ingest_calls) >= 1
-        # The URL should contain the tenant slug and source as stream
-        assert "/default/envoy/_json" in ingest_calls[-1]["url"]
+        # The URL should contain the tenant slug and 'logs' stream
+        assert "/default/logs/_json" in ingest_calls[-1]["url"]
 
     @patch("control_plane.routes.logs.OPENOBSERVE_MULTI_TENANT", True)
     @patch("control_plane.openobserve.OPENOBSERVE_MULTI_TENANT", True)

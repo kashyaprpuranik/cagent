@@ -34,18 +34,18 @@ docker compose ps
 cd /workspace
 
 # Configure DNS to use our filtered DNS
-echo "nameserver 172.30.0.5" > /etc/resolv.conf
+echo "nameserver 10.200.1.5" > /etc/resolv.conf
 
 # Set proxy environment for the user
-export HTTP_PROXY=http://172.30.0.10:8443
-export HTTPS_PROXY=http://172.30.0.10:8443
-export NO_PROXY=localhost,127.0.0.1,172.30.0.0/16
+export HTTP_PROXY=http://10.200.1.10:8443
+export HTTPS_PROXY=http://10.200.1.10:8443
+export NO_PROXY=localhost,127.0.0.1,10.200.1.0/24
 
 # Write proxy config for aiuser
 cat >> /home/aiuser/.bashrc << 'EOF'
-export HTTP_PROXY=http://172.30.0.10:8443
-export HTTPS_PROXY=http://172.30.0.10:8443
-export NO_PROXY=localhost,127.0.0.1,172.30.0.0/16
+export HTTP_PROXY=http://10.200.1.10:8443
+export HTTPS_PROXY=http://10.200.1.10:8443
+export NO_PROXY=localhost,127.0.0.1,10.200.1.0/24
 EOF
 
 if [ -n "$CONTROL_PLANE_HOST" ]; then

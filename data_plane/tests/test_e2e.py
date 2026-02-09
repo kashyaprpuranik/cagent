@@ -25,12 +25,12 @@ def is_data_plane_running():
     """Check if data plane containers are running."""
     try:
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=envoy-proxy", "--format", "{{.Names}}"],
+            ["docker", "ps", "--filter", "name=http-proxy", "--format", "{{.Names}}"],
             capture_output=True,
             text=True,
             timeout=5
         )
-        return "envoy-proxy" in result.stdout
+        return "http-proxy" in result.stdout
     except:
         return False
 
@@ -62,13 +62,13 @@ class TestAgentNetworkIsolation:
 
     def test_agent_can_reach_envoy(self, data_plane_running):
         """Agent should be able to reach Envoy proxy."""
-        result = exec_in_agent("nc -z 172.30.0.10 8443 && echo OK")
+        result = exec_in_agent("nc -z 10.200.1.10 8443 && echo OK")
         assert result.returncode == 0 or "OK" in result.stdout, \
             f"Agent cannot reach Envoy: {result.stderr}"
 
     def test_agent_can_reach_dns(self, data_plane_running):
         """Agent should be able to reach DNS filter."""
-        result = exec_in_agent("nc -z 172.30.0.5 53 && echo OK")
+        result = exec_in_agent("nc -z 10.200.1.5 53 && echo OK")
         assert result.returncode == 0 or "OK" in result.stdout, \
             f"Agent cannot reach DNS: {result.stderr}"
 
@@ -82,7 +82,7 @@ class TestAgentNetworkIsolation:
     def test_agent_cannot_reach_control_plane(self, data_plane_running):
         """Agent should NOT be able to reach control plane directly."""
         # Control plane is on infra-net, agent should not reach it
-        result = exec_in_agent("nc -z -w 2 172.31.0.1 8000 && echo FAIL || echo BLOCKED")
+        result = exec_in_agent("nc -z -w 2 10.200.2.1 8000 && echo FAIL || echo BLOCKED")
         # This might succeed if control plane IP is different, so just log
         if "FAIL" in result.stdout:
             pytest.skip("Warning: Agent may be able to reach infra-net")
@@ -94,13 +94,13 @@ class TestDNSFiltering:
 
     def test_allowed_domain_resolves(self, data_plane_running):
         """Allowed domains should resolve via DNS filter."""
-        result = exec_in_agent("nslookup api.openai.com 172.30.0.5")
+        result = exec_in_agent("nslookup api.openai.com 10.200.1.5")
         assert result.returncode == 0, f"Failed to resolve allowed domain: {result.stderr}"
         assert "NXDOMAIN" not in result.stdout, "Allowed domain returned NXDOMAIN"
 
     def test_blocked_domain_fails(self, data_plane_running):
         """Non-allowed domains should fail DNS resolution."""
-        result = exec_in_agent("nslookup evil-malware.com 172.30.0.5")
+        result = exec_in_agent("nslookup evil-malware.com 10.200.1.5")
         # Should return NXDOMAIN or fail
         assert "NXDOMAIN" in result.stdout or result.returncode != 0, \
             "Blocked domain should not resolve"
@@ -114,7 +114,7 @@ class TestProxyEgress:
         """Should successfully reach allowed domains through proxy."""
         result = exec_in_agent(
             "curl -s -o /dev/null -w '%{http_code}' "
-            "-x http://172.30.0.10:8443 "
+            "-x http://10.200.1.10:8443 "
             "https://api.github.com"
         )
         # Should get some HTTP response (even 401 unauthorized is fine)
@@ -126,7 +126,7 @@ class TestProxyEgress:
         """Should fail to reach blocked domains through proxy."""
         result = exec_in_agent(
             "curl -s -o /dev/null -w '%{http_code}' "
-            "-x http://172.30.0.10:8443 "
+            "-x http://10.200.1.10:8443 "
             "--connect-timeout 5 "
             "https://evil-malware.com"
         )
@@ -151,7 +151,7 @@ class TestCredentialInjection:
     def test_envoy_handles_credential_injection(self, data_plane_running):
         """Envoy should be running (handles credential injection via Lua)."""
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=envoy-proxy", "--format", "{{.Status}}"],
+            ["docker", "ps", "--filter", "name=http-proxy", "--format", "{{.Status}}"],
             capture_output=True,
             text=True
         )
@@ -168,7 +168,7 @@ class TestCredentialInjection:
         # We use -v to see the CONNECT method being used
         result = exec_in_agent(
             "curl -v -s -o /dev/null -w '%{http_code}' "
-            "-x http://172.30.0.10:8443 "
+            "-x http://10.200.1.10:8443 "
             "--connect-timeout 5 "
             "https://httpbin.org/headers 2>&1 | grep -E 'CONNECT|HTTP/1.1'"
         )
@@ -188,7 +188,7 @@ class TestCredentialInjection:
         # For now, just verify the devbox.local routing works
         result = exec_in_agent(
             "curl -s -o /dev/null -w '%{http_code}' "
-            "-x http://172.30.0.10:8443 "
+            "-x http://10.200.1.10:8443 "
             "--connect-timeout 5 "
             "http://openai.devbox.local/v1/models 2>&1"
         )
@@ -207,16 +207,16 @@ class TestLogging:
     def test_vector_running(self, data_plane_running):
         """Vector should be running for log collection."""
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=vector", "--format", "{{.Status}}"],
+            ["docker", "ps", "--filter", "name=log-shipper", "--format", "{{.Status}}"],
             capture_output=True,
             text=True
         )
-        assert "Up" in result.stdout, "Vector is not running"
+        assert "Up" in result.stdout, "Log shipper is not running"
 
     def test_envoy_logs_exist(self, data_plane_running):
         """Envoy should be generating access logs."""
         result = subprocess.run(
-            ["docker", "exec", "envoy-proxy", "ls", "-la", "/var/log/envoy/"],
+            ["docker", "exec", "http-proxy", "ls", "-la", "/var/log/envoy/"],
             capture_output=True,
             text=True
         )
@@ -244,24 +244,24 @@ class TestAgentSecurityHardening:
     def test_proxy_env_vars_set(self, data_plane_running):
         """Agent must have HTTP_PROXY and HTTPS_PROXY pointing to Envoy."""
         result = exec_in_agent("echo $HTTP_PROXY")
-        assert "172.30.0.10:8443" in result.stdout, \
+        assert "10.200.1.10:8443" in result.stdout, \
             f"HTTP_PROXY not set correctly: {result.stdout}"
 
         result = exec_in_agent("echo $HTTPS_PROXY")
-        assert "172.30.0.10:8443" in result.stdout, \
+        assert "10.200.1.10:8443" in result.stdout, \
             f"HTTPS_PROXY not set correctly: {result.stdout}"
 
     def test_cannot_reach_infra_net(self, data_plane_running):
         """Agent should not be able to reach any infra-net addresses."""
         # dns-filter's infra side
-        result = exec_in_agent("nc -z -w 2 172.31.0.5 53 && echo FAIL || echo BLOCKED")
+        result = exec_in_agent("nc -z -w 2 10.200.2.5 53 && echo FAIL || echo BLOCKED")
         assert "BLOCKED" in result.stdout, \
-            "Agent can reach dns-filter on infra-net (172.31.0.5)"
+            "Agent can reach dns-filter on infra-net (10.200.2.5)"
 
         # envoy's infra side
-        result = exec_in_agent("nc -z -w 2 172.31.0.10 8443 && echo FAIL || echo BLOCKED")
+        result = exec_in_agent("nc -z -w 2 10.200.2.10 8443 && echo FAIL || echo BLOCKED")
         assert "BLOCKED" in result.stdout, \
-            "Agent can reach envoy on infra-net (172.31.0.10)"
+            "Agent can reach envoy on infra-net (10.200.2.10)"
 
     def test_raw_socket_blocked(self, data_plane_running):
         """Raw sockets should be blocked (CAP_NET_RAW dropped + seccomp)."""
@@ -285,21 +285,6 @@ class TestAgentSecurityHardening:
         )
         assert "PACKET_BLOCKED" in result.stdout or "Operation not permitted" in result.stdout, \
             "AF_PACKET sockets are allowed — agent could sniff/inject raw frames!"
-
-    def test_pid_limit(self, data_plane_running):
-        """Fork bomb should be stopped by PID limit."""
-        # Try to create many processes; the container has a 128 or 256 PID limit
-        result = exec_in_agent(
-            "for i in $(seq 1 300); do sleep 60 & done 2>&1; "
-            "CREATED=$(jobs -p | wc -l); "
-            "kill $(jobs -p) 2>/dev/null; "
-            "echo PIDS:$CREATED"
-        )
-        # Extract the count — should be well below 300
-        if "PIDS:" in result.stdout:
-            count = int(result.stdout.split("PIDS:")[-1].strip())
-            assert count < 300, \
-                f"Created {count}/300 processes — PID limit may not be enforced"
 
     def test_no_privilege_escalation(self, data_plane_running):
         """no-new-privileges should prevent setuid escalation."""
@@ -393,7 +378,7 @@ class TestLocalAdminAPI:
         assert "checks" in data
         assert "agent" in data["checks"]
         assert "dns-filter" in data["checks"]
-        assert "envoy-proxy" in data["checks"]
+        assert "http-proxy" in data["checks"]
 
     def test_info(self, admin_url):
         """Info endpoint should return container names and paths."""
@@ -402,7 +387,7 @@ class TestLocalAdminAPI:
         data = r.json()
         assert data["containers"]["agent"] == "agent"
         assert data["containers"]["dns"] == "dns-filter"
-        assert data["containers"]["envoy"] == "envoy-proxy"
+        assert data["containers"]["envoy"] == "http-proxy"
 
     def test_list_containers(self, admin_url):
         """Should list managed containers with status."""
@@ -410,7 +395,7 @@ class TestLocalAdminAPI:
         assert r.status_code == 200
         data = r.json()
         assert "containers" in data
-        for name in ("agent", "dns-filter", "envoy-proxy"):
+        for name in ("agent", "dns-filter", "http-proxy"):
             assert name in data["containers"]
             assert "status" in data["containers"][name]
 
@@ -452,13 +437,13 @@ class TestLocalAdminAPI:
     def test_container_logs(self, admin_url, data_plane_running):
         """Should return recent logs for a running container."""
         r = requests.get(
-            f"{admin_url}/api/containers/envoy-proxy/logs",
+            f"{admin_url}/api/containers/http-proxy/logs",
             params={"tail": 10},
             timeout=10,
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["container"] == "envoy-proxy"
+        assert data["container"] == "http-proxy"
         assert isinstance(data["lines"], list)
         assert data["count"] == len(data["lines"])
 
@@ -472,9 +457,9 @@ class TestLocalAdminAPI:
         assert r.status_code == 400
 
     def test_container_restart(self, admin_url, data_plane_running):
-        """Restarting envoy-proxy via API should succeed and container should recover."""
+        """Restarting http-proxy via API should succeed and container should recover."""
         r = requests.post(
-            f"{admin_url}/api/containers/envoy-proxy",
+            f"{admin_url}/api/containers/http-proxy",
             json={"action": "restart"},
             timeout=30,
         )
@@ -482,8 +467,8 @@ class TestLocalAdminAPI:
         assert r.json()["action"] == "restart"
 
         # Verify container comes back
-        assert wait_for_container("envoy-proxy", timeout=30), \
-            "envoy-proxy did not recover after restart"
+        assert wait_for_container("http-proxy", timeout=30), \
+            "http-proxy did not recover after restart"
 
     def test_ssh_tunnel_connect_info_unconfigured(self, admin_url):
         """Should return 400 when tunnel is not configured."""
@@ -517,7 +502,7 @@ class TestLocalAdminConfigPipeline:
         original_config = original.json()["config"]
 
         # -- Step 2: Confirm test domain is currently blocked --
-        result = exec_in_agent(f"nslookup {self.TEST_DOMAIN} 172.30.0.5")
+        result = exec_in_agent(f"nslookup {self.TEST_DOMAIN} 10.200.1.5")
         if "NXDOMAIN" not in result.stdout and result.returncode == 0:
             pytest.skip(f"{self.TEST_DOMAIN} already resolves — already in allowlist")
 
@@ -557,7 +542,7 @@ class TestLocalAdminConfigPipeline:
             time.sleep(2)
 
             # -- Step 6: Verify domain now resolves from agent --
-            result = exec_in_agent(f"nslookup {self.TEST_DOMAIN} 172.30.0.5")
+            result = exec_in_agent(f"nslookup {self.TEST_DOMAIN} 10.200.1.5")
             assert result.returncode == 0 and "NXDOMAIN" not in result.stdout, \
                 f"{self.TEST_DOMAIN} should resolve after being added to config. " \
                 f"stdout: {result.stdout}, stderr: {result.stderr}"

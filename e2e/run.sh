@@ -8,12 +8,12 @@ docker network create e2e-bridge 2>/dev/null || true
 
 # 2. Start CP dependencies (postgres + redis)
 cd "$REPO_ROOT/control_plane"
-SEED_TOKENS=true docker compose up -d postgres redis
+SEED_TOKENS=true docker compose up -d db cache
 # Wait for health
-echo "Waiting for postgres..."
-until docker compose exec -T postgres pg_isready -U aidevbox -d control_plane 2>/dev/null; do sleep 1; done
-echo "Waiting for redis..."
-until docker compose exec -T redis redis-cli ping 2>/dev/null | grep -q PONG; do sleep 1; done
+echo "Waiting for db..."
+until docker compose exec -T db pg_isready -U aidevbox -d control_plane 2>/dev/null; do sleep 1; done
+echo "Waiting for cache..."
+until docker compose exec -T cache redis-cli ping 2>/dev/null | grep -q PONG; do sleep 1; done
 
 # 3. Start OpenObserve mock on CP network
 docker rm -f openobserve-mock 2>/dev/null || true
@@ -36,7 +36,7 @@ HTTPServer(('0.0.0.0',5080),H).serve_forever()
 # 4. Start CP API (with mock OpenObserve URL, test seed enabled)
 SEED_TOKENS=true \
 OPENOBSERVE_URL=http://openobserve-mock:5080 \
-docker compose up -d control-plane-api
+docker compose up -d backend
 
 # Wait for CP health
 echo "Waiting for CP API..."
@@ -44,7 +44,7 @@ until curl -sf http://localhost:8002/health >/dev/null 2>&1; do sleep 1; done
 echo "CP API healthy."
 
 # 5. Connect CP API to bridge
-docker network connect e2e-bridge control-plane-api 2>/dev/null || true
+docker network connect e2e-bridge backend 2>/dev/null || true
 
 # 6. Create agent token via API
 ADMIN_TOKEN="admin-test-token-do-not-use-in-production"
@@ -88,7 +88,7 @@ echo "Patched cagent.yaml with echo-server domain."
 cd "$REPO_ROOT/data_plane"
 E2E_ECHO_CREDENTIAL=test-e2e-injected-cred \
 DATAPLANE_MODE=connected \
-CONTROL_PLANE_URL=http://control-plane-api:8000 \
+CONTROL_PLANE_URL=http://backend:8000 \
 CONTROL_PLANE_TOKEN="$AGENT_TOKEN" \
 HEARTBEAT_INTERVAL=5 \
 CONFIG_SYNC_INTERVAL=10 \

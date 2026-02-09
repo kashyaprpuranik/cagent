@@ -92,7 +92,7 @@ async def info():
         "containers": {
             "agent": AGENT_CONTAINER_NAME,
             "dns": COREDNS_CONTAINER_NAME,
-            "envoy": ENVOY_CONTAINER_NAME,
-            "frpc": FRPC_CONTAINER_NAME
+            "http_proxy": ENVOY_CONTAINER_NAME,
+            "tunnel": FRPC_CONTAINER_NAME
         }
     }

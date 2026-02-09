@@ -32,6 +32,7 @@ from main import (
 )
 
 SEED_TOKEN_FILE = "/tmp/seed-token"
+SEED_AGENT_TOKEN = "seed-agent-token-do-not-use-in-production"
 
 
 def hash_token(token: str) -> str:
@@ -122,7 +123,7 @@ def seed_database(reset: bool = False, show_token: bool = False):
         existing_agent_token = db.query(ApiToken).filter(ApiToken.name == "test-agent-token").first()
         agent_token_value = None
         if not existing_agent_token:
-            agent_token_value = generate_token()
+            agent_token_value = SEED_AGENT_TOKEN
             agent_token = ApiToken(
                 name="test-agent-token",
                 token_hash=hash_token(agent_token_value),

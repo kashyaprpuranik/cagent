@@ -121,7 +121,7 @@ Features:
 ```bash
 export CONTROL_PLANE_URL=http://<control-plane-ip>:8002
 export CONTROL_PLANE_TOKEN=your-token
-docker-compose --profile standard --profile managed up -d  # or --profile dev if no gVisor
+docker compose --profile standard --profile managed up -d  # or --profile dev if no gVisor
 ```
 
 ### Standalone Mode
@@ -139,13 +139,13 @@ python services/config_generator/config_generator.py \
   --envoy configs/envoy/envoy.yaml
 
 # Start containers
-docker-compose --profile standard up -d  # or --profile dev if no gVisor
+docker compose --profile standard up -d  # or --profile dev if no gVisor
 ```
 
 **Option B: Edit raw configs directly** (advanced)
 ```bash
 # Edit configs/coredns/Corefile and configs/envoy/envoy-enhanced.yaml directly
-docker-compose --profile standard up -d  # or --profile dev if no gVisor
+docker compose --profile standard up -d  # or --profile dev if no gVisor
 ```
 
 #### Managed (With Admin UI)
@@ -154,10 +154,10 @@ Adds agent-manager (watches `cagent.yaml`) and local admin UI.
 
 ```bash
 # With gVisor (recommended)
-docker-compose --profile standard --profile admin up -d
+docker compose --profile standard --profile admin up -d
 
 # Without gVisor (development)
-docker-compose --profile dev --profile admin up -d
+docker compose --profile dev --profile admin up -d
 
 # Access at http://localhost:8080
 ```
@@ -247,8 +247,8 @@ With `--profile managed` or `--profile admin`, agent-manager watches `cagent.yam
 | `dev` | agent (runc) | For development or when gVisor unavailable |
 | `managed` | agent-manager | Config file watching |
 | `admin` | agent-manager + local-admin UI | Web-based management |
-| `auditing` | vector (log shipping) | Forward logs to OpenObserve |
-| `ssh` | frpc (STCP tunnel) | Remote SSH access |
+| `auditing` | log-shipper | Forward logs to control plane |
+| `ssh` | tunnel-client (STCP tunnel) | Remote SSH access |
 
 ```bash
 # Standard mode with gVisor (RECOMMENDED - requires gVisor installed)
@@ -276,7 +276,7 @@ docker compose --profile standard --profile admin --profile ssh up -d
 
 The local admin UI includes a browser-based terminal:
 1. Go to http://localhost:8080/terminal
-2. Select container (agent, dns-filter, envoy-proxy)
+2. Select container (agent, dns-filter, http-proxy)
 3. Click Connect
 
 ### Via STCP Tunnel
@@ -297,7 +297,7 @@ STCP_PROXY_NAME=my-agent-ssh    # From setup_ssh_tunnel.sh
 STCP_SECRET_KEY=generated-secret
 
 # Start with SSH profile
-docker-compose --profile ssh up -d
+docker compose --profile ssh up -d
 ```
 
 ## Agent Image Variants
@@ -332,12 +332,12 @@ AGENT_VARIANT=lean  # or dev, ml
 | Service | Port | Network | Profile | Description |
 |---------|------|---------|---------|-------------|
 | agent | 22 | agent-net | standard/secure | Isolated execution environment |
-| envoy-proxy | 8443 | agent-net, infra-net | - | Egress proxy with credential injection |
-| dns-filter | 53 | agent-net, infra-net | - | CoreDNS with domain allowlist |
+| http-proxy | 8443 | agent-net, infra-net | - | Egress proxy with credential injection |
+| dns-filter | 53 | agent-net, infra-net | - | DNS filter with domain allowlist |
 | agent-manager | - | infra-net | managed/admin | Config watching and regeneration |
 | local-admin | 8080 | infra-net | admin | Web UI for standalone mode |
-| vector | - | infra-net | auditing | Log shipping to OpenObserve |
-| frpc | - | agent-net, infra-net | ssh | FRP client for STCP tunnel |
+| log-shipper | - | infra-net | auditing | Log forwarding to control plane |
+| tunnel-client | - | agent-net, infra-net | ssh | STCP tunnel for SSH access |
 
 ## Files
 

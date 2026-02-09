@@ -4,8 +4,8 @@ import docker
 
 AGENT_CONTAINER_NAME = "agent"
 COREDNS_CONTAINER_NAME = "dns-filter"
-ENVOY_CONTAINER_NAME = "envoy-proxy"
-FRPC_CONTAINER_NAME = "frpc"
+ENVOY_CONTAINER_NAME = "http-proxy"
+FRPC_CONTAINER_NAME = "tunnel-client"
 CAGENT_CONFIG_PATH = os.environ.get("CAGENT_CONFIG_PATH", "/etc/cagent/cagent.yaml")
 DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/data_plane")
 

@@ -23,7 +23,11 @@ def _generate_password() -> str:
 
 
 async def provision_tenant_org(slug: str) -> Tuple[str, str, str, str]:
-    """Create writer + reader users in an OpenObserve org (org created implicitly).
+    """Create an OpenObserve org with writer + reader users.
+
+    OpenObserve OSS creates orgs implicitly on first data ingest, not on user
+    creation. So we ingest a bootstrap record first to ensure the org exists,
+    then create the users.
 
     Returns (writer_email, writer_pw, reader_email, reader_pw).
     """
@@ -33,6 +37,20 @@ async def provision_tenant_org(slug: str) -> Tuple[str, str, str, str]:
     reader_pw = _generate_password()
 
     async with httpx.AsyncClient() as client:
+        # Step 1: Create the org by ingesting a bootstrap record
+        resp = await client.post(
+            f"{OPENOBSERVE_URL}/api/{slug}/logs/_json",
+            json=[{"_timestamp": 0, "message": "org bootstrap", "source": "control-plane", "level": "info"}],
+            auth=(OPENOBSERVE_ROOT_USER, OPENOBSERVE_ROOT_PASSWORD),
+            timeout=10.0,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f"Failed to bootstrap OpenObserve org '{slug}': "
+                f"{resp.status_code} {resp.text}"
+            )
+
+        # Step 2: Create writer + reader users in the now-existing org
         for email, pw, role in [
             (writer_email, writer_pw, "admin"),
             (reader_email, reader_pw, "admin"),
@@ -104,10 +122,10 @@ def get_query_auth(tenant_settings: Optional[dict]) -> Tuple[str, str]:
     return OPENOBSERVE_USER, OPENOBSERVE_PASSWORD
 
 
-def get_ingest_url(tenant_slug: str, stream: str) -> str:
-    """Build ingest URL — per-tenant org + per-source stream, or legacy default."""
+def get_ingest_url(tenant_slug: str) -> str:
+    """Build ingest URL — per-tenant org with 'logs' stream, or legacy default."""
     if OPENOBSERVE_MULTI_TENANT:
-        return f"{OPENOBSERVE_URL}/api/{tenant_slug}/{stream}/_json"
+        return f"{OPENOBSERVE_URL}/api/{tenant_slug}/logs/_json"
     return f"{OPENOBSERVE_URL}/api/default/default/_json"
 
 

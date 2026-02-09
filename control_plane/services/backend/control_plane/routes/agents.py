@@ -519,7 +519,7 @@ async def get_stcp_visitor_config(
         raise HTTPException(status_code=404, detail="STCP not configured for this agent. Generate a secret first.")
 
     return STCPVisitorConfig(
-        server_addr=os.environ.get("FRP_SERVER_ADDR", "frps"),
+        server_addr=os.environ.get("FRP_SERVER_ADDR", "tunnel-server"),
         server_port=7000,
         proxy_name=f"{agent_id}-ssh",
         secret_key=decrypt_secret(state.stcp_secret_key)

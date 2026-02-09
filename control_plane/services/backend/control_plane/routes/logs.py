@@ -1,6 +1,5 @@
 import re
-from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
@@ -32,11 +31,28 @@ router = APIRouter()
 _SAFE_QUERY_RE = re.compile(r'^[a-zA-Z0-9\s\.\-_:/@=,\[\]{}|*+#]+$')
 
 
+async def _parse_log_batch(request: Request) -> LogBatch:
+    """Parse log batch from request body.
+
+    Accepts both:
+      - {"logs": [...]}           (standard format)
+      - [{"logs": [...]}, ...]    (Vector json codec wraps batches in an array)
+    """
+    body = await request.json()
+    if isinstance(body, list):
+        all_logs = []
+        for item in body:
+            sub = LogBatch.model_validate(item)
+            all_logs.extend(sub.logs)
+        return LogBatch(logs=all_logs)
+    return LogBatch.model_validate(body)
+
+
 @router.post("/api/v1/logs/ingest")
 @limiter.limit("100/minute")
 async def ingest_logs(
     request: Request,
-    batch: LogBatch,
+    batch: LogBatch = Depends(_parse_log_batch),
     token_info: TokenInfo = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
@@ -103,12 +119,15 @@ async def ingest_logs(
             tenant_settings = get_tenant_settings(tenant)
 
     # Log age cutoff
-    age_cutoff = datetime.utcnow() - timedelta(hours=LOG_INGEST_MAX_AGE_HOURS)
+    age_cutoff = datetime.now(timezone.utc) - timedelta(hours=LOG_INGEST_MAX_AGE_HOURS)
 
     # Transform logs for OpenObserve, injecting trusted identity
     enriched_logs = []
     for log in batch.logs:
-        ts = log.timestamp or datetime.utcnow()
+        ts = log.timestamp or datetime.now(timezone.utc)
+        # Normalize naive timestamps to UTC for comparison
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
 
         # Reject logs older than max age
         if ts < age_cutoff:
@@ -135,28 +154,22 @@ async def ingest_logs(
     # --- Forward to OpenObserve ---
 
     if OPENOBSERVE_MULTI_TENANT and tenant:
-        # Group logs by source for per-source streams
-        by_source = defaultdict(list)
-        for entry in enriched_logs:
-            by_source[entry.get("source", "default")].append(entry)
-
         auth = get_ingest_auth(tenant_settings)
+        url = get_ingest_url(tenant.slug)
 
         async with httpx.AsyncClient() as client:
-            for source, logs in by_source.items():
-                url = get_ingest_url(tenant.slug, source)
-                response = await client.post(
-                    url,
-                    json=logs,
-                    auth=auth,
-                    timeout=LOG_INGEST_TIMEOUT,
+            response = await client.post(
+                url,
+                json=enriched_logs,
+                auth=auth,
+                timeout=LOG_INGEST_TIMEOUT,
+            )
+            if response.status_code not in (200, 201):
+                logger.error(f"OpenObserve ingestion failed for {tenant.slug}: {response.status_code} {response.text}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to store logs: {response.text}"
                 )
-                if response.status_code not in (200, 201):
-                    logger.error(f"OpenObserve ingestion failed for {tenant.slug}/{source}: {response.status_code} {response.text}")
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"Failed to store logs: {response.text}"
-                    )
     else:
         # Legacy single-org mode
         async with httpx.AsyncClient() as client:
@@ -267,7 +280,7 @@ async def query_agent_logs(
 
     # Time range
     if not end:
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
     else:
         end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
 
@@ -288,11 +301,8 @@ async def query_agent_logs(
     start_us = int(start_time.timestamp() * 1_000_000)
     end_us = int(end_time.timestamp() * 1_000_000)
 
-    # Determine stream name for the SQL FROM clause
-    if OPENOBSERVE_MULTI_TENANT and source:
-        stream_name = source
-    else:
-        stream_name = "default"
+    # Stream name for the SQL FROM clause
+    stream_name = "logs" if OPENOBSERVE_MULTI_TENANT else "default"
 
     where_clause = " AND ".join(conditions) if conditions else "1=1"
     sql = f"SELECT * FROM {stream_name} WHERE {where_clause} ORDER BY _timestamp DESC LIMIT {limit}"

@@ -76,12 +76,20 @@ export function AgentLogs() {
 
   const sourceOptions = [
     { value: '', label: 'All Sources' },
-    { value: 'envoy', label: 'Envoy Proxy' },
-    { value: 'agent', label: 'Agent Container' },
-    { value: 'coredns', label: 'CoreDNS' },
-    { value: 'gvisor', label: 'gVisor (Security)' },
+    { value: 'envoy', label: 'HTTP Proxy' },
+    { value: 'agent', label: 'Agent' },
+    { value: 'coredns', label: 'DNS' },
+    { value: 'gvisor', label: 'Security Sandbox' },
     { value: 'agent-manager', label: 'Agent Manager' },
   ];
+
+  const sourceDisplayName: Record<string, string> = {
+    envoy: 'HTTP Proxy',
+    agent: 'Agent',
+    coredns: 'DNS',
+    gvisor: 'Sandbox',
+    'agent-manager': 'Manager',
+  };
 
   const getBadgeVariant = (log: LogEntry) => {
     if (log.source === 'gvisor' && log.syscall_result === 'denied') {
@@ -100,8 +108,9 @@ export function AgentLogs() {
     {
       key: 'timestamp',
       header: 'Time',
+      className: 'w-40',
       render: (log: LogEntry) => (
-        <span className="text-dark-400 text-sm whitespace-nowrap font-mono">
+        <span className="text-dark-400 text-xs whitespace-nowrap font-mono">
           {new Date(log.timestamp).toLocaleString()}
         </span>
       ),
@@ -109,15 +118,19 @@ export function AgentLogs() {
     {
       key: 'source',
       header: 'Source',
+      className: 'w-24',
       render: (log: LogEntry) => (
-        <Badge variant={getBadgeVariant(log)}>{log.source}</Badge>
+        <Badge variant={getBadgeVariant(log)}>
+          {sourceDisplayName[log.source] || log.source}
+        </Badge>
       ),
     },
     {
       key: 'agent',
       header: 'Agent',
+      className: 'w-28',
       render: (log: LogEntry) => (
-        <span className="text-dark-300 text-sm">{log.agent_id}</span>
+        <span className="text-dark-300 text-xs truncate block">{log.agent_id}</span>
       ),
     },
     {
@@ -125,13 +138,13 @@ export function AgentLogs() {
       header: 'Log',
       render: (log: LogEntry) => (
         <div>
-          {/* Show syscall info for gVisor logs */}
+          {/* Show syscall info for sandbox logs */}
           {log.syscall && (
             <span className={`text-xs mr-2 ${log.syscall_result === 'denied' ? 'text-red-400' : 'text-dark-500'}`}>
               [{log.syscall}: {log.syscall_result}]
             </span>
           )}
-          {/* Show HTTP info for Envoy access logs */}
+          {/* Show HTTP info for proxy access logs */}
           {log.method && (
             <span className="text-xs text-dark-500 mr-2">
               {log.method} {log.path} → {log.response_code}
@@ -151,7 +164,7 @@ export function AgentLogs() {
         <div>
           <h1 className="text-2xl font-bold text-dark-100">Agent Logs</h1>
           <p className="text-dark-400 text-sm mt-1">
-            Logs from data plane components (Envoy, CoreDNS, gVisor, containers)
+            Logs from data plane components (HTTP proxy, DNS, security sandbox, containers)
           </p>
         </div>
         <Button variant="secondary" onClick={() => refetch()}>

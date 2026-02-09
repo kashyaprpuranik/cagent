@@ -3,18 +3,16 @@
 # Management, Policy, Secrets, and Observability
 # =============================================================================
 
-version: '3.8'
-
 services:
   # ===========================================================================
-  # Redis - Rate Limiting Store (for horizontal scaling)
+  # Cache - Rate Limiting Store (for horizontal scaling)
   # ===========================================================================
-  redis:
+  cache:
     image: redis:7-alpine
-    container_name: redis
+    container_name: cache
     command: redis-server --appendonly yes
     volumes:
-      - redis-data:/data
+      - cache-data:/data
     networks:
       - control-net
     restart: unless-stopped
@@ -25,18 +23,18 @@ services:
       retries: 3
 
   # ===========================================================================
-  # Control Plane API
+  # Backend - Control Plane API
   # ===========================================================================
-  control-plane-api:
+  backend:
     build:
       context: ./services/backend
       dockerfile: Dockerfile
-    container_name: control-plane-api
+    container_name: backend
 
     environment:
-      - DATABASE_URL=postgresql://aidevbox:aidevbox@postgres:5432/control_plane
-      - REDIS_URL=redis://redis:6379
-      - OPENOBSERVE_URL=http://openobserve:5080
+      - DATABASE_URL=postgresql://aidevbox:aidevbox@db:5432/control_plane
+      - REDIS_URL=redis://cache:6379
+      - OPENOBSERVE_URL=http://log-store:5080
       # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       # Set to "true" to seed test tenants, tokens, and domain policies (deploy.sh sets this)
@@ -57,9 +55,9 @@ services:
       - control-net
 
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-      redis:
+      cache:
         condition: service_healthy
 
     restart: unless-stopped
@@ -71,11 +69,11 @@ services:
       retries: 3
 
   # ===========================================================================
-  # PostgreSQL - Control Plane State
+  # Database - Control Plane State
   # ===========================================================================
-  postgres:
+  db:
     image: postgres:16-alpine
-    container_name: postgres
+    container_name: db
 
     environment:
       - POSTGRES_USER=aidevbox
@@ -83,7 +81,7 @@ services:
       - POSTGRES_DB=control_plane
 
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - db-data:/var/lib/postgresql/data
 
     networks:
       - control-net
@@ -97,12 +95,12 @@ services:
       retries: 3
 
   # ===========================================================================
-  # OpenObserve - Unified Log Storage & UI
-  # Receives logs from data plane Vector, provides built-in search UI
+  # Log Store - Unified Log Storage & UI
+  # Receives logs from data plane, provides built-in search UI
   # ===========================================================================
-  openobserve:
+  log-store:
     image: public.ecr.aws/zinclabs/openobserve:latest
-    container_name: openobserve
+    container_name: log-store
 
     environment:
       - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_USER:-admin@cagent.local}
@@ -110,9 +108,9 @@ services:
       - ZO_DATA_DIR=/data
 
     volumes:
-      - openobserve-data:/data
+      - log-store-data:/data
 
-    # Exposed for data plane Vector to push logs + built-in UI
+    # Exposed for data plane log shipper to push logs + built-in UI
     ports:
       - "5080:5080"   # HTTP API + UI
 
@@ -121,20 +119,18 @@ services:
 
     restart: unless-stopped
 
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5080/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    # Note: OpenObserve uses a distroless image (no shell, curl, or wget)
+    # so Docker healthchecks cannot be used. The container is monitored
+    # via restart: unless-stopped and the backend's HTTP calls to it.
 
   # ===========================================================================
-  # Admin UI - React Web Console
+  # Frontend - React Web Console
   # ===========================================================================
-  admin-ui:
+  frontend:
     build:
       context: ./services/frontend
       dockerfile: Dockerfile
-    container_name: admin-ui
+    container_name: frontend
 
     ports:
       - "9080:80"
@@ -143,16 +139,16 @@ services:
       - control-net
 
     depends_on:
-      - control-plane-api
+      - backend
 
     restart: unless-stopped
 
   # ===========================================================================
-  # FRP Server - Reverse Tunnel for Agent SSH Access
+  # Tunnel Server - Reverse Tunnel for Agent SSH Access
   # ===========================================================================
-  frps:
+  tunnel-server:
     image: snowdreamtech/frps:latest
-    container_name: frps
+    container_name: tunnel-server
 
     environment:
       - FRP_AUTH_TOKEN=${FRP_AUTH_TOKEN:-changeme}
@@ -182,6 +178,6 @@ networks:
 # Volumes
 # =============================================================================
 volumes:
-  postgres-data:
-  redis-data:
-  openobserve-data:
+  db-data:
+  cache-data:
+  log-store-data:

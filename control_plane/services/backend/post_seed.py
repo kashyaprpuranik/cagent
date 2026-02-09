@@ -10,7 +10,7 @@ Pre-seed (seed.py) creates tenants and tokens — things the API needs to
 function. This script creates everything else.
 
 Run from dev_up.sh after the health check passes:
-    docker exec control-plane-api python post_seed.py
+    docker exec backend python post_seed.py
 """
 
 import json
