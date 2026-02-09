@@ -9,6 +9,7 @@ Run with:
 """
 
 import pytest
+import requests
 import subprocess
 import time
 
@@ -220,3 +221,217 @@ class TestLogging:
         )
         # Check if log directory exists and has files
         assert result.returncode == 0, "Cannot access Envoy log directory"
+
+
+def get_admin_url():
+    """Get local admin base URL, detecting the mapped port."""
+    try:
+        result = subprocess.run(
+            ["docker", "port", "local-admin", "8080"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Output like "0.0.0.0:8080" or ":::8080"
+            mapping = result.stdout.strip().splitlines()[0]
+            host_port = mapping.rsplit(":", 1)[-1]
+            return f"http://localhost:{host_port}"
+    except Exception:
+        pass
+    return None
+
+
+@pytest.fixture(scope="module")
+def admin_url():
+    """Get local admin URL, skip if not running."""
+    url = get_admin_url()
+    if not url:
+        pytest.skip(
+            "Local admin not running. Start with: "
+            "docker-compose --profile admin up -d"
+        )
+    return url
+
+
+def is_container_running(name):
+    """Check if a Docker container is running."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--filter", f"name=^{name}$", "--format", "{{.Status}}"],
+            capture_output=True, text=True, timeout=5
+        )
+        return "Up" in result.stdout
+    except Exception:
+        return False
+
+
+def wait_for_container(name, timeout=30):
+    """Wait for a container to be running."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if is_container_running(name):
+            return True
+        time.sleep(1)
+    return False
+
+
+@pytest.mark.e2e
+class TestLocalAdminAPI:
+    """Test local admin UI API endpoints (requires --profile admin)."""
+
+    def test_health(self, admin_url):
+        """Health endpoint should return ok."""
+        r = requests.get(f"{admin_url}/api/health", timeout=5)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "ok"
+        assert "timestamp" in data
+
+    def test_detailed_health(self, admin_url):
+        """Detailed health should report on managed containers."""
+        r = requests.get(f"{admin_url}/api/health/detailed", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] in ("healthy", "degraded")
+        assert "checks" in data
+        assert "agent" in data["checks"]
+        assert "dns-filter" in data["checks"]
+        assert "envoy-proxy" in data["checks"]
+
+    def test_info(self, admin_url):
+        """Info endpoint should return container names and paths."""
+        r = requests.get(f"{admin_url}/api/info", timeout=5)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["containers"]["agent"] == "agent"
+        assert data["containers"]["dns"] == "dns-filter"
+        assert data["containers"]["envoy"] == "envoy-proxy"
+
+    def test_list_containers(self, admin_url):
+        """Should list managed containers with status."""
+        r = requests.get(f"{admin_url}/api/containers", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert "containers" in data
+        for name in ("agent", "dns-filter", "envoy-proxy"):
+            assert name in data["containers"]
+            assert "status" in data["containers"][name]
+
+    def test_get_single_container(self, admin_url):
+        """Should get status for a specific container."""
+        r = requests.get(f"{admin_url}/api/containers/agent", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["name"] == "agent"
+        assert "status" in data
+
+    def test_get_config(self, admin_url):
+        """Should return current cagent.yaml config."""
+        r = requests.get(f"{admin_url}/api/config", timeout=5)
+        assert r.status_code in (200, 404)
+        if r.status_code == 200:
+            data = r.json()
+            assert "config" in data
+            assert "raw" in data
+            assert "path" in data
+
+    def test_ssh_tunnel_status(self, admin_url):
+        """Should return SSH tunnel status."""
+        r = requests.get(f"{admin_url}/api/ssh-tunnel", timeout=5)
+        assert r.status_code == 200
+        data = r.json()
+        assert "enabled" in data
+        assert "connected" in data
+        assert "configured" in data
+
+    def test_generate_stcp_key(self, admin_url):
+        """Should generate an STCP secret key."""
+        r = requests.post(f"{admin_url}/api/ssh-tunnel/generate-key", timeout=5)
+        assert r.status_code == 200
+        data = r.json()
+        assert "stcp_secret_key" in data
+        assert len(data["stcp_secret_key"]) > 20
+
+
+@pytest.mark.e2e
+class TestLocalAdminConfigPipeline:
+    """Test config update pipeline: local admin → cagent.yaml → agent-manager → CoreDNS → agent.
+
+    Requires --profile admin (which includes agent-manager).
+    Verifies that updating config via the local admin API propagates
+    all the way to the agent container's DNS resolution.
+    """
+
+    # A real domain that is unlikely to be in the default allowlist
+    TEST_DOMAIN = "ifconfig.me"
+
+    def test_config_update_propagates_to_agent(self, admin_url, data_plane_running):
+        """Updating config via local admin should change agent DNS behavior."""
+        if not is_container_running("agent-manager"):
+            pytest.skip("agent-manager not running (needs --profile admin)")
+
+        # -- Step 1: Read original config (for cleanup) --
+        original = requests.get(f"{admin_url}/api/config", timeout=5)
+        if original.status_code == 404:
+            pytest.skip("No cagent.yaml configured")
+        original_raw = original.json()["raw"]
+        original_config = original.json()["config"]
+
+        # -- Step 2: Confirm test domain is currently blocked --
+        result = exec_in_agent(f"nslookup {self.TEST_DOMAIN} 172.30.0.5")
+        if "NXDOMAIN" not in result.stdout and result.returncode == 0:
+            pytest.skip(f"{self.TEST_DOMAIN} already resolves — already in allowlist")
+
+        try:
+            # -- Step 3: Add test domain via local admin API --
+            domains = original_config.get("domains", [])
+            domains.append({"domain": self.TEST_DOMAIN})
+            r = requests.put(
+                f"{admin_url}/api/config",
+                json={"domains": domains},
+                timeout=5,
+            )
+            assert r.status_code == 200, f"Config update failed: {r.text}"
+
+            # Verify write persisted
+            updated = requests.get(f"{admin_url}/api/config", timeout=5)
+            updated_domains = [d["domain"] for d in updated.json()["config"].get("domains", [])]
+            assert self.TEST_DOMAIN in updated_domains, "Config write did not persist"
+
+            # -- Step 4: Restart agent-manager to force immediate config regen --
+            # On startup, agent-manager reads cagent.yaml and writes new Corefile
+            subprocess.run(
+                ["docker", "restart", "agent-manager"],
+                capture_output=True, timeout=30, check=True,
+            )
+            assert wait_for_container("agent-manager", timeout=15), \
+                "agent-manager did not restart"
+            # Give it a moment to regenerate configs
+            time.sleep(3)
+
+            # -- Step 5: Reload CoreDNS to pick up new Corefile --
+            r = requests.post(f"{admin_url}/api/config/reload", timeout=15)
+            assert r.status_code == 200
+            assert wait_for_container("dns-filter", timeout=15), \
+                "dns-filter did not come back after reload"
+            # Wait for CoreDNS to be ready
+            time.sleep(2)
+
+            # -- Step 6: Verify domain now resolves from agent --
+            result = exec_in_agent(f"nslookup {self.TEST_DOMAIN} 172.30.0.5")
+            assert result.returncode == 0 and "NXDOMAIN" not in result.stdout, \
+                f"{self.TEST_DOMAIN} should resolve after being added to config. " \
+                f"stdout: {result.stdout}, stderr: {result.stderr}"
+
+        finally:
+            # -- Cleanup: restore original config --
+            requests.put(
+                f"{admin_url}/api/config/raw",
+                json={"content": original_raw},
+                timeout=5,
+            )
+            subprocess.run(
+                ["docker", "restart", "agent-manager"],
+                capture_output=True, timeout=30,
+            )
+            time.sleep(3)
+            requests.post(f"{admin_url}/api/config/reload", timeout=15)
