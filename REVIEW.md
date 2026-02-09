@@ -29,7 +29,7 @@ This review covers: feature critique, security vulnerabilities, observability ga
 
 ## 2. Security Vulnerabilities
 
-### CRITICAL: SQL Injection in Log Query Endpoint
+### MEDIUM: SQL String Construction in Log Query Endpoint
 
 **File:** `control_plane/services/backend/control_plane/routes/logs.py:254-279`
 
@@ -41,13 +41,19 @@ conditions.append(f"source = '{source}'")          # line 274
 conditions.append(f"agent_id = '{agent_id}'")      # line 279
 ```
 
-**Mitigation attempt:** A regex `_SAFE_QUERY_RE` filters the `query` parameter, and `source`/`agent_id` are validated as alphanumeric-with-hyphens. However:
+**Existing mitigations:**
 
-1. The regex allows `*`, `+`, `#`, `|`, `{`, `}`, `[`, `]` — characters with meaning in some SQL dialects.
-2. The `query` field allows `/` and `@`, which combined with `%` LIKE wildcards can produce unintended pattern matches.
-3. No parameterized query mechanism is used. Even if current validation is sufficient for OpenObserve's SQL dialect today, any upstream change to supported syntax could open an injection path.
+1. A regex `_SAFE_QUERY_RE` filters the `query` parameter; `source`/`agent_id` are validated as alphanumeric-with-hyphens.
+2. **Critically, each tenant queries against their own OpenObserve organization** with tenant-scoped reader credentials. Cross-tenant data leakage is not possible regardless of what SQL is injected.
 
-**Recommendation:** Use parameterized queries if the OpenObserve API supports them. If not, apply a strict escaping function that handles the target SQL dialect, not a regex allowlist.
+**Residual risk (intra-tenant only):**
+
+- A developer-role user could potentially bypass `agent_id` filters to read other agents' logs within their own tenant.
+- Resource-exhaustion queries (removing LIMIT, scanning full dataset) could degrade that tenant's query performance.
+
+**Constraint:** OpenObserve's `_search` API only accepts raw SQL strings — there is no parameterized query support. This is a limitation of the upstream API, not an oversight.
+
+**Recommendation:** Replace `LIKE '%{query}%'` with OpenObserve's `match_all()` full-text function and single-quote escaping. Restrict `source` to an enum of known values (`envoy`, `agent`, `coredns`, `gvisor`). This keeps all user input inside string literals, where the attack surface is limited to breaking out of single-quoted context in OpenObserve's SQL parser.
 
 ### HIGH: WebSocket Error Reason Leaks Internal State
 
@@ -94,9 +100,9 @@ detail=f"Access denied: IP address {client_ip} is not in the allowed range for t
 
 This confirms to an attacker what IP the server perceives, which can reveal proxy topology (X-Forwarded-For handling) or NAT configuration. The response should not echo the client IP.
 
-### MEDIUM: No CSRF Protection on State-Mutating Endpoints
+### NOTE: Local Admin UI Has No Authentication (By Design)
 
-The API uses Bearer tokens (no cookies), which inherently mitigates CSRF for API calls. However, the local admin UI (`data_plane/services/local_admin`) serves a React SPA on the same origin as the API with no authentication at all. Any process on the same machine can invoke config changes, container restarts, or terminal sessions via `http://localhost:8080/api/*`.
+The local admin UI (`data_plane/services/local_admin`) serves a React SPA on `localhost:8080` with no authentication. This is intentional and appropriate: in standalone mode, the local admin is accessible only to the operator who already owns the host machine and has `docker exec` access, shell access to `cagent.yaml`, and full control over the Docker daemon. Adding authentication would gate-keep someone from infrastructure they already fully control. In connected mode, the control plane UI (with full RBAC) replaces the local admin.
 
 ### LOW: OpenObserve Error Responses Forwarded to Clients
 
@@ -169,7 +175,6 @@ Default PostgreSQL credentials (`aidevbox/aidevbox`), OpenObserve defaults, and 
 
 - **No SDK or CLI for agent developers.** An agent running inside Cagent has no way to introspect its own permissions. An SDK or CLI that answers "can I reach api.github.com?" or "what rate limit applies to me?" would improve the agent development loop.
 - **Email proxy is beta with no documentation.** The email proxy supports Gmail, Outlook, and generic IMAP/SMTP, but there is no user-facing documentation on how to configure OAuth credentials, set up recipient allowlists, or test email delivery.
-- **Local admin UI has no authentication.** Anyone on the same network can access `http://localhost:8080` and modify configuration, restart containers, or open terminal sessions.
 
 ---
 
@@ -179,12 +184,11 @@ Default PostgreSQL credentials (`aidevbox/aidevbox`), OpenObserve defaults, and 
 
 | Priority | Item | Rationale |
 |----------|------|-----------|
-| P0 | Fix SQL injection in log query endpoint | Active vulnerability in authenticated endpoint |
 | P0 | Bind Envoy admin to 127.0.0.1 | Prevents agent from manipulating proxy |
 | P0 | Sanitize WebSocket close reasons | Prevents internal state leakage |
 | P0 | Add CI/CD pipeline (GitHub Actions) | Automate tests, linting, dependency scanning, container scanning |
+| P1 | Harden log query SQL construction (`match_all()` + enum validation) | Reduces intra-tenant injection surface |
 | P1 | Add JSON Schema validation for `cagent.yaml` | Catch config errors before they cause runtime failures |
-| P1 | Implement local admin authentication | Prevent unauthorized local access |
 | P1 | Replace in-memory token cache with Redis | Required for multi-worker deployments |
 | P1 | Add mTLS between data plane and control plane | Currently relies on bearer tokens over HTTPS |
 
@@ -247,4 +251,4 @@ Default PostgreSQL credentials (`aidevbox/aidevbox`), OpenObserve defaults, and 
 
 ## Summary
 
-Cagent addresses a real and growing need with a well-designed multi-layered security architecture. The core concept — treating AI agents as untrusted by default and mediating all network access through controlled proxies — is sound. The main areas requiring attention are: fixing the identified security vulnerabilities (particularly the SQL injection), adding observability infrastructure (metrics, tracing, alerting), improving the developer onboarding experience, and establishing CI/CD. The product is at a stage where these investments would have high leverage in moving from a working prototype to a production-grade platform.
+Cagent addresses a real and growing need with a well-designed multi-layered security architecture. The core concept — treating AI agents as untrusted by default and mediating all network access through controlled proxies — is sound. The trust model is well-considered: the local admin is intentionally unauthenticated (operator already owns the host), and the SQL construction risk in log queries is bounded by per-tenant OpenObserve org isolation. The main areas requiring attention are: fixing the Envoy admin exposure and WebSocket info leak, hardening the log query builder, adding observability infrastructure (metrics, tracing, alerting), improving the developer onboarding experience, and establishing CI/CD. The product is at a stage where these investments would have high leverage in moving from a working prototype to a production-grade platform.
