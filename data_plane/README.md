@@ -2,6 +2,10 @@
 
 The data plane provides a secure, isolated execution environment for AI agents with controlled network egress, credential injection, and audit logging.
 
+## Roadmap
+
+- **Network content restrictions** - Deep packet inspection and response body filtering for HTTP egress (e.g., block downloads over N bytes, restrict content types, PII detection in outbound requests)
+
 ## Architecture
 
 ### Minimal (Static Config)
@@ -239,6 +243,40 @@ domains:
 
 With `--profile managed` or `--profile admin`, agent-manager watches `cagent.yaml` and regenerates CoreDNS/Envoy configs on changes. Without it, edit configs directly.
 
+### Email Configuration (Beta)
+
+Add `--profile email` to enable controlled email access. Agent accesses email via `http://email.devbox.local/...`.
+
+```yaml
+# In configs/cagent.yaml
+email:
+  accounts:
+    - name: work-gmail
+      provider: gmail              # gmail | outlook | generic
+      email: agent@company.com
+      credential:
+        client_id_env: GMAIL_CLIENT_ID
+        client_secret_env: GMAIL_CLIENT_SECRET
+        refresh_token_env: GMAIL_REFRESH_TOKEN
+      policy:
+        allowed_recipients:
+          - "*@company.com"
+        allowed_senders:
+          - "*"
+        sends_per_hour: 50
+        reads_per_hour: 200
+```
+
+```bash
+# Set credentials in .env or shell
+export GMAIL_CLIENT_ID=...
+export GMAIL_CLIENT_SECRET=...
+export GMAIL_REFRESH_TOKEN=...
+
+# Start with email profile
+docker compose --profile dev --profile email up -d
+```
+
 ## Docker Compose Profiles
 
 | Profile | Services Added | Description |
@@ -249,6 +287,7 @@ With `--profile managed` or `--profile admin`, agent-manager watches `cagent.yam
 | `admin` | agent-manager + local-admin UI | Web-based management |
 | `auditing` | log-shipper | Forward logs to control plane |
 | `ssh` | tunnel-client (STCP tunnel) | Remote SSH access |
+| `email` | email-proxy | Controlled email access (IMAP/SMTP) - **beta** |
 
 ```bash
 # Standard mode with gVisor (RECOMMENDED - requires gVisor installed)
@@ -338,6 +377,7 @@ AGENT_VARIANT=lean  # or dev, ml
 | local-admin | 8080 | infra-net | admin | Web UI for standalone mode |
 | log-shipper | - | infra-net | auditing | Log forwarding to control plane |
 | tunnel-client | - | agent-net, infra-net | ssh | STCP tunnel for SSH access |
+| email-proxy | 8025 | infra-net | email | Email proxy (IMAP/SMTP with OAuth) - **beta** |
 
 ## Files
 
@@ -357,6 +397,9 @@ data_plane/
 │       └── frpc.toml           # FRP client configuration
 ├── services/
 │   ├── agent_manager/          # Container lifecycle + config generation
+│   ├── email_proxy/            # Email proxy (IMAP/SMTP with OAuth)
+│   │   ├── providers/          # Gmail, Outlook, generic providers
+│   │   └── tests/              # Unit tests
 │   ├── local_admin/            # Local admin UI (React + FastAPI)
 │   │   ├── frontend/           # React app
 │   │   └── backend/            # FastAPI backend

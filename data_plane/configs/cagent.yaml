@@ -109,6 +109,48 @@ domains:
     read_only: true
 
 # =============================================================================
+# Email Accounts (opt-in with --profile email)
+# =============================================================================
+# Each account configures IMAP/SMTP access with credential injection.
+# Providers: gmail (OAuth2), outlook (OAuth2), generic (password).
+# Agent accesses via http://email.devbox.local/...
+#
+# email:
+#   accounts:
+#     - name: work-gmail                    # Unique identifier
+#       provider: gmail                     # gmail | outlook | generic
+#       email: agent@company.com            # Account email address
+#       imap_server: imap.gmail.com         # Auto-set by provider, overridable
+#       smtp_server: smtp.gmail.com
+#       credential:
+#         client_id_env: GMAIL_CLIENT_ID        # OAuth2 client ID
+#         client_secret_env: GMAIL_CLIENT_SECRET # OAuth2 client secret
+#         refresh_token_env: GMAIL_REFRESH_TOKEN # OAuth2 refresh token
+#       policy:
+#         allowed_recipients:               # Who agent can email
+#           - "*@company.com"               # Wildcards
+#           - "partner@external.com"        # Exact match
+#         allowed_senders:                  # Filter inbox to these senders
+#           - "*"                           # Read from anyone
+#         sends_per_hour: 50
+#         reads_per_hour: 200
+#
+#     - name: notifications                 # Generic IMAP/SMTP
+#       provider: generic
+#       email: bot@myserver.com
+#       imap_server: mail.myserver.com
+#       imap_port: 993
+#       smtp_server: mail.myserver.com
+#       smtp_port: 587
+#       credential:
+#         password_env: MAIL_PASSWORD       # Plain password
+#       policy:
+#         allowed_recipients: ["admin@myserver.com"]
+#         allowed_senders: ["*@myserver.com"]
+#         sends_per_hour: 20
+#         reads_per_hour: 100
+
+# =============================================================================
 # Internal Services (Docker DNS)
 # =============================================================================
 # These resolve via Docker's internal DNS (127.0.0.11)

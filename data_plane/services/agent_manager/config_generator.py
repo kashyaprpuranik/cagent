@@ -51,6 +51,10 @@ class ConfigGenerator:
         """Get list of internal service names."""
         return self.config.get('internal_services', [])
 
+    def get_email_accounts(self) -> list:
+        """Get list of email account configs."""
+        return self.config.get('email', {}).get('accounts', [])
+
     def get_dns_config(self) -> dict:
         """Get DNS configuration."""
         return self.config.get('dns', {
@@ -125,6 +129,16 @@ class ConfigGenerator:
         for service in self.get_internal_services():
             lines.extend([
                 f"{service} {{",
+                "    forward . 127.0.0.11",
+                "    log",
+                "}",
+                "",
+            ])
+
+        # Email proxy internal DNS (if email accounts configured)
+        if self.get_email_accounts():
+            lines.extend([
+                "email-proxy {",
                 "    forward . 127.0.0.11",
                 "    log",
                 "}",
@@ -248,6 +262,12 @@ class ConfigGenerator:
 
                 clusters.append(self._generate_cluster(cluster_name, actual_host))
 
+        # Add email proxy route if email accounts are configured
+        email_vhost, email_cluster = self._generate_email_envoy_config()
+        if email_vhost:
+            virtual_hosts.append(email_vhost)
+            clusters.append(email_cluster)
+
         # Add catch-all block
         virtual_hosts.append({
             'name': 'blocked',
@@ -264,6 +284,48 @@ class ConfigGenerator:
         # Build full Envoy config
         config = self._build_envoy_config(virtual_hosts, clusters, default_rate_limit)
         return config
+
+    def _generate_email_envoy_config(self) -> tuple:
+        """Generate Envoy virtual host + cluster for email proxy if email accounts exist."""
+        email_accounts = self.get_email_accounts()
+        if not email_accounts:
+            return None, None
+
+        virtual_host = {
+            'name': 'devbox_email',
+            'domains': ['email.devbox.local', 'email.devbox.local:*'],
+            'routes': [{
+                'match': {'prefix': '/'},
+                'route': {
+                    'cluster': 'email_proxy',
+                    'timeout': '60s',
+                }
+            }]
+        }
+
+        cluster = {
+            'name': 'email_proxy',
+            'type': 'STRICT_DNS',
+            'connect_timeout': '5s',
+            'lb_policy': 'ROUND_ROBIN',
+            'load_assignment': {
+                'cluster_name': 'email_proxy',
+                'endpoints': [{
+                    'lb_endpoints': [{
+                        'endpoint': {
+                            'address': {
+                                'socket_address': {
+                                    'address': '10.200.2.40',
+                                    'port_value': 8025
+                                }
+                            }
+                        }
+                    }]
+                }]
+            }
+        }
+
+        return virtual_host, cluster
 
     def _domain_to_cluster_name(self, domain: str) -> str:
         """Convert domain to valid cluster name."""

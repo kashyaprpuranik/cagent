@@ -374,6 +374,53 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
+  # Email Proxy - Controlled email access (IMAP/SMTP) for agents
+  # Supports Gmail (OAuth2), Outlook (OAuth2), and generic IMAP/SMTP
+  # Optional: Only runs with --profile email
+  # ===========================================================================
+  email-proxy:
+    build:
+      context: ./services/email_proxy
+    container_name: email-proxy
+    profiles:
+      - email
+
+    environment:
+      - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml
+      # Gmail OAuth (set in .env or shell)
+      - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID:-}
+      - GMAIL_CLIENT_SECRET=${GMAIL_CLIENT_SECRET:-}
+      - GMAIL_REFRESH_TOKEN=${GMAIL_REFRESH_TOKEN:-}
+      # Outlook/M365 OAuth (set in .env or shell)
+      - OUTLOOK_CLIENT_ID=${OUTLOOK_CLIENT_ID:-}
+      - OUTLOOK_CLIENT_SECRET=${OUTLOOK_CLIENT_SECRET:-}
+      - OUTLOOK_REFRESH_TOKEN=${OUTLOOK_REFRESH_TOKEN:-}
+      # Generic mail password (set in .env or shell)
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-}
+
+    volumes:
+      - ./configs/cagent.yaml:/etc/cagent/cagent.yaml:ro
+
+    # On infra-net only - agent accesses via Envoy on agent-net
+    networks:
+      infra-net:
+        ipv4_address: 10.200.2.40
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8025/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    restart: unless-stopped
+
+  # ===========================================================================
   # Tunnel Client - Reverse tunnel for SSH access via STCP
   # Connects outbound to control plane tunnel server
   # STCP mode: P2P tunneling with unique secret key per agent
