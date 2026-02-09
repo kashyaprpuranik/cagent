@@ -1,17 +1,29 @@
 import re
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from control_plane.config import OPENOBSERVE_URL, OPENOBSERVE_USER, OPENOBSERVE_PASSWORD
+from control_plane.config import (
+    OPENOBSERVE_URL, OPENOBSERVE_USER, OPENOBSERVE_PASSWORD,
+    OPENOBSERVE_MULTI_TENANT,
+    LOG_INGEST_MAX_BATCH_SIZE, LOG_INGEST_MAX_PAYLOAD_BYTES,
+    LOG_INGEST_MAX_AGE_HOURS, LOG_INGEST_TIMEOUT,
+    LOG_QUERY_TIMEOUT, LOG_QUERY_MAX_RESULTS, LOG_QUERY_MAX_TIME_RANGE_DAYS,
+    logger,
+)
 from control_plane.database import get_db
-from control_plane.models import AgentState, AuditTrail
+from control_plane.models import AgentState, AuditTrail, Tenant
 from control_plane.schemas import LogBatch, AuditTrailResponse
 from control_plane.auth import TokenInfo, verify_token, require_admin_role, require_developer_role
 from control_plane.rate_limit import limiter
-from control_plane.config import logger
+from control_plane.openobserve import (
+    get_ingest_auth, get_query_auth,
+    get_ingest_url, get_query_url,
+    get_tenant_settings,
+)
 
 router = APIRouter()
 
@@ -48,6 +60,23 @@ async def ingest_logs(
             detail="Agent token must have agent_id"
         )
 
+    # --- Ingestion hardening (independent of multi-tenancy) ---
+
+    # Batch size limit
+    if len(batch.logs) > LOG_INGEST_MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Batch too large: {len(batch.logs)} logs exceeds maximum of {LOG_INGEST_MAX_BATCH_SIZE}"
+        )
+
+    # Payload size limit (from Content-Length header)
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > LOG_INGEST_MAX_PAYLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Payload too large: {content_length} bytes exceeds maximum of {LOG_INGEST_MAX_PAYLOAD_BYTES}"
+        )
+
     # Get tenant_id from agent state (trusted source, not from request)
     agent = db.query(AgentState).filter(
         AgentState.agent_id == token_info.agent_id,
@@ -62,11 +91,34 @@ async def ingest_logs(
 
     tenant_id = agent.tenant_id
 
+    # Look up tenant for multi-tenant routing
+    tenant = None
+    tenant_settings = None
+    if OPENOBSERVE_MULTI_TENANT:
+        tenant = db.query(Tenant).filter(
+            Tenant.id == tenant_id,
+            Tenant.deleted_at.is_(None)
+        ).first()
+        if tenant:
+            tenant_settings = get_tenant_settings(tenant)
+
+    # Log age cutoff
+    age_cutoff = datetime.utcnow() - timedelta(hours=LOG_INGEST_MAX_AGE_HOURS)
+
     # Transform logs for OpenObserve, injecting trusted identity
     enriched_logs = []
     for log in batch.logs:
+        ts = log.timestamp or datetime.utcnow()
+
+        # Reject logs older than max age
+        if ts < age_cutoff:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Log timestamp {ts.isoformat()} is older than {LOG_INGEST_MAX_AGE_HOURS} hours"
+            )
+
         entry = {
-            "_timestamp": int((log.timestamp or datetime.utcnow()).timestamp() * 1_000_000),
+            "_timestamp": int(ts.timestamp() * 1_000_000),
             "message": log.message,
             "source": log.source,
             "level": log.level or "info",
@@ -80,21 +132,47 @@ async def ingest_logs(
             entry.update(safe_extra)
         enriched_logs.append(entry)
 
-    # Forward to OpenObserve
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{OPENOBSERVE_URL}/api/default/default/_json",
-            json=enriched_logs,
-            auth=(OPENOBSERVE_USER, OPENOBSERVE_PASSWORD),
-            timeout=30.0
-        )
+    # --- Forward to OpenObserve ---
 
-        if response.status_code not in (200, 201):
-            logger.error(f"OpenObserve ingestion failed: {response.status_code} {response.text}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to store logs: {response.text}"
+    if OPENOBSERVE_MULTI_TENANT and tenant:
+        # Group logs by source for per-source streams
+        by_source = defaultdict(list)
+        for entry in enriched_logs:
+            by_source[entry.get("source", "default")].append(entry)
+
+        auth = get_ingest_auth(tenant_settings)
+
+        async with httpx.AsyncClient() as client:
+            for source, logs in by_source.items():
+                url = get_ingest_url(tenant.slug, source)
+                response = await client.post(
+                    url,
+                    json=logs,
+                    auth=auth,
+                    timeout=LOG_INGEST_TIMEOUT,
+                )
+                if response.status_code not in (200, 201):
+                    logger.error(f"OpenObserve ingestion failed for {tenant.slug}/{source}: {response.status_code} {response.text}")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Failed to store logs: {response.text}"
+                    )
+    else:
+        # Legacy single-org mode
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{OPENOBSERVE_URL}/api/default/default/_json",
+                json=enriched_logs,
+                auth=(OPENOBSERVE_USER, OPENOBSERVE_PASSWORD),
+                timeout=LOG_INGEST_TIMEOUT,
             )
+
+            if response.status_code not in (200, 201):
+                logger.error(f"OpenObserve ingestion failed: {response.status_code} {response.text}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to store logs: {response.text}"
+                )
 
     return {"status": "ok", "count": len(enriched_logs)}
 
@@ -130,6 +208,12 @@ async def query_agent_logs(
         end: End time (RFC3339)
     """
     import httpx
+
+    # --- Query hardening ---
+
+    # Cap limit to configured max
+    if limit > LOG_QUERY_MAX_RESULTS:
+        limit = LOG_QUERY_MAX_RESULTS
 
     # Determine effective tenant filter
     if token_info.is_super_admin:
@@ -192,16 +276,48 @@ async def query_agent_logs(
     else:
         start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
 
+    # Time range limit
+    time_range = end_time - start_time
+    if time_range.days > LOG_QUERY_MAX_TIME_RANGE_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Time range of {time_range.days} days exceeds maximum of {LOG_QUERY_MAX_TIME_RANGE_DAYS} days"
+        )
+
     # Convert to microseconds for OpenObserve
     start_us = int(start_time.timestamp() * 1_000_000)
     end_us = int(end_time.timestamp() * 1_000_000)
 
+    # Determine stream name for the SQL FROM clause
+    if OPENOBSERVE_MULTI_TENANT and source:
+        stream_name = source
+    else:
+        stream_name = "default"
+
     where_clause = " AND ".join(conditions) if conditions else "1=1"
-    sql = f"SELECT * FROM default WHERE {where_clause} ORDER BY _timestamp DESC LIMIT {limit}"
+    sql = f"SELECT * FROM {stream_name} WHERE {where_clause} ORDER BY _timestamp DESC LIMIT {limit}"
+
+    # Per-tenant routing for queries
+    tenant_settings = None
+    if OPENOBSERVE_MULTI_TENANT and effective_tenant_id is not None:
+        tenant = db.query(Tenant).filter(
+            Tenant.id == effective_tenant_id,
+            Tenant.deleted_at.is_(None)
+        ).first()
+        if tenant:
+            tenant_settings = get_tenant_settings(tenant)
+            query_url = get_query_url(tenant.slug)
+            auth = get_query_auth(tenant_settings)
+        else:
+            query_url = f"{OPENOBSERVE_URL}/api/default/_search"
+            auth = (OPENOBSERVE_USER, OPENOBSERVE_PASSWORD)
+    else:
+        query_url = f"{OPENOBSERVE_URL}/api/default/_search"
+        auth = (OPENOBSERVE_USER, OPENOBSERVE_PASSWORD)
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{OPENOBSERVE_URL}/api/default/_search",
+            query_url,
             json={
                 "query": {
                     "sql": sql,
@@ -209,8 +325,8 @@ async def query_agent_logs(
                     "end_time": end_us,
                 }
             },
-            auth=(OPENOBSERVE_USER, OPENOBSERVE_PASSWORD),
-            timeout=30.0
+            auth=auth,
+            timeout=LOG_QUERY_TIMEOUT,
         )
 
         if response.status_code != 200:

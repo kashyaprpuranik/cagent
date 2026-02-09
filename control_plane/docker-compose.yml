@@ -41,6 +41,14 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       # Set to "true" to seed test tenants, tokens, and domain policies (deploy.sh sets this)
       - SEED_TOKENS=${SEED_TOKENS:-false}
+      # OpenObserve multi-tenancy and hardening
+      - OPENOBSERVE_MULTI_TENANT=${OPENOBSERVE_MULTI_TENANT:-true}
+      - OPENOBSERVE_USER=${OPENOBSERVE_USER:-admin@cagent.local}
+      - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD:-admin}
+      - LOG_INGEST_MAX_BATCH_SIZE=${LOG_INGEST_MAX_BATCH_SIZE:-500}
+      - LOG_INGEST_MAX_AGE_HOURS=${LOG_INGEST_MAX_AGE_HOURS:-24}
+      - LOG_QUERY_TIMEOUT=${LOG_QUERY_TIMEOUT:-15.0}
+      - LOG_QUERY_MAX_TIME_RANGE_DAYS=${LOG_QUERY_MAX_TIME_RANGE_DAYS:-30}
 
     ports:
       - "8002:8000"

@@ -11,6 +11,30 @@ OPENOBSERVE_URL = os.environ.get('OPENOBSERVE_URL', 'http://openobserve:5080')
 OPENOBSERVE_USER = os.environ.get('OPENOBSERVE_USER', 'admin@cagent.local')
 OPENOBSERVE_PASSWORD = os.environ.get('OPENOBSERVE_PASSWORD', 'admin')
 
+# Root credentials — used ONLY for org/user provisioning
+OPENOBSERVE_ROOT_USER = os.environ.get(
+    'OPENOBSERVE_ROOT_USER',
+    os.environ.get('OPENOBSERVE_USER', 'admin@cagent.local')
+)
+OPENOBSERVE_ROOT_PASSWORD = os.environ.get(
+    'OPENOBSERVE_ROOT_PASSWORD',
+    os.environ.get('OPENOBSERVE_PASSWORD', 'admin')
+)
+
+# Multi-tenancy toggle (default on)
+OPENOBSERVE_MULTI_TENANT = os.environ.get('OPENOBSERVE_MULTI_TENANT', 'true').lower() == 'true'
+
+# Ingestion hardening
+LOG_INGEST_MAX_BATCH_SIZE = int(os.environ.get('LOG_INGEST_MAX_BATCH_SIZE', '500'))
+LOG_INGEST_MAX_PAYLOAD_BYTES = int(os.environ.get('LOG_INGEST_MAX_PAYLOAD_BYTES', str(1024 * 1024)))
+LOG_INGEST_MAX_AGE_HOURS = int(os.environ.get('LOG_INGEST_MAX_AGE_HOURS', '24'))
+LOG_INGEST_TIMEOUT = float(os.environ.get('LOG_INGEST_TIMEOUT', '10.0'))
+
+# Query hardening
+LOG_QUERY_TIMEOUT = float(os.environ.get('LOG_QUERY_TIMEOUT', '15.0'))
+LOG_QUERY_MAX_RESULTS = int(os.environ.get('LOG_QUERY_MAX_RESULTS', '1000'))
+LOG_QUERY_MAX_TIME_RANGE_DAYS = int(os.environ.get('LOG_QUERY_MAX_TIME_RANGE_DAYS', '30'))
+
 # Redis
 REDIS_URL = os.environ.get('REDIS_URL', '')
 

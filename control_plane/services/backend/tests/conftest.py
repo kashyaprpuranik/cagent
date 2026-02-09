@@ -9,6 +9,7 @@ Supports two modes:
 import os
 import sys
 import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -20,6 +21,8 @@ os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 os.environ["DATABASE_URL"] = "sqlite:///file::memory:?cache=shared"
 # Enable full test data seeding for tests
 os.environ["SEED_TOKENS"] = "true"
+# Disable multi-tenant by default in tests (individual tests opt in)
+os.environ["OPENOBSERVE_MULTI_TENANT"] = "false"
 
 # Add parent directory to path so we can import main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -118,6 +121,54 @@ def super_admin_headers():
 
 
 @pytest.fixture
+def dev_headers():
+    """Return developer authorization headers (default tenant)."""
+    return {"Authorization": "Bearer dev-test-token-do-not-use-in-production"}
+
+
+@pytest.fixture
 def acme_admin_headers():
     """Return admin authorization headers for Acme Corp tenant."""
     return {"Authorization": "Bearer acme-admin-test-token-do-not-use-in-production"}
+
+
+@pytest.fixture
+def mock_openobserve():
+    """Mock httpx.AsyncClient for OpenObserve HTTP calls.
+
+    Captures and validates requests without real network.
+    Returns a mock that records all POST/DELETE calls.
+    """
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code=200, json_data=None, text=""):
+            self.status_code = status_code
+            self._json_data = json_data or {}
+            self.text = text
+
+        def json(self):
+            return self._json_data
+
+    class FakeClient:
+        async def post(self, url, **kwargs):
+            calls.append({"method": "POST", "url": url, **kwargs})
+            # Return search results for query endpoints
+            if "/_search" in url:
+                return FakeResponse(200, {"hits": []})
+            return FakeResponse(200)
+
+        async def delete(self, url, **kwargs):
+            calls.append({"method": "DELETE", "url": url, **kwargs})
+            return FakeResponse(200)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    fake_client = FakeClient()
+
+    with patch("httpx.AsyncClient", return_value=fake_client):
+        yield calls

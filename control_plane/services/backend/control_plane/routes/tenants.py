@@ -9,6 +9,8 @@ from control_plane.models import Tenant, AgentState, ApiToken, AuditTrail
 from control_plane.schemas import TenantCreate, TenantResponse
 from control_plane.auth import TokenInfo, require_super_admin
 from control_plane.rate_limit import limiter
+from control_plane.config import OPENOBSERVE_MULTI_TENANT, logger
+from control_plane.openobserve import provision_tenant_org, delete_tenant_org, store_org_credentials
 
 router = APIRouter()
 
@@ -93,6 +95,22 @@ async def create_tenant(
     db.add(log)
     db.commit()
 
+    # Provision OpenObserve org for this tenant
+    if OPENOBSERVE_MULTI_TENANT:
+        try:
+            writer_email, writer_pw, reader_email, reader_pw = await provision_tenant_org(tenant.slug)
+            store_org_credentials(tenant, db, writer_email, writer_pw, reader_email, reader_pw)
+        except Exception as e:
+            logger.error(f"Failed to provision OpenObserve org for tenant {tenant.slug}: {e}")
+            # Rollback: delete the tenant we just created
+            db.delete(default_agent)
+            db.delete(tenant)
+            db.commit()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to provision log storage for tenant: {e}"
+            )
+
     return TenantResponse(
         id=tenant.id,
         name=tenant.name,
@@ -148,6 +166,13 @@ async def delete_tenant(
     ).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Best-effort cleanup of OpenObserve org
+    if OPENOBSERVE_MULTI_TENANT:
+        try:
+            await delete_tenant_org(tenant.slug)
+        except Exception as e:
+            logger.warning(f"Failed to clean up OpenObserve org for tenant {tenant.slug}: {e}")
 
     now = datetime.utcnow()
 
