@@ -60,6 +60,9 @@ def acme_admin_headers():
     return {"Authorization": f"Bearer {ACME_ADMIN_TOKEN}"}
 
 
+PROXY = "http://10.200.1.10:8443"
+
+
 def exec_in_agent(command: str) -> subprocess.CompletedProcess:
     """Execute a command inside the agent container."""
     return subprocess.run(
@@ -402,7 +405,7 @@ class TestCredentialInjection:
         """
         # Agent requests through envoy to echo.devbox.local
         result = exec_in_agent(
-            "curl -s --max-time 10 http://echo.devbox.local/headers"
+            f"curl -s --max-time 10 -x {PROXY} http://echo.devbox.local/headers"
         )
         if result.returncode != 0:
             pytest.fail(
@@ -445,7 +448,7 @@ class TestLogContent:
         """Access log entries should contain all expected JSON fields."""
         # Make a request with a unique path to identify in logs
         marker = f"/e2e-log-fields-{int(time.time())}"
-        exec_in_agent(f"curl -s -o /dev/null http://openai.devbox.local{marker}")
+        exec_in_agent(f"curl -s -o /dev/null -x {PROXY} http://openai.devbox.local{marker}")
         time.sleep(2)
 
         entries = get_envoy_access_logs()
@@ -479,7 +482,7 @@ class TestLogContent:
         """Access log should show credential_injected=true for echo requests."""
         marker = f"/e2e-cred-log-{int(time.time())}"
         exec_in_agent(
-            f"curl -s -o /dev/null http://echo.devbox.local{marker}"
+            f"curl -s -o /dev/null -x {PROXY} http://echo.devbox.local{marker}"
         )
         time.sleep(2)
 
@@ -499,7 +502,7 @@ class TestLogContent:
         """Blocked domains should return 403 and appear in access logs."""
         marker = f"/e2e-blocked-{int(time.time())}"
         result = exec_in_agent(
-            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"curl -s -o /dev/null -w '%{{http_code}}' -x {PROXY} "
             f"http://blocked.example.com{marker}"
         )
         # Envoy catch-all returns 403 for unlisted domains

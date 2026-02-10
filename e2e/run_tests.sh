@@ -164,9 +164,29 @@ PYEOF
         sleep 1
     done
 
-    # 11. Wait for first heartbeat + config sync
-    echo "Waiting for first heartbeat and config sync..."
-    sleep 8
+    # 11. Wait for proxy readiness (agent-manager writes configs and restarts services)
+    echo "Waiting for proxy readiness..."
+    for i in $(seq 1 30); do
+        if docker exec agent curl -sf -x http://10.200.1.10:8443 --connect-timeout 2 \
+            http://api.github.com/ -o /dev/null 2>/dev/null; then
+            echo "Proxy ready."
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "WARNING: Proxy readiness check timed out (continuing anyway)"
+            echo "--- agent-manager logs ---"
+            docker logs agent-manager --tail 10 2>&1 || true
+            echo "--- dns-filter status ---"
+            docker ps --filter name=dns-filter --format "{{.Status}}" 2>/dev/null || true
+            echo "--- http-proxy status ---"
+            docker ps --filter name=http-proxy --format "{{.Status}}" 2>/dev/null || true
+        fi
+        sleep 2
+    done
+
+    # Wait for first heartbeat
+    echo "Waiting for first heartbeat..."
+    sleep 5
     echo "Infrastructure ready."
 }
 

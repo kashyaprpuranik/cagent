@@ -86,7 +86,10 @@ services:
     environment:
       - HTTP_PROXY=http://10.200.1.10:8443
       - HTTPS_PROXY=http://10.200.1.10:8443
+      - http_proxy=http://10.200.1.10:8443
+      - https_proxy=http://10.200.1.10:8443
       - NO_PROXY=localhost,127.0.0.1
+      - no_proxy=localhost,127.0.0.1
       - USER_NAME=agent
       # SSH public keys (paste your public key here or mount file)
       - SSH_AUTHORIZED_KEYS=${SSH_AUTHORIZED_KEYS:-}
@@ -161,7 +164,10 @@ services:
     environment:
       - HTTP_PROXY=http://10.200.1.10:8443
       - HTTPS_PROXY=http://10.200.1.10:8443
+      - http_proxy=http://10.200.1.10:8443
+      - https_proxy=http://10.200.1.10:8443
       - NO_PROXY=localhost,127.0.0.1
+      - no_proxy=localhost,127.0.0.1
       - USER_NAME=agent
       - SSH_AUTHORIZED_KEYS=${SSH_AUTHORIZED_KEYS:-}
       - TMUX_AUTO_ATTACH=${TMUX_AUTO_ATTACH:-1}
