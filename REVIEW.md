@@ -20,7 +20,7 @@ This review covers: feature critique, security vulnerabilities, observability ga
 
 ### Weaknesses
 
-- **The terminal WebSocket is a placeholder.** `terminal.py:206-229` echoes input back. There is no SSH relay via paramiko or STCP visitor. This is the most visible user-facing feature in the UI and it does not function.
+- **Control plane WebSocket terminal relay is not yet wired up.** The control plane's `terminal.py:206-229` echoes input back as a placeholder for a paramiko SSH relay. However, terminal access works through two other paths: in standalone mode, the local admin provides a fully functional `docker exec`-based terminal over WebSocket; in connected mode, the STCP tunnel (FRP) provides direct SSH access. The control plane WebSocket is a convenience path for browser-based remote access that hasn't been completed yet.
 - **Token verification cache is per-process only.** `auth.py:30` uses an in-memory dict with a 60-second TTL. Redis is already deployed and used for rate limiting, but the token cache hasn't been moved to it yet (there's a TODO). In a multi-worker deployment, disabling a token on one worker won't be visible to others until the cache expires. Unlikely to matter at current scale, but worth noting since Redis is already available.
 
 ---
