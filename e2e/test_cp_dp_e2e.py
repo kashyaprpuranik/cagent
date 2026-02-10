@@ -73,32 +73,37 @@ def exec_in_agent(command: str) -> subprocess.CompletedProcess:
     )
 
 
-def get_envoy_access_logs(tail: int = 500) -> list[dict]:
-    """Get recent Envoy access log entries (JSON lines).
+def get_envoy_access_logs(since: str | None = None) -> list[dict]:
+    """Get Envoy access log entries (JSON lines) from docker logs.
 
-    Note: ``docker logs --tail N`` counts lines across both stdout and stderr.
-    Envoy writes access logs to stdout but startup/config messages to stderr,
-    so we combine both streams to ensure the tail window captures enough
-    actual access-log lines.
+    Args:
+        since: Docker ``--since`` value, e.g. ``"30s"`` or an RFC 3339
+               timestamp.  When *None* the last 60 s of logs are returned.
+
+    ``docker logs --tail N`` counts lines across **both** stdout and stderr.
+    Envoy writes access logs to stdout but hundreds of startup / config lines
+    to stderr, so a tail-based window misses access-log entries after restarts.
+    Using ``--since`` avoids this entirely.
     """
+    cmd = ["docker", "logs", "--since", since or "60s", "http-proxy"]
     result = subprocess.run(
-        ["docker", "logs", "--tail", str(tail), "http-proxy"],
-        capture_output=True,
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,   # merge stderr into stdout
         text=True,
         timeout=10,
     )
     entries = []
-    for output in (result.stdout, result.stderr):
-        for line in output.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                if isinstance(entry, dict) and "authority" in entry:
-                    entries.append(entry)
-            except (json.JSONDecodeError, ValueError):
-                continue
+    for line in result.stdout.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            if isinstance(entry, dict) and "authority" in entry:
+                entries.append(entry)
+        except (json.JSONDecodeError, ValueError):
+            continue
     return entries
 
 
@@ -455,14 +460,16 @@ class TestLogContent:
         """Access log entries should contain all expected JSON fields."""
         # Make a request with a unique path to identify in logs
         marker = f"/e2e-log-fields-{int(time.time())}"
-        exec_in_agent(f"curl -s -o /dev/null -x {PROXY} http://openai.devbox.local{marker}")
+        curl_result = exec_in_agent(f"curl -s -o /dev/null -w '%{{http_code}}' -x {PROXY} http://openai.devbox.local{marker}")
         time.sleep(2)
 
         entries = get_envoy_access_logs()
         matching = [e for e in entries if marker in e.get("path", "")]
         assert len(matching) > 0, (
             f"No log entry found for path {marker}. "
-            f"Total entries: {len(entries)}"
+            f"Total entries: {len(entries)}. "
+            f"curl status: {curl_result.stdout!r}. "
+            f"Sample paths: {[e.get('path','')[:60] for e in entries[:5]]}"
         )
 
         entry = matching[-1]
@@ -488,15 +495,17 @@ class TestLogContent:
     def test_envoy_logs_credential_injection(self, cp_running):
         """Access log should show credential_injected=true for echo requests."""
         marker = f"/e2e-cred-log-{int(time.time())}"
-        exec_in_agent(
-            f"curl -s -o /dev/null -x {PROXY} http://echo.devbox.local{marker}"
+        curl_result = exec_in_agent(
+            f"curl -s -o /dev/null -w '%{{http_code}}' -x {PROXY} http://echo.devbox.local{marker}"
         )
         time.sleep(2)
 
         entries = get_envoy_access_logs()
         matching = [e for e in entries if marker in e.get("path", "")]
         assert len(matching) > 0, (
-            f"No log entry found for echo request {marker}"
+            f"No log entry found for echo request {marker}. "
+            f"Total entries: {len(entries)}. "
+            f"curl status: {curl_result.stdout!r}"
         )
 
         entry = matching[-1]
@@ -521,7 +530,9 @@ class TestLogContent:
         entries = get_envoy_access_logs()
         matching = [e for e in entries if marker in e.get("path", "")]
         assert len(matching) > 0, (
-            f"No log entry for blocked request {marker}"
+            f"No log entry for blocked request {marker}. "
+            f"Total entries: {len(entries)}. "
+            f"Sample paths: {[e.get('path','')[:60] for e in entries[:5]]}"
         )
 
         entry = matching[-1]
