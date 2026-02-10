@@ -73,8 +73,14 @@ def exec_in_agent(command: str) -> subprocess.CompletedProcess:
     )
 
 
-def get_envoy_access_logs(tail: int = 100) -> list[dict]:
-    """Get recent Envoy access log entries (JSON lines from stdout)."""
+def get_envoy_access_logs(tail: int = 500) -> list[dict]:
+    """Get recent Envoy access log entries (JSON lines).
+
+    Note: ``docker logs --tail N`` counts lines across both stdout and stderr.
+    Envoy writes access logs to stdout but startup/config messages to stderr,
+    so we combine both streams to ensure the tail window captures enough
+    actual access-log lines.
+    """
     result = subprocess.run(
         ["docker", "logs", "--tail", str(tail), "http-proxy"],
         capture_output=True,
@@ -82,16 +88,17 @@ def get_envoy_access_logs(tail: int = 100) -> list[dict]:
         timeout=10,
     )
     entries = []
-    for line in result.stdout.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-            if isinstance(entry, dict) and "authority" in entry:
-                entries.append(entry)
-        except (json.JSONDecodeError, ValueError):
-            continue
+    for output in (result.stdout, result.stderr):
+        for line in output.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if isinstance(entry, dict) and "authority" in entry:
+                    entries.append(entry)
+            except (json.JSONDecodeError, ValueError):
+                continue
     return entries
 
 
