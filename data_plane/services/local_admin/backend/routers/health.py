@@ -13,6 +13,7 @@ from ..constants import (
     CAGENT_CONFIG_PATH,
     DATA_PLANE_DIR,
     DATAPLANE_MODE,
+    BETA_FEATURES,
     MANAGED_CONTAINERS,
     docker_client,
 )
@@ -105,6 +106,7 @@ async def info():
         "mode": DATAPLANE_MODE,
         "config_path": CAGENT_CONFIG_PATH,
         "data_plane_dir": DATA_PLANE_DIR,
+        "features": sorted(BETA_FEATURES),
         "containers": {
             "agent": AGENT_CONTAINER_NAME,
             "dns": COREDNS_CONTAINER_NAME,

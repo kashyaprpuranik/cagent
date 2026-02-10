@@ -366,6 +366,7 @@ services:
       - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml
       - DATA_PLANE_DIR=/app/data_plane
       - DATAPLANE_MODE=${DATAPLANE_MODE:-standalone}
+      - BETA_FEATURES=${BETA_FEATURES:-}
 
     volumes:
       # Docker socket for container management
@@ -392,6 +393,8 @@ services:
     build:
       context: ./services/email_proxy
     container_name: email-proxy
+    profiles:
+      - email
 
     environment:
       - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml

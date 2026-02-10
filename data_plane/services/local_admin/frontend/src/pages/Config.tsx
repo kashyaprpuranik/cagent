@@ -19,7 +19,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { Modal, Input, Select, Button, Badge } from '@cagent/shared-ui';
-import { getConfig, updateConfigRaw, reloadConfig, Config, DomainEntry, EmailAccount } from '../api/client';
+import { getConfig, getInfo, updateConfigRaw, reloadConfig, Config, DomainEntry, EmailAccount } from '../api/client';
 
 type Tab = 'domains' | 'email' | 'settings' | 'raw';
 
@@ -753,6 +753,9 @@ export default function ConfigPage() {
   const [editingEmail, setEditingEmail] = useState<EmailAccount | null>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
 
+  const { data: infoData } = useQuery({ queryKey: ['info'], queryFn: getInfo });
+  const emailEnabled = infoData?.features?.includes('email');
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['config'],
     queryFn: getConfig,
@@ -971,7 +974,7 @@ export default function ConfigPage() {
 
   const tabs = [
     { id: 'domains' as Tab, label: 'Egress Policies', icon: Globe, count: config.domains?.length },
-    { id: 'email' as Tab, label: 'Email', icon: Mail, count: config.email?.accounts?.length, badge: 'Beta' },
+    ...(emailEnabled ? [{ id: 'email' as Tab, label: 'Email', icon: Mail, count: config.email?.accounts?.length, badge: 'Beta' }] : []),
     ...(!isReadOnly ? [{ id: 'settings' as Tab, label: 'Settings', icon: Settings }] : []),
     { id: 'raw' as Tab, label: 'Raw YAML', icon: Code },
   ];

@@ -14,6 +14,7 @@ import {
   LucideIcon,
   ChevronDown,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
 import { api } from '../api/client';
@@ -25,6 +26,7 @@ interface NavItem {
   badge?: string;
   superAdminOnly?: boolean;
   adminOnly?: boolean;
+  beta?: string;  // feature flag name from /api/v1/info features list
 }
 
 interface NavSection {
@@ -45,7 +47,7 @@ const navSections: NavSection[] = [
     title: 'Configuration',
     items: [
       { to: '/domain-policies', icon: Globe, label: 'Egress Policies', adminOnly: true },
-      { to: '/email-policies', icon: Mail, label: 'Email Policies', badge: 'Beta', adminOnly: true },
+      { to: '/email-policies', icon: Mail, label: 'Email Policies', badge: 'Beta', adminOnly: true, beta: 'email_policies' },
       { to: '/ip-acls', icon: Network, label: 'IP ACLs', adminOnly: true },
     ],
   },
@@ -63,6 +65,8 @@ export function Sidebar() {
   const { user, refresh } = useAuth();
   const { selectedTenant, tenants, canSwitch, setSelectedTenantId, loading: tenantLoading } = useTenant();
   const navigate = useNavigate();
+  const { data: info } = useQuery({ queryKey: ['info'], queryFn: () => api.getInfo() });
+  const enabledFeatures = new Set(info?.features || []);
 
   const handleLogout = async () => {
     api.clearToken();
@@ -73,11 +77,12 @@ export function Sidebar() {
   // Check if user has admin role
   const hasAdminRole = user?.is_super_admin || user?.roles?.includes('admin');
 
-  // Filter nav items based on user roles
+  // Filter nav items based on user roles and beta features
   const filterItems = (items: NavItem[]) =>
     items.filter((item) => {
       if (item.superAdminOnly && !user?.is_super_admin) return false;
       if (item.adminOnly && !hasAdminRole) return false;
+      if (item.beta && !enabledFeatures.has(item.beta)) return false;
       return true;
     });
 

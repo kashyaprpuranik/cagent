@@ -22,6 +22,7 @@ export const getHealth = () => request<{ status: string }>('/health');
 export const getInfo = () => request<{
   mode: string;
   config_path: string;
+  features?: string[];
   containers: Record<string, string>;
 }>('/info');
 

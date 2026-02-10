@@ -401,6 +401,14 @@ export const api = {
     return handleResponse<{ ticket: string; expires_in_seconds: number }>(response);
   },
 
+  // Info (features, version)
+  getInfo: async (): Promise<{ name: string; version: string; features: string[] }> => {
+    const response = await fetch(`${API_BASE}/info`, {
+      headers: getAuthHeaders(),
+    });
+    return handleResponse(response);
+  },
+
   rotateDomainPolicyCredential: async (id: number, credential: DomainPolicyCredential): Promise<DomainPolicy> => {
     const response = await fetch(`${API_BASE}/domain-policies/${id}/rotate-credential`, {
       method: 'POST',

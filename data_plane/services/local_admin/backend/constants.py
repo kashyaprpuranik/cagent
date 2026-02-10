@@ -16,4 +16,11 @@ READ_ONLY = DATAPLANE_MODE == "connected"
 
 docker_client = docker.from_env()
 
-MANAGED_CONTAINERS = [AGENT_CONTAINER_NAME, COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, EMAIL_PROXY_CONTAINER_NAME]
+BETA_FEATURES = set(
+    f.strip() for f in os.environ.get('BETA_FEATURES', '').split(',') if f.strip()
+)
+
+_base_containers = [AGENT_CONTAINER_NAME, COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME]
+if "email" in BETA_FEATURES:
+    _base_containers.append(EMAIL_PROXY_CONTAINER_NAME)
+MANAGED_CONTAINERS = _base_containers

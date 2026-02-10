@@ -5,7 +5,7 @@ from slowapi import _rate_limit_exceeded_handler
 
 from control_plane.lifespan import lifespan
 from control_plane.rate_limit import limiter
-from control_plane.config import CORS_ORIGINS
+from control_plane.config import CORS_ORIGINS, BETA_FEATURES
 from control_plane.database import Base, engine
 from control_plane.models import (  # noqa: F401 - ensure models are registered
     Tenant, TenantIpAcl, AuditTrail, DomainPolicy, EmailPolicy,
@@ -43,7 +43,8 @@ if CORS_ORIGINS:
 app.include_router(health.router)
 app.include_router(logs.router)
 app.include_router(domain_policies.router)
-app.include_router(email_policies.router)
+if "email" in BETA_FEATURES:
+    app.include_router(email_policies.router)
 app.include_router(agents.router)
 app.include_router(terminal.router)
 app.include_router(tenants.router)

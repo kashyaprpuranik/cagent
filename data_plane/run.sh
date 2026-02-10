@@ -6,14 +6,15 @@
 # Usage:
 #   ./run.sh                              # Dev mode (runc)
 #   ./run.sh --gvisor                     # Production mode (gVisor)
-#   ./run.sh --admin                      # Dev + local admin UI + email proxy
+#   ./run.sh --admin                      # Dev + local admin UI
 #   ./run.sh --gvisor --admin --ssh       # Production + admin + SSH
 #   ./run.sh down                         # Stop all services
 #
 # Profiles (from docker-compose.yml):
 #   dev        Agent with runc runtime (default)
 #   standard   Agent with gVisor/runsc runtime
-#   admin      Local admin UI + agent-manager + email proxy
+#   admin      Local admin UI + agent-manager
+#   email      Email proxy (beta, use --beta flag)
 #   managed    Agent-manager only (no UI)
 #   auditing   Vector log forwarding
 #   ssh        FRP tunnel for SSH access
@@ -61,6 +62,11 @@ while [[ $# -gt 0 ]]; do
             PROFILES="$PROFILES --profile auditing"
             shift
             ;;
+        --beta)
+            export BETA_FEATURES="email"
+            PROFILES="$PROFILES --profile email"
+            shift
+            ;;
         up|down|restart|logs|ps|build)
             ACTION="$1"
             shift
@@ -71,10 +77,11 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --gvisor     Use gVisor runtime (default: runc)"
-            echo "  --admin      Enable local admin UI + agent-manager + email proxy"
+            echo "  --admin      Enable local admin UI + agent-manager"
             echo "  --managed    Enable agent-manager only (no UI)"
             echo "  --ssh        Enable SSH access via FRP tunnel"
             echo "  --auditing   Enable log forwarding via Vector"
+            echo "  --beta       Enable beta features (email proxy)"
             echo ""
             echo "Actions:"
             echo "  up           Start services (default, detached)"

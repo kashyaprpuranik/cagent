@@ -42,3 +42,8 @@ REDIS_URL = os.environ.get('REDIS_URL', '')
 CORS_ORIGINS = [
     o.strip() for o in os.environ.get('CORS_ORIGINS', '').split(',') if o.strip()
 ]
+
+# Beta features: comma-separated list of enabled beta features (e.g. "email")
+BETA_FEATURES = set(
+    f.strip() for f in os.environ.get('BETA_FEATURES', '').split(',') if f.strip()
+)

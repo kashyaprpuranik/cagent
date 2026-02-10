@@ -11,6 +11,7 @@ import { Tenants } from './pages/Tenants';
 import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Terminal } from './pages/Terminal';
+import { useQuery } from '@tanstack/react-query';
 import { api } from './api/client';
 import { useAuth } from './contexts/AuthContext';
 
@@ -34,6 +35,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const { data: info } = useQuery({ queryKey: ['info'], queryFn: () => api.getInfo() });
+  const features = new Set(info?.features || []);
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -47,7 +51,9 @@ function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="domain-policies" element={<DomainPolicies />} />
-        <Route path="email-policies" element={<EmailPolicies />} />
+        {features.has('email_policies') && (
+          <Route path="email-policies" element={<EmailPolicies />} />
+        )}
         <Route path="ip-acls" element={<IpAcls />} />
         <Route path="audit-trail" element={<AuditTrail />} />
         <Route path="agent-logs" element={<AgentLogs />} />

@@ -9,6 +9,7 @@ from control_plane.database import get_db
 from control_plane.models import Tenant
 from control_plane.auth import TokenInfo, verify_token
 from control_plane.rate_limit import limiter
+from control_plane.config import BETA_FEATURES
 
 router = APIRouter()
 
@@ -33,16 +34,19 @@ async def health_check():
 
 @router.get("/api/v1/info")
 async def get_info():
+    features = [
+        "audit_trail",
+        "allowlist_management",
+        "secret_management",
+        "container_monitoring",
+        "usage_reporting",
+    ]
+    if "email" in BETA_FEATURES:
+        features.append("email_policies")
     return {
         "name": "AI Devbox Control Plane",
         "version": "1.0.0",
-        "features": [
-            "audit_trail",
-            "allowlist_management",
-            "secret_management",
-            "container_monitoring",
-            "usage_reporting"
-        ]
+        "features": features,
     }
 
 

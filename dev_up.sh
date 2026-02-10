@@ -12,7 +12,7 @@
 #   ./dev_up.sh --dp-only --admin   # Data plane with local admin UI
 #   ./dev_up.sh down                # Stop everything
 #
-# DP flags (passed through): --admin, --gvisor, --ssh
+# DP flags (passed through): --admin, --gvisor, --ssh, --beta
 #
 # NOT for production use.
 # =============================================================================
@@ -59,6 +59,11 @@ while [[ $# -gt 0 ]]; do
             DP_PROFILES="$DP_PROFILES --profile ssh"
             shift
             ;;
+        --beta)
+            export BETA_FEATURES="email"
+            DP_PROFILES="$DP_PROFILES --profile email"
+            shift
+            ;;
         down)
             ACTION="down"
             shift
@@ -75,6 +80,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --admin         Include local admin UI"
             echo "  --gvisor        Use gVisor runtime (default: runc)"
             echo "  --ssh           Include SSH tunnel via FRP"
+            echo "  --beta          Enable beta features (email proxy)"
             echo ""
             echo "Actions:"
             echo "  down            Stop all services (CP + DP)"
@@ -120,7 +126,7 @@ stop_cp() {
 stop_dp() {
     echo "Stopping Data Plane..."
     cd "$DP_DIR"
-    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile ssh down --remove-orphans 2>/dev/null || true
+    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile ssh --profile email down --remove-orphans 2>/dev/null || true
     cd "$ROOT_DIR"
 }
 

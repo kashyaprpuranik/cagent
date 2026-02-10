@@ -13,9 +13,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
 } from 'lucide-react';
-import { getContainerLogs, createLogStream } from '../api/client';
-
-const CONTAINERS = ['http-proxy', 'dns-filter', 'agent', 'email-proxy'];
+import { getContainerLogs, getInfo, createLogStream } from '../api/client';
 
 interface EnvoyLogEntry {
   timestamp: string;
@@ -165,6 +163,12 @@ function StatCard({
 }
 
 export default function LogsPage() {
+  const { data: infoData } = useQuery({ queryKey: ['info'], queryFn: getInfo });
+  const emailEnabled = infoData?.features?.includes('email');
+  const containers = useMemo(
+    () => ['http-proxy', 'dns-filter', 'agent', ...(emailEnabled ? ['email-proxy'] : [])],
+    [emailEnabled]
+  );
   const [selectedContainer, setSelectedContainer] = useState('http-proxy');
   const [logs, setLogs] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -303,7 +307,7 @@ export default function LogsPage() {
             onChange={(e) => handleContainerChange(e.target.value)}
             className="bg-gray-800 border border-gray-700 text-white px-3 py-2 rounded-lg focus:outline-none focus:border-blue-500"
           >
-            {CONTAINERS.map((c) => (
+            {containers.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
