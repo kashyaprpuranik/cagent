@@ -7,7 +7,7 @@ import {
   X,
   Users,
 } from 'lucide-react';
-import { Card, Badge, Button, Modal } from '../components/common';
+import { Card, Badge, Button, Modal } from '@cagent/shared-ui';
 import {
   useTenants,
   useCreateTenant,

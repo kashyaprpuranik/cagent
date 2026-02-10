@@ -87,12 +87,52 @@ class DomainPolicy(Base):
     credential_value_encrypted = Column(Text)  # Fernet-encrypted secret
     credential_rotated_at = Column(DateTime)
 
+    # Envoy config options
+    timeout = Column(String(20))  # e.g., "30s", "120s", "5m"
+    read_only = Column(Boolean, default=False)  # Block POST/PUT/DELETE
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
         # Unique constraint: one policy per domain per agent per tenant
         UniqueConstraint('domain', 'agent_id', 'tenant_id', name='uq_domain_policy_tenant'),
+    )
+
+
+class EmailPolicy(Base):
+    """Email account policy: provider, allowlists, rate limits, encrypted credentials."""
+    __tablename__ = "email_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)  # Unique per tenant, e.g. "work-gmail"
+    provider = Column(String(20), nullable=False)  # gmail, outlook, generic
+    email = Column(String(200), nullable=False)  # e.g. agent@company.com
+    enabled = Column(Boolean, default=True, index=True)
+    agent_id = Column(String(100), nullable=True, index=True)  # NULL = tenant-global
+
+    # Server overrides (NULL = use provider defaults)
+    imap_server = Column(String(200))
+    imap_port = Column(Integer)
+    smtp_server = Column(String(200))
+    smtp_port = Column(Integer)
+
+    # Policy
+    allowed_recipients = Column(JSON, default=list)  # ["*@company.com", "user@ext.com"]
+    allowed_senders = Column(JSON, default=list)  # ["*"] = any
+    sends_per_hour = Column(Integer)
+    reads_per_hour = Column(Integer)
+
+    # Encrypted credentials (OAuth2 or password)
+    credential_type = Column(String(20))  # oauth2, password
+    credential_data_encrypted = Column(Text)  # Fernet-encrypted JSON blob
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('name', 'tenant_id', name='uq_email_policy_name_tenant'),
     )
 
 

@@ -1,8 +1,10 @@
 """
 End-to-end tests for Control Plane + Data Plane integration.
 
-These tests require both stacks to be running via ./run.sh.
-Run with: pytest test_cp_dp_e2e.py -v
+These tests require the CP running in test mode and the DP in connected mode.
+Run with:
+    ./run_tests.sh              # setup, test, teardown
+    ./run_tests.sh --no-teardown  # keep containers for debugging
 """
 
 import json
@@ -146,18 +148,19 @@ class TestCommandExecution:
         assert r.status_code == 200
         assert r.json()["status"] == "queued"
 
-        # Wait for 2 heartbeat cycles (HEARTBEAT_INTERVAL=5 in run.sh)
-        time.sleep(12)
-
-        # Check that command was executed and result reported
-        r = requests.get(
-            f"{CP_BASE}/api/v1/agents/{AGENT_ID}/status",
-            headers=admin_headers,
-        )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["last_command"] == "restart", f"Expected last_command=restart, got {data}"
-        assert data["last_command_result"] == "success", f"Restart failed: {data}"
+        # Poll until command result is reported (up to 30s)
+        for _ in range(15):
+            time.sleep(2)
+            r = requests.get(
+                f"{CP_BASE}/api/v1/agents/{AGENT_ID}/status",
+                headers=admin_headers,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("last_command") == "restart":
+                    assert data["last_command_result"] == "success", f"Restart failed: {data}"
+                    return
+        pytest.fail("Restart command not completed within 30s")
 
 
 # ---------------------------------------------------------------------------

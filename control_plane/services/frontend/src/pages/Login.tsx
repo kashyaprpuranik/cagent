@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { KeyRound } from 'lucide-react';
-import { Button, Input } from '../components/common';
+import { Button, Input } from '@cagent/shared-ui';
 import { api } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 

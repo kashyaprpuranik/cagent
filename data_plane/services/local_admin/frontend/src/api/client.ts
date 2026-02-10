@@ -59,11 +59,38 @@ export interface DomainEntry {
   credential?: { header: string; format: string; env: string };
 }
 
+export interface EmailCredential {
+  client_id_env?: string;
+  client_secret_env?: string;
+  refresh_token_env?: string;
+  password_env?: string;
+}
+
+export interface EmailPolicy {
+  allowed_recipients?: string[];
+  allowed_senders?: string[];
+  sends_per_hour?: number;
+  reads_per_hour?: number;
+}
+
+export interface EmailAccount {
+  name: string;
+  provider: 'gmail' | 'outlook' | 'generic';
+  email: string;
+  imap_server?: string;
+  imap_port?: number;
+  smtp_server?: string;
+  smtp_port?: number;
+  credential?: EmailCredential;
+  policy?: EmailPolicy;
+}
+
 export interface Config {
   mode?: string;
   dns?: { upstream: string[]; cache_ttl: number };
   rate_limits?: { default: { requests_per_minute: number; burst_size: number } };
   domains?: DomainEntry[];
+  email?: { accounts?: EmailAccount[] };
   internal_services?: string[];
 }
 
@@ -72,6 +99,7 @@ export interface ConfigResponse {
   raw: string;
   path: string;
   modified: string;
+  read_only: boolean;
 }
 
 export const getConfig = () => request<ConfigResponse>('/config');
@@ -128,7 +156,7 @@ export const createLogStream = (name: string): WebSocket => {
 export interface SshTunnelStatus {
   enabled: boolean;
   connected: boolean;
-  agent_id?: string;
+  stcp_proxy_name?: string;
   frp_server?: string;
   frp_server_port?: string;
   container_status?: string;
@@ -140,12 +168,12 @@ export interface SshTunnelConfig {
   frp_server_addr: string;
   frp_server_port: number;
   frp_auth_token: string;
-  agent_id: string;
+  stcp_proxy_name?: string;
   stcp_secret_key?: string;
 }
 
 export interface SshConnectInfo {
-  agent_id: string;
+  stcp_proxy_name: string;
   frp_server: string;
   frp_port: string;
   stcp_secret_key: string;
@@ -159,7 +187,7 @@ export const generateStcpKey = () =>
   request<{ stcp_secret_key: string }>('/ssh-tunnel/generate-key', { method: 'POST' });
 
 export const configureSshTunnel = (config: SshTunnelConfig) =>
-  request<{ status: string; agent_id: string; stcp_secret_key: string; message: string }>(
+  request<{ status: string; stcp_proxy_name: string; stcp_secret_key: string; message: string }>(
     '/ssh-tunnel/configure',
     {
       method: 'POST',

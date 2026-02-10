@@ -19,6 +19,9 @@ import type {
   CreateDomainPolicyRequest,
   UpdateDomainPolicyRequest,
   DomainPolicyCredential,
+  EmailPolicy,
+  CreateEmailPolicyRequest,
+  UpdateEmailPolicyRequest,
 } from '../types/api';
 
 const API_BASE = './api/v1';
@@ -303,7 +306,7 @@ export const api = {
     return handleResponse<void>(response);
   },
 
-  // Domain Policies
+  // Egress Policies (API route: /domain-policies)
   getDomainPolicies: async (params?: { agentId?: string; tenantId?: number }): Promise<DomainPolicy[]> => {
     const searchParams = new URLSearchParams();
     if (params?.agentId) {
@@ -343,6 +346,46 @@ export const api = {
 
   deleteDomainPolicy: async (id: number): Promise<void> => {
     const response = await fetch(`${API_BASE}/domain-policies/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    return handleResponse<void>(response);
+  },
+
+  // Email Policies
+  getEmailPolicies: async (params?: { agentId?: string; tenantId?: number }): Promise<EmailPolicy[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.agentId) searchParams.append('agent_id', params.agentId);
+    if (params?.tenantId !== undefined) searchParams.append('tenant_id', String(params.tenantId));
+    const queryString = searchParams.toString();
+    const url = queryString ? `${API_BASE}/email-policies?${queryString}` : `${API_BASE}/email-policies`;
+    const response = await fetch(url, { headers: getAuthHeaders() });
+    return handleResponse<EmailPolicy[]>(response);
+  },
+
+  createEmailPolicy: async (data: CreateEmailPolicyRequest, tenantId?: number): Promise<EmailPolicy> => {
+    const url = tenantId !== undefined
+      ? `${API_BASE}/email-policies?tenant_id=${tenantId}`
+      : `${API_BASE}/email-policies`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<EmailPolicy>(response);
+  },
+
+  updateEmailPolicy: async (id: number, data: UpdateEmailPolicyRequest): Promise<EmailPolicy> => {
+    const response = await fetch(`${API_BASE}/email-policies/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<EmailPolicy>(response);
+  },
+
+  deleteEmailPolicy: async (id: number): Promise<void> => {
+    const response = await fetch(`${API_BASE}/email-policies/${id}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });

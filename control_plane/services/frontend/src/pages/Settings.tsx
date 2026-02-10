@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Eye, EyeOff, Save } from 'lucide-react';
-import { Card, Button, Input } from '../components/common';
+import { Card, Button, Input } from '@cagent/shared-ui';
 import { useHealth } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../api/client';

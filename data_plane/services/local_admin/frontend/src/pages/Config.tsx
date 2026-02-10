@@ -11,15 +11,17 @@ import {
   Globe,
   Settings,
   Code,
-  X,
   Shield,
   Clock,
   Gauge,
   Key,
+  Mail,
+  Lock,
 } from 'lucide-react';
-import { getConfig, updateConfigRaw, reloadConfig, Config, DomainEntry } from '../api/client';
+import { Modal, Input, Select, Button, Badge } from '@cagent/shared-ui';
+import { getConfig, updateConfigRaw, reloadConfig, Config, DomainEntry, EmailAccount } from '../api/client';
 
-type Tab = 'domains' | 'settings' | 'raw';
+type Tab = 'domains' | 'email' | 'settings' | 'raw';
 
 interface ValidationError {
   field: string;
@@ -152,259 +154,449 @@ function DomainModal({
   const getError = (field: string) => errors.find((e) => e.field === field)?.message;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 border border-gray-700 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <h2 className="text-lg font-semibold text-white">
-            {domain ? 'Edit Domain' : 'Add Domain'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+    <Modal isOpen={true} onClose={onClose} title={domain ? 'Edit Egress Policy' : 'Add Egress Policy'} size="lg">
+      <div className="space-y-4">
+        {/* Domain */}
+        <Input
+          label="Domain *"
+          value={form.domain}
+          onChange={(e) => setForm({ ...form, domain: e.target.value })}
+          placeholder="api.example.com or *.example.com"
+          error={getError('domain')}
+        />
 
-        <div className="p-4 space-y-4">
-          {/* Domain */}
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">
-              Domain <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              value={form.domain}
-              onChange={(e) => setForm({ ...form, domain: e.target.value })}
-              placeholder="api.example.com or *.example.com"
-              className={`w-full bg-gray-900 border rounded px-3 py-2 text-white focus:outline-none ${
-                getError('domain') ? 'border-red-500' : 'border-gray-600 focus:border-blue-500'
-              }`}
-            />
-            {getError('domain') && (
-              <p className="text-red-400 text-xs mt-1">{getError('domain')}</p>
-            )}
-          </div>
-
-          {/* Alias */}
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">
-              Alias <span className="text-gray-500">(optional)</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={form.alias || ''}
-                onChange={(e) => setForm({ ...form, alias: e.target.value || undefined })}
-                placeholder="shortname"
-                className={`flex-1 bg-gray-900 border rounded px-3 py-2 text-white focus:outline-none ${
-                  getError('alias') ? 'border-red-500' : 'border-gray-600 focus:border-blue-500'
-                }`}
-              />
-              <span className="text-gray-500 text-sm">.devbox.local</span>
-            </div>
-            {getError('alias') && (
-              <p className="text-red-400 text-xs mt-1">{getError('alias')}</p>
-            )}
-          </div>
-
-          {/* Timeout */}
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">
-              Timeout <span className="text-gray-500">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={form.timeout || ''}
-              onChange={(e) => setForm({ ...form, timeout: e.target.value || undefined })}
-              placeholder="30s"
-              className={`w-full bg-gray-900 border rounded px-3 py-2 text-white focus:outline-none ${
-                getError('timeout') ? 'border-red-500' : 'border-gray-600 focus:border-blue-500'
-              }`}
-            />
-            {getError('timeout') && (
-              <p className="text-red-400 text-xs mt-1">{getError('timeout')}</p>
-            )}
-          </div>
-
-          {/* Read Only */}
+        {/* Alias */}
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-surface-300">
+            Alias <span className="text-surface-500">(optional)</span>
+          </label>
           <div className="flex items-center gap-2">
             <input
-              type="checkbox"
-              id="read_only"
-              checked={form.read_only || false}
-              onChange={(e) => setForm({ ...form, read_only: e.target.checked || undefined })}
-              className="w-4 h-4 rounded bg-gray-900 border-gray-600"
+              type="text"
+              value={form.alias || ''}
+              onChange={(e) => setForm({ ...form, alias: e.target.value || undefined })}
+              placeholder="shortname"
+              className={`flex-1 px-3 py-2 bg-surface-900 border rounded-lg text-surface-100 focus:outline-none ${
+                getError('alias') ? 'border-red-500' : 'border-surface-600 focus:border-blue-500'
+              }`}
             />
-            <label htmlFor="read_only" className="text-sm text-gray-300">
-              Read-only (block POST/PUT/DELETE)
-            </label>
+            <span className="text-surface-500 text-sm">.devbox.local</span>
           </div>
-
-          {/* Rate Limit Toggle */}
-          <div className="border-t border-gray-700 pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm text-gray-300 flex items-center gap-2">
-                <Gauge className="w-4 h-4" />
-                Rate Limit
-              </label>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowRateLimit(!showRateLimit);
-                  if (!showRateLimit) {
-                    setForm({
-                      ...form,
-                      rate_limit: { requests_per_minute: 60, burst_size: 10 },
-                    });
-                  } else {
-                    setForm({ ...form, rate_limit: undefined });
-                  }
-                }}
-                className={`px-2 py-1 text-xs rounded ${
-                  showRateLimit ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'
-                }`}
-              >
-                {showRateLimit ? 'Enabled' : 'Disabled'}
-              </button>
-            </div>
-
-            {showRateLimit && (
-              <div className="grid grid-cols-2 gap-3 mt-2">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Requests/min</label>
-                  <input
-                    type="number"
-                    value={form.rate_limit?.requests_per_minute || ''}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        rate_limit: {
-                          ...form.rate_limit,
-                          requests_per_minute: parseInt(e.target.value) || 0,
-                          burst_size: form.rate_limit?.burst_size || 10,
-                        },
-                      })
-                    }
-                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Burst size</label>
-                  <input
-                    type="number"
-                    value={form.rate_limit?.burst_size || ''}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        rate_limit: {
-                          ...form.rate_limit,
-                          requests_per_minute: form.rate_limit?.requests_per_minute || 60,
-                          burst_size: parseInt(e.target.value) || 0,
-                        },
-                      })
-                    }
-                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Credential Toggle */}
-          <div className="border-t border-gray-700 pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm text-gray-300 flex items-center gap-2">
-                <Key className="w-4 h-4" />
-                Credential Injection
-              </label>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowCredential(!showCredential);
-                  if (!showCredential) {
-                    setForm({
-                      ...form,
-                      credential: { header: 'Authorization', format: 'Bearer {value}', env: '' },
-                    });
-                  } else {
-                    setForm({ ...form, credential: undefined });
-                  }
-                }}
-                className={`px-2 py-1 text-xs rounded ${
-                  showCredential ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'
-                }`}
-              >
-                {showCredential ? 'Enabled' : 'Disabled'}
-              </button>
-            </div>
-
-            {showCredential && (
-              <div className="space-y-3 mt-2">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Header Name</label>
-                  <input
-                    type="text"
-                    value={form.credential?.header || ''}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        credential: { ...form.credential!, header: e.target.value },
-                      })
-                    }
-                    placeholder="Authorization"
-                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Format</label>
-                  <input
-                    type="text"
-                    value={form.credential?.format || ''}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        credential: { ...form.credential!, format: e.target.value },
-                      })
-                    }
-                    placeholder="Bearer {value}"
-                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Use {'{value}'} as placeholder</p>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Environment Variable</label>
-                  <input
-                    type="text"
-                    value={form.credential?.env || ''}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        credential: { ...form.credential!, env: e.target.value },
-                      })
-                    }
-                    placeholder="API_KEY"
-                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
+          {getError('alias') && (
+            <p className="text-sm text-red-500">{getError('alias')}</p>
+          )}
         </div>
 
-        <div className="flex justify-end gap-2 p-4 border-t border-gray-700">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-          >
-            {domain ? 'Update' : 'Add'} Domain
-          </button>
+        {/* Timeout */}
+        <Input
+          label="Timeout (optional)"
+          value={form.timeout || ''}
+          onChange={(e) => setForm({ ...form, timeout: e.target.value || undefined })}
+          placeholder="30s"
+          error={getError('timeout')}
+        />
+
+        {/* Read Only */}
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="read_only"
+            checked={form.read_only || false}
+            onChange={(e) => setForm({ ...form, read_only: e.target.checked || undefined })}
+            className="w-4 h-4 rounded bg-surface-900 border-surface-600"
+          />
+          <label htmlFor="read_only" className="text-sm text-surface-300">
+            Read-only (block POST/PUT/DELETE)
+          </label>
+        </div>
+
+        {/* Rate Limit Toggle */}
+        <div className="border-t border-surface-700 pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm text-surface-300 flex items-center gap-2">
+              <Gauge className="w-4 h-4" />
+              Rate Limit
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setShowRateLimit(!showRateLimit);
+                if (!showRateLimit) {
+                  setForm({
+                    ...form,
+                    rate_limit: { requests_per_minute: 60, burst_size: 10 },
+                  });
+                } else {
+                  setForm({ ...form, rate_limit: undefined });
+                }
+              }}
+              className={`px-2 py-1 text-xs rounded ${
+                showRateLimit ? 'bg-blue-600 text-white' : 'bg-surface-700 text-surface-400'
+              }`}
+            >
+              {showRateLimit ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+
+          {showRateLimit && (
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <Input
+                label="Requests/min"
+                type="number"
+                value={form.rate_limit?.requests_per_minute || ''}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    rate_limit: {
+                      ...form.rate_limit,
+                      requests_per_minute: parseInt(e.target.value) || 0,
+                      burst_size: form.rate_limit?.burst_size || 10,
+                    },
+                  })
+                }
+                error={getError('rate_limit.requests_per_minute')}
+              />
+              <Input
+                label="Burst size"
+                type="number"
+                value={form.rate_limit?.burst_size || ''}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    rate_limit: {
+                      ...form.rate_limit,
+                      requests_per_minute: form.rate_limit?.requests_per_minute || 60,
+                      burst_size: parseInt(e.target.value) || 0,
+                    },
+                  })
+                }
+                error={getError('rate_limit.burst_size')}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Credential Toggle */}
+        <div className="border-t border-surface-700 pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm text-surface-300 flex items-center gap-2">
+              <Key className="w-4 h-4" />
+              Credential Injection
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setShowCredential(!showCredential);
+                if (!showCredential) {
+                  setForm({
+                    ...form,
+                    credential: { header: 'Authorization', format: 'Bearer {value}', env: '' },
+                  });
+                } else {
+                  setForm({ ...form, credential: undefined });
+                }
+              }}
+              className={`px-2 py-1 text-xs rounded ${
+                showCredential ? 'bg-blue-600 text-white' : 'bg-surface-700 text-surface-400'
+              }`}
+            >
+              {showCredential ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+
+          {showCredential && (
+            <div className="space-y-3 mt-2">
+              <Input
+                label="Header Name"
+                value={form.credential?.header || ''}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    credential: { ...form.credential!, header: e.target.value },
+                  })
+                }
+                placeholder="Authorization"
+                error={getError('credential.header')}
+              />
+              <div className="space-y-1">
+                <Input
+                  label="Format"
+                  value={form.credential?.format || ''}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      credential: { ...form.credential!, format: e.target.value },
+                    })
+                  }
+                  placeholder="Bearer {value}"
+                />
+                <p className="text-xs text-surface-500">Use {'{value}'} as placeholder</p>
+              </div>
+              <Input
+                label="Environment Variable"
+                value={form.credential?.env || ''}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    credential: { ...form.credential!, env: e.target.value },
+                  })
+                }
+                placeholder="API_KEY"
+                error={getError('credential.env')}
+              />
+            </div>
+          )}
         </div>
       </div>
-    </div>
+
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-surface-700">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave}>{domain ? 'Update' : 'Add'} Policy</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// Email Account Editor Modal
+function EmailAccountModal({
+  account,
+  onSave,
+  onClose,
+  existingNames,
+}: {
+  account: EmailAccount | null;
+  onSave: (account: EmailAccount) => void;
+  onClose: () => void;
+  existingNames: string[];
+}) {
+  const [form, setForm] = useState<EmailAccount>(
+    account || { name: '', provider: 'gmail', email: '' }
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = () => {
+    if (!form.name) { setError('Account name is required'); return; }
+    if (!form.email) { setError('Email address is required'); return; }
+    if (!account && existingNames.includes(form.name)) { setError('Account name already exists'); return; }
+
+    const cleaned: EmailAccount = {
+      name: form.name,
+      provider: form.provider,
+      email: form.email,
+    };
+
+    if (form.imap_server) cleaned.imap_server = form.imap_server;
+    if (form.imap_port) cleaned.imap_port = form.imap_port;
+    if (form.smtp_server) cleaned.smtp_server = form.smtp_server;
+    if (form.smtp_port) cleaned.smtp_port = form.smtp_port;
+
+    // Credential
+    if (form.provider === 'generic') {
+      if (form.credential?.password_env) {
+        cleaned.credential = { password_env: form.credential.password_env };
+      }
+    } else {
+      if (form.credential?.client_id_env || form.credential?.client_secret_env || form.credential?.refresh_token_env) {
+        cleaned.credential = {
+          client_id_env: form.credential?.client_id_env || undefined,
+          client_secret_env: form.credential?.client_secret_env || undefined,
+          refresh_token_env: form.credential?.refresh_token_env || undefined,
+        };
+      }
+    }
+
+    // Policy
+    const policy = form.policy;
+    if (policy?.allowed_recipients?.length || policy?.allowed_senders?.length || policy?.sends_per_hour || policy?.reads_per_hour) {
+      cleaned.policy = {};
+      if (policy?.allowed_recipients?.length) cleaned.policy.allowed_recipients = policy.allowed_recipients;
+      if (policy?.allowed_senders?.length) cleaned.policy.allowed_senders = policy.allowed_senders;
+      if (policy?.sends_per_hour) cleaned.policy.sends_per_hour = policy.sends_per_hour;
+      if (policy?.reads_per_hour) cleaned.policy.reads_per_hour = policy.reads_per_hour;
+    }
+
+    onSave(cleaned);
+  };
+
+  return (
+    <Modal isOpen={true} onClose={onClose} title={account ? 'Edit Email Account' : 'Add Email Account'} size="lg">
+      <div className="space-y-4">
+        {error && (
+          <div className="bg-red-900/50 border border-red-700 text-red-300 p-2 rounded text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Name */}
+        <Input
+          label="Account Name *"
+          value={form.name}
+          onChange={(e) => { setForm({ ...form, name: e.target.value }); setError(null); }}
+          placeholder="work-gmail"
+          disabled={!!account}
+        />
+
+        {/* Provider + Email */}
+        <div className="grid grid-cols-2 gap-3">
+          <Select
+            label="Provider"
+            value={form.provider}
+            onChange={(e) => setForm({ ...form, provider: e.target.value as EmailAccount['provider'] })}
+            options={[
+              { value: 'gmail', label: 'Gmail (OAuth2)' },
+              { value: 'outlook', label: 'Outlook/M365 (OAuth2)' },
+              { value: 'generic', label: 'Generic (Password)' },
+            ]}
+          />
+          <Input
+            label="Email *"
+            type="email"
+            value={form.email}
+            onChange={(e) => { setForm({ ...form, email: e.target.value }); setError(null); }}
+            placeholder="agent@company.com"
+          />
+        </div>
+
+        {/* Server overrides */}
+        <div className="border-t border-surface-700 pt-4">
+          <label className="text-sm text-surface-300 mb-2 block">Server Settings (optional overrides)</label>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="IMAP Server"
+              value={form.imap_server || ''}
+              onChange={(e) => setForm({ ...form, imap_server: e.target.value || undefined })}
+              placeholder={form.provider === 'gmail' ? 'imap.gmail.com' : form.provider === 'outlook' ? 'outlook.office365.com' : 'mail.example.com'}
+            />
+            <Input
+              label="IMAP Port"
+              type="number"
+              value={form.imap_port || ''}
+              onChange={(e) => setForm({ ...form, imap_port: parseInt(e.target.value) || undefined })}
+              placeholder="993"
+            />
+            <Input
+              label="SMTP Server"
+              value={form.smtp_server || ''}
+              onChange={(e) => setForm({ ...form, smtp_server: e.target.value || undefined })}
+              placeholder={form.provider === 'gmail' ? 'smtp.gmail.com' : form.provider === 'outlook' ? 'smtp.office365.com' : 'mail.example.com'}
+            />
+            <Input
+              label="SMTP Port"
+              type="number"
+              value={form.smtp_port || ''}
+              onChange={(e) => setForm({ ...form, smtp_port: parseInt(e.target.value) || undefined })}
+              placeholder="587"
+            />
+          </div>
+        </div>
+
+        {/* Credentials */}
+        <div className="border-t border-surface-700 pt-4">
+          <label className="text-sm text-surface-300 flex items-center gap-2 mb-2">
+            <Key className="w-4 h-4" />
+            Credentials (environment variable names)
+          </label>
+          {form.provider === 'generic' ? (
+            <Input
+              label="Password Env Var"
+              value={form.credential?.password_env || ''}
+              onChange={(e) => setForm({ ...form, credential: { ...form.credential, password_env: e.target.value || undefined } })}
+              placeholder="MAIL_PASSWORD"
+            />
+          ) : (
+            <div className="space-y-3">
+              <Input
+                label="Client ID Env Var"
+                value={form.credential?.client_id_env || ''}
+                onChange={(e) => setForm({ ...form, credential: { ...form.credential, client_id_env: e.target.value || undefined } })}
+                placeholder={form.provider === 'gmail' ? 'GMAIL_CLIENT_ID' : 'OUTLOOK_CLIENT_ID'}
+              />
+              <Input
+                label="Client Secret Env Var"
+                value={form.credential?.client_secret_env || ''}
+                onChange={(e) => setForm({ ...form, credential: { ...form.credential, client_secret_env: e.target.value || undefined } })}
+                placeholder={form.provider === 'gmail' ? 'GMAIL_CLIENT_SECRET' : 'OUTLOOK_CLIENT_SECRET'}
+              />
+              <Input
+                label="Refresh Token Env Var"
+                value={form.credential?.refresh_token_env || ''}
+                onChange={(e) => setForm({ ...form, credential: { ...form.credential, refresh_token_env: e.target.value || undefined } })}
+                placeholder={form.provider === 'gmail' ? 'GMAIL_REFRESH_TOKEN' : 'OUTLOOK_REFRESH_TOKEN'}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Policy */}
+        <div className="border-t border-surface-700 pt-4">
+          <label className="text-sm text-surface-300 flex items-center gap-2 mb-2">
+            <Shield className="w-4 h-4" />
+            Policy
+          </label>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-surface-500 mb-1">Allowed Recipients (one per line, supports *@domain.com)</label>
+              <textarea
+                value={form.policy?.allowed_recipients?.join('\n') || ''}
+                onChange={(e) => setForm({
+                  ...form,
+                  policy: {
+                    ...form.policy,
+                    allowed_recipients: e.target.value ? e.target.value.split('\n').map(s => s.trim()).filter(Boolean) : undefined,
+                  },
+                })}
+                rows={3}
+                placeholder="*@company.com&#10;partner@external.com"
+                className="w-full bg-surface-900 border border-surface-600 rounded-lg px-3 py-2 text-surface-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-surface-500 mb-1">Allowed Senders (filter inbox, one per line)</label>
+              <textarea
+                value={form.policy?.allowed_senders?.join('\n') || ''}
+                onChange={(e) => setForm({
+                  ...form,
+                  policy: {
+                    ...form.policy,
+                    allowed_senders: e.target.value ? e.target.value.split('\n').map(s => s.trim()).filter(Boolean) : undefined,
+                  },
+                })}
+                rows={2}
+                placeholder="*"
+                className="w-full bg-surface-900 border border-surface-600 rounded-lg px-3 py-2 text-surface-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Sends per Hour"
+                type="number"
+                value={form.policy?.sends_per_hour || ''}
+                onChange={(e) => setForm({
+                  ...form,
+                  policy: { ...form.policy, sends_per_hour: parseInt(e.target.value) || undefined },
+                })}
+                placeholder="50"
+              />
+              <Input
+                label="Reads per Hour"
+                type="number"
+                value={form.policy?.reads_per_hour || ''}
+                onChange={(e) => setForm({
+                  ...form,
+                  policy: { ...form.policy, reads_per_hour: parseInt(e.target.value) || undefined },
+                })}
+                placeholder="200"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-surface-700">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave}>{account ? 'Update' : 'Add'} Account</Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -412,9 +604,11 @@ function DomainModal({
 function SettingsEditor({
   config,
   onChange,
+  isReadOnly,
 }: {
   config: Config;
   onChange: (config: Config) => void;
+  isReadOnly: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -442,7 +636,8 @@ function SettingsEditor({
                 })
               }
               placeholder="8.8.8.8, 8.8.4.4"
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white disabled:opacity-50"
+              disabled={isReadOnly}
             />
             <p className="text-xs text-gray-500 mt-1">Comma-separated list of DNS servers</p>
           </div>
@@ -462,7 +657,8 @@ function SettingsEditor({
                   },
                 })
               }
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white disabled:opacity-50"
+              disabled={isReadOnly}
             />
           </div>
         </div>
@@ -492,7 +688,8 @@ function SettingsEditor({
                   },
                 })
               }
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white disabled:opacity-50"
+              disabled={isReadOnly}
             />
           </div>
           <div>
@@ -511,7 +708,8 @@ function SettingsEditor({
                   },
                 })
               }
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white disabled:opacity-50"
+              disabled={isReadOnly}
             />
           </div>
         </div>
@@ -520,22 +718,24 @@ function SettingsEditor({
         </p>
       </div>
 
-      {/* Mode */}
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Settings className="w-5 h-5 text-gray-400" />
-          Operation Mode
-        </h3>
+      {/* Mode - hidden in read-only/connected mode */}
+      {!isReadOnly && (
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <Settings className="w-5 h-5 text-gray-400" />
+            Operation Mode
+          </h3>
 
-        <select
-          value={config.mode || 'standalone'}
-          onChange={(e) => onChange({ ...config, mode: e.target.value })}
-          className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
-        >
-          <option value="standalone">Standalone (local config only)</option>
-          <option value="connected">Connected (sync from control plane)</option>
-        </select>
-      </div>
+          <select
+            value={config.mode || 'standalone'}
+            onChange={(e) => onChange({ ...config, mode: e.target.value })}
+            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
+          >
+            <option value="standalone">Standalone (local config only)</option>
+            <option value="connected">Connected (sync from control plane)</option>
+          </select>
+        </div>
+      )}
     </div>
   );
 }
@@ -546,9 +746,12 @@ export default function ConfigPage() {
   const [rawContent, setRawContent] = useState('');
   const [config, setConfig] = useState<Config>({});
   const [hasChanges, setHasChanges] = useState(false);
+  const [isReadOnly, setIsReadOnly] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [editingDomain, setEditingDomain] = useState<DomainEntry | null>(null);
   const [showDomainModal, setShowDomainModal] = useState(false);
+  const [editingEmail, setEditingEmail] = useState<EmailAccount | null>(null);
+  const [showEmailModal, setShowEmailModal] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['config'],
@@ -559,6 +762,7 @@ export default function ConfigPage() {
     if (data) {
       setRawContent(data.raw);
       setConfig(data.config);
+      setIsReadOnly(data.read_only);
       setHasChanges(false);
     }
   }, [data]);
@@ -630,6 +834,41 @@ export default function ConfigPage() {
       }
     }
 
+    if (cfg.email?.accounts?.length) {
+      lines.push('');
+      lines.push('email:');
+      lines.push('  accounts:');
+      for (const acct of cfg.email.accounts) {
+        lines.push(`    - name: ${acct.name}`);
+        lines.push(`      provider: ${acct.provider}`);
+        lines.push(`      email: ${acct.email}`);
+        if (acct.imap_server) lines.push(`      imap_server: ${acct.imap_server}`);
+        if (acct.imap_port) lines.push(`      imap_port: ${acct.imap_port}`);
+        if (acct.smtp_server) lines.push(`      smtp_server: ${acct.smtp_server}`);
+        if (acct.smtp_port) lines.push(`      smtp_port: ${acct.smtp_port}`);
+        if (acct.credential) {
+          lines.push('      credential:');
+          if (acct.credential.client_id_env) lines.push(`        client_id_env: ${acct.credential.client_id_env}`);
+          if (acct.credential.client_secret_env) lines.push(`        client_secret_env: ${acct.credential.client_secret_env}`);
+          if (acct.credential.refresh_token_env) lines.push(`        refresh_token_env: ${acct.credential.refresh_token_env}`);
+          if (acct.credential.password_env) lines.push(`        password_env: ${acct.credential.password_env}`);
+        }
+        if (acct.policy) {
+          lines.push('      policy:');
+          if (acct.policy.allowed_recipients?.length) {
+            lines.push('        allowed_recipients:');
+            for (const r of acct.policy.allowed_recipients) lines.push(`          - "${r}"`);
+          }
+          if (acct.policy.allowed_senders?.length) {
+            lines.push('        allowed_senders:');
+            for (const s of acct.policy.allowed_senders) lines.push(`          - "${s}"`);
+          }
+          if (acct.policy.sends_per_hour) lines.push(`        sends_per_hour: ${acct.policy.sends_per_hour}`);
+          if (acct.policy.reads_per_hour) lines.push(`        reads_per_hour: ${acct.policy.reads_per_hour}`);
+        }
+      }
+    }
+
     if (cfg.internal_services?.length) {
       lines.push('');
       lines.push('internal_services:');
@@ -685,6 +924,33 @@ export default function ConfigPage() {
     setHasChanges(true);
   };
 
+  const handleAddEmail = (account: EmailAccount) => {
+    const accounts = config.email?.accounts || [];
+    if (editingEmail) {
+      setConfig({
+        ...config,
+        email: { accounts: accounts.map((a) => a.name === editingEmail.name ? account : a) },
+      });
+    } else {
+      setConfig({
+        ...config,
+        email: { accounts: [...accounts, account] },
+      });
+    }
+    setHasChanges(true);
+    setShowEmailModal(false);
+    setEditingEmail(null);
+  };
+
+  const handleDeleteEmail = (name: string) => {
+    if (!confirm(`Delete email account "${name}"?`)) return;
+    setConfig({
+      ...config,
+      email: { accounts: (config.email?.accounts || []).filter((a) => a.name !== name) },
+    });
+    setHasChanges(true);
+  };
+
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setRawContent(e.target.value);
     setHasChanges(e.target.value !== data?.raw);
@@ -704,8 +970,9 @@ export default function ConfigPage() {
   }
 
   const tabs = [
-    { id: 'domains' as Tab, label: 'Domains', icon: Globe, count: config.domains?.length },
-    { id: 'settings' as Tab, label: 'Settings', icon: Settings },
+    { id: 'domains' as Tab, label: 'Egress Policies', icon: Globe, count: config.domains?.length },
+    { id: 'email' as Tab, label: 'Email', icon: Mail, count: config.email?.accounts?.length, badge: 'Beta' },
+    ...(!isReadOnly ? [{ id: 'settings' as Tab, label: 'Settings', icon: Settings }] : []),
     { id: 'raw' as Tab, label: 'Raw YAML', icon: Code },
   ];
 
@@ -720,25 +987,35 @@ export default function ConfigPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => reloadMutation.mutate()}
-            disabled={reloadMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${reloadMutation.isPending ? 'animate-spin' : ''}`} />
-            Apply & Reload
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!hasChanges || saveMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
-          >
-            <Save className="w-4 h-4" />
-            Save
-          </button>
-        </div>
+        {!isReadOnly && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => reloadMutation.mutate()}
+              disabled={reloadMutation.isPending}
+              className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${reloadMutation.isPending ? 'animate-spin' : ''}`} />
+              Apply & Reload
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!hasChanges || saveMutation.isPending}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" />
+              Save
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Read-only banner */}
+      {isReadOnly && (
+        <div className="flex items-center gap-2 p-3 rounded-lg mb-4 bg-yellow-900/50 border border-yellow-700 text-yellow-300">
+          <Lock className="w-4 h-4" />
+          Configuration is managed by the control plane. Changes must be made in the control plane admin UI.
+        </div>
+      )}
 
       {saveMessage && (
         <div
@@ -759,7 +1036,7 @@ export default function ConfigPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b border-gray-700">
-        {tabs.map(({ id, label, icon: Icon, count }) => (
+        {tabs.map(({ id, label, icon: Icon, count, badge }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -771,6 +1048,9 @@ export default function ConfigPage() {
           >
             <Icon className="w-4 h-4" />
             {label}
+            {badge && (
+              <span className="text-[10px] font-medium bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">{badge}</span>
+            )}
             {count !== undefined && (
               <span className="text-xs bg-gray-700 px-1.5 py-0.5 rounded">{count}</span>
             )}
@@ -778,7 +1058,7 @@ export default function ConfigPage() {
         ))}
       </div>
 
-      {hasChanges && (
+      {!isReadOnly && hasChanges && (
         <div className="mb-4 text-sm text-yellow-400 flex items-center gap-2">
           <AlertCircle className="w-4 h-4" />
           You have unsaved changes
@@ -791,18 +1071,20 @@ export default function ConfigPage() {
           <div>
             <div className="flex justify-between items-center mb-4">
               <p className="text-gray-400 text-sm">
-                Allowed domains that the agent can access through the proxy
+                Egress policies controlling agent access through the proxy
               </p>
-              <button
-                onClick={() => {
-                  setEditingDomain(null);
-                  setShowDomainModal(true);
-                }}
-                className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"
-              >
-                <Plus className="w-4 h-4" />
-                Add Domain
-              </button>
+              {!isReadOnly && (
+                <button
+                  onClick={() => {
+                    setEditingDomain(null);
+                    setShowDomainModal(true);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Policy
+                </button>
+              )}
             </div>
 
             <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
@@ -812,7 +1094,7 @@ export default function ConfigPage() {
                     <th className="px-4 py-3">Domain</th>
                     <th className="px-4 py-3">Alias</th>
                     <th className="px-4 py-3">Options</th>
-                    <th className="px-4 py-3 w-24">Actions</th>
+                    {!isReadOnly && <th className="px-4 py-3 w-24">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -834,58 +1116,68 @@ export default function ConfigPage() {
                       <td className="px-4 py-3">
                         <div className="flex gap-2 flex-wrap">
                           {domain.read_only && (
-                            <span className="text-xs bg-yellow-900/50 text-yellow-400 px-2 py-0.5 rounded flex items-center gap-1">
-                              <Shield className="w-3 h-3" />
-                              Read-only
-                            </span>
+                            <Badge variant="warning">
+                              <span className="flex items-center gap-1">
+                                <Shield className="w-3 h-3" />
+                                Read-only
+                              </span>
+                            </Badge>
                           )}
                           {domain.timeout && (
-                            <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {domain.timeout}
-                            </span>
+                            <Badge>
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {domain.timeout}
+                              </span>
+                            </Badge>
                           )}
                           {domain.rate_limit && (
-                            <span className="text-xs bg-blue-900/50 text-blue-400 px-2 py-0.5 rounded flex items-center gap-1">
-                              <Gauge className="w-3 h-3" />
-                              {domain.rate_limit.requests_per_minute}/min
-                            </span>
+                            <Badge variant="info">
+                              <span className="flex items-center gap-1">
+                                <Gauge className="w-3 h-3" />
+                                {domain.rate_limit.requests_per_minute}/min
+                              </span>
+                            </Badge>
                           )}
                           {domain.credential && (
-                            <span className="text-xs bg-green-900/50 text-green-400 px-2 py-0.5 rounded flex items-center gap-1">
-                              <Key className="w-3 h-3" />
-                              {domain.credential.env}
-                            </span>
+                            <Badge variant="success">
+                              <span className="flex items-center gap-1">
+                                <Key className="w-3 h-3" />
+                                {domain.credential.env}
+                              </span>
+                            </Badge>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => {
-                              setEditingDomain(domain);
-                              setShowDomainModal(true);
-                            }}
-                            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDomain(domain.domain)}
-                            className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
+                      {!isReadOnly && (
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingDomain(domain);
+                                setShowDomainModal(true);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDomain(domain.domain)}
+                              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {(!config.domains || config.domains.length === 0) && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
-                        No domains configured. Click "Add Domain" to get started.
+                      <td colSpan={isReadOnly ? 3 : 4} className="px-4 py-8 text-center text-gray-500">
+                        No egress policies configured. {!isReadOnly && 'Click "Add Policy" to get started.'}
                       </td>
                     </tr>
                   )}
@@ -895,22 +1187,147 @@ export default function ConfigPage() {
           </div>
         )}
 
-        {activeTab === 'settings' && (
-          <SettingsEditor config={config} onChange={handleSettingsChange} />
+        {activeTab === 'email' && (
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <p className="text-gray-400 text-sm">
+                Email accounts the agent can use to send and read email (Beta)
+              </p>
+              {!isReadOnly && (
+                <button
+                  onClick={() => {
+                    setEditingEmail(null);
+                    setShowEmailModal(true);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Account
+                </button>
+              )}
+            </div>
+
+            <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-700 text-left text-sm text-gray-400">
+                    <th className="px-4 py-3">Account</th>
+                    <th className="px-4 py-3">Provider</th>
+                    <th className="px-4 py-3">Email</th>
+                    <th className="px-4 py-3">Recipients</th>
+                    <th className="px-4 py-3">Credential</th>
+                    <th className="px-4 py-3">Policy</th>
+                    {!isReadOnly && <th className="px-4 py-3 w-24">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(config.email?.accounts || []).map((account) => (
+                    <tr
+                      key={account.name}
+                      className="border-b border-gray-700/50 hover:bg-gray-700/30"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="text-white font-mono text-sm">{account.name}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs px-2 py-0.5 rounded ${
+                          account.provider === 'gmail' ? 'bg-red-900/50 text-red-400' :
+                          account.provider === 'outlook' ? 'bg-blue-900/50 text-blue-400' :
+                          'bg-gray-700 text-gray-300'
+                        }`}>
+                          {account.provider}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-gray-300 text-sm">{account.email}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {account.policy?.allowed_recipients?.length ? (
+                          <Badge variant="warning">
+                            {account.policy.allowed_recipients.length} recipients
+                          </Badge>
+                        ) : (
+                          <span className="text-gray-500 text-sm">Any</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {account.credential ? (
+                          <Badge variant="success">
+                            {account.credential.password_env ? 'Password' : 'OAuth2'}
+                          </Badge>
+                        ) : (
+                          <span className="text-gray-500 text-sm">None</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-2 flex-wrap">
+                          {account.policy?.sends_per_hour && (
+                            <Badge variant="info">
+                              {account.policy.sends_per_hour} sends/hr
+                            </Badge>
+                          )}
+                          {account.policy?.reads_per_hour && (
+                            <Badge variant="success">
+                              {account.policy.reads_per_hour} reads/hr
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      {!isReadOnly && (
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingEmail(account);
+                                setShowEmailModal(true);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteEmail(account.name)}
+                              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {(!config.email?.accounts || config.email.accounts.length === 0) && (
+                    <tr>
+                      <td colSpan={isReadOnly ? 6 : 7} className="px-4 py-8 text-center text-gray-500">
+                        No email accounts configured. {!isReadOnly && 'Click "Add Account" to get started.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && !isReadOnly && (
+          <SettingsEditor config={config} onChange={handleSettingsChange} isReadOnly={isReadOnly} />
         )}
 
         {activeTab === 'raw' && (
           <textarea
             value={rawContent}
             onChange={handleRawChange}
-            className="yaml-editor w-full h-full min-h-[500px] bg-gray-800 border border-gray-700 rounded-lg p-4 text-gray-100 font-mono text-sm focus:outline-none focus:border-blue-500 resize-none"
+            readOnly={isReadOnly}
+            className="yaml-editor w-full h-full min-h-[500px] bg-gray-800 border border-gray-700 rounded-lg p-4 text-gray-100 font-mono text-sm focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
             spellCheck={false}
           />
         )}
       </div>
 
       {/* Domain Modal */}
-      {showDomainModal && (
+      {showDomainModal && !isReadOnly && (
         <DomainModal
           domain={editingDomain}
           onSave={handleAddDomain}
@@ -919,6 +1336,19 @@ export default function ConfigPage() {
             setEditingDomain(null);
           }}
           existingDomains={(config.domains || []).map((d) => d.domain)}
+        />
+      )}
+
+      {/* Email Account Modal */}
+      {showEmailModal && !isReadOnly && (
+        <EmailAccountModal
+          account={editingEmail}
+          onSave={handleAddEmail}
+          onClose={() => {
+            setShowEmailModal(false);
+            setEditingEmail(null);
+          }}
+          existingNames={(config.email?.accounts || []).map((a) => a.name)}
         />
       )}
     </div>

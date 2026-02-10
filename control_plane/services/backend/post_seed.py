@@ -82,6 +82,23 @@ def create_policies(token, tenant_id, tenant_name, policies, created, skipped):
             print(f"WARNING: Failed to create {label}: {data}")
 
 
+def create_email_policies(token, tenant_id, tenant_name, policies, created, skipped):
+    """Create email policies for a tenant."""
+    for policy in policies:
+        status, data = api_call(
+            "POST", "/email-policies", token,
+            body=policy,
+            params={"tenant_id": str(tenant_id)},
+        )
+        label = f"[{tenant_name}] Email policy '{policy['name']}'"
+        if status == 200:
+            created.append(label)
+        elif status == 400 and "already exists" in data.get("detail", ""):
+            skipped.append(f"{label} (exists)")
+        else:
+            print(f"WARNING: Failed to create {label}: {data}")
+
+
 def create_ip_acls(token, tenant_id, tenant_name, acls, created, skipped):
     """Create IP ACLs for a tenant."""
     for acl in acls:
@@ -124,6 +141,7 @@ def post_seed():
             "domain": "api.openai.com",
             "alias": "openai",
             "description": "OpenAI API - ChatGPT, GPT-4, embeddings",
+            "timeout": "120s",
             "requests_per_minute": 60,
             "burst_size": 10,
             "allowed_paths": ["/v1/chat/*", "/v1/completions", "/v1/embeddings", "/v1/models"],
@@ -132,32 +150,58 @@ def post_seed():
             "domain": "api.anthropic.com",
             "alias": "anthropic",
             "description": "Anthropic API - Claude models",
+            "timeout": "120s",
             "requests_per_minute": 60,
             "burst_size": 10,
             "allowed_paths": ["/v1/messages", "/v1/complete"],
         },
         {
+            "domain": "github.com",
+            "description": "GitHub web",
+        },
+        {
             "domain": "api.github.com",
             "alias": "github",
             "description": "GitHub API - repos, issues, PRs",
+            "timeout": "30s",
             "requests_per_minute": 100,
             "burst_size": 20,
         },
         {
+            "domain": "raw.githubusercontent.com",
+            "description": "GitHub raw content",
+        },
+        {
+            "domain": "objects.githubusercontent.com",
+            "description": "GitHub objects",
+        },
+        {
+            "domain": "gist.githubusercontent.com",
+            "description": "GitHub gist content",
+        },
+        {
+            "domain": "codeload.github.com",
+            "description": "GitHub code downloads",
+        },
+        {
             "domain": "pypi.org",
             "description": "Python Package Index",
+            "read_only": True,
         },
         {
             "domain": "files.pythonhosted.org",
             "description": "Python package downloads",
+            "read_only": True,
         },
         {
             "domain": "registry.npmjs.org",
             "description": "NPM Registry",
+            "read_only": True,
         },
         {
-            "domain": "*.githubusercontent.com",
-            "description": "GitHub raw content",
+            "domain": "registry.yarnpkg.com",
+            "description": "Yarn Registry",
+            "read_only": True,
         },
     ]
 
@@ -171,6 +215,7 @@ def post_seed():
             "domain": "huggingface.co",
             "alias": "huggingface",
             "description": "HuggingFace - test-agent only",
+            "timeout": "300s",
             "requests_per_minute": 30,
             "burst_size": 5,
             "agent_id": "test-agent",
@@ -179,6 +224,12 @@ def post_seed():
                 "format": "Bearer {value}",
                 "value": "hf_dummy_token_for_testing",
             },
+        },
+        {
+            "domain": "cdn-lfs.huggingface.co",
+            "description": "HuggingFace LFS - large model downloads",
+            "timeout": "600s",
+            "agent_id": "test-agent",
         },
         {
             "domain": "*.aws.amazon.com",
@@ -213,7 +264,41 @@ def post_seed():
     create_policies(token, acme_tenant_id, "acme", acme_policies, created, skipped)
 
     # =========================================================================
-    # 4. IP ACLs — allow all IPs for development (both tenants)
+    # 4. Email policies — default tenant
+    # =========================================================================
+    default_email_policies = [
+        {
+            "name": "team-gmail",
+            "provider": "gmail",
+            "email": "agent@company.com",
+            "allowed_recipients": ["*@company.com"],
+            "allowed_senders": ["*"],
+            "sends_per_hour": 50,
+            "reads_per_hour": 200,
+        },
+    ]
+
+    create_email_policies(token, default_tenant_id, "default", default_email_policies, created, skipped)
+
+    # =========================================================================
+    # 5. Email policies — acme tenant
+    # =========================================================================
+    acme_email_policies = [
+        {
+            "name": "acme-corp",
+            "provider": "outlook",
+            "email": "agent@acme-corp.com",
+            "allowed_recipients": ["*@acme-corp.com"],
+            "allowed_senders": ["*"],
+            "sends_per_hour": 30,
+            "reads_per_hour": 100,
+        },
+    ]
+
+    create_email_policies(token, acme_tenant_id, "acme", acme_email_policies, created, skipped)
+
+    # =========================================================================
+    # 6. IP ACLs — allow all IPs for development (both tenants)
     # =========================================================================
     dev_acls = [
         {

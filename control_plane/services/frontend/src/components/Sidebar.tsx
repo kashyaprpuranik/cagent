@@ -8,7 +8,9 @@ import {
   Building2,
   LogOut,
   Network,
+  Container,
   Globe,
+  Mail,
   LucideIcon,
   ChevronDown,
 } from 'lucide-react';
@@ -20,6 +22,7 @@ interface NavItem {
   to: string;
   icon: LucideIcon;
   label: string;
+  badge?: string;
   superAdminOnly?: boolean;
   adminOnly?: boolean;
 }
@@ -41,7 +44,8 @@ const navSections: NavSection[] = [
   {
     title: 'Configuration',
     items: [
-      { to: '/domain-policies', icon: Globe, label: 'Domain Policies', adminOnly: true },
+      { to: '/domain-policies', icon: Globe, label: 'Egress Policies', adminOnly: true },
+      { to: '/email-policies', icon: Mail, label: 'Email Policies', badge: 'Beta', adminOnly: true },
       { to: '/ip-acls', icon: Network, label: 'IP ACLs', adminOnly: true },
     ],
   },
@@ -80,7 +84,10 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-dark-900 border-r border-dark-700 flex flex-col">
       <div className="p-4 border-b border-dark-700">
-        <h1 className="text-xl font-bold text-dark-100">Cagent</h1>
+        <NavLink to="/" className="text-xl font-bold text-dark-100 flex items-center gap-2 hover:text-white transition-colors">
+          <Container size={20} className="text-blue-400" />
+          Cagent
+        </NavLink>
         <p className="text-sm text-dark-500">
           {user?.is_super_admin ? 'Super Admin' : hasAdminRole ? 'Admin' : 'Developer'}
         </p>
@@ -128,7 +135,7 @@ export function Sidebar() {
                 {section.title}
               </h2>
               <div className="space-y-1">
-                {filteredItems.map(({ to, icon: Icon, label }) => (
+                {filteredItems.map(({ to, icon: Icon, label, badge }) => (
                   <NavLink
                     key={to}
                     to={to}
@@ -143,6 +150,11 @@ export function Sidebar() {
                   >
                     <Icon size={20} />
                     <span>{label}</span>
+                    {badge && (
+                      <span className="text-[10px] font-medium bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">
+                        {badge}
+                      </span>
+                    )}
                   </NavLink>
                 ))}
               </div>

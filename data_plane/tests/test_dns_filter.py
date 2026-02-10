@@ -85,14 +85,6 @@ class TestDNSFilterWithContainer:
         except:
             pass
 
-    def test_allowed_domain_resolves(self, coredns_container, skip_without_docker):
-        """Allowed domains should resolve."""
-        pytest.skip("Requires network setup - run manually with docker-compose")
-
-    def test_blocked_domain_fails(self, coredns_container, skip_without_docker):
-        """Blocked domains should return NXDOMAIN."""
-        pytest.skip("Requires network setup - run manually with docker-compose")
-
 
 class TestDNSAllowlist:
     """Test DNS allowlist file parsing."""

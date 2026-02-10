@@ -8,10 +8,10 @@ from control_plane.rate_limit import limiter
 from control_plane.config import CORS_ORIGINS
 from control_plane.database import Base, engine
 from control_plane.models import (  # noqa: F401 - ensure models are registered
-    Tenant, TenantIpAcl, AuditTrail, DomainPolicy,
+    Tenant, TenantIpAcl, AuditTrail, DomainPolicy, EmailPolicy,
     AgentState, TerminalSession, ApiToken, WebSocketTicket,
 )
-from control_plane.routes import health, logs, domain_policies, agents, terminal, tenants, ip_acls, tokens
+from control_plane.routes import health, logs, domain_policies, email_policies, agents, terminal, tenants, ip_acls, tokens
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -43,6 +43,7 @@ if CORS_ORIGINS:
 app.include_router(health.router)
 app.include_router(logs.router)
 app.include_router(domain_policies.router)
+app.include_router(email_policies.router)
 app.include_router(agents.router)
 app.include_router(terminal.router)
 app.include_router(tenants.router)

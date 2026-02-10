@@ -153,39 +153,48 @@ async def ingest_logs(
 
     # --- Forward to OpenObserve ---
 
-    if OPENOBSERVE_MULTI_TENANT and tenant:
-        auth = get_ingest_auth(tenant_settings)
-        url = get_ingest_url(tenant.slug)
+    try:
+        if OPENOBSERVE_MULTI_TENANT and tenant:
+            auth = get_ingest_auth(tenant_settings)
+            url = get_ingest_url(tenant.slug)
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                json=enriched_logs,
-                auth=auth,
-                timeout=LOG_INGEST_TIMEOUT,
-            )
-            if response.status_code not in (200, 201):
-                logger.error(f"OpenObserve ingestion failed for {tenant.slug}: {response.status_code} {response.text}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to store logs: {response.text}"
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    json=enriched_logs,
+                    auth=auth,
+                    timeout=LOG_INGEST_TIMEOUT,
                 )
-    else:
-        # Legacy single-org mode
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{OPENOBSERVE_URL}/api/default/default/_json",
-                json=enriched_logs,
-                auth=(OPENOBSERVE_USER, OPENOBSERVE_PASSWORD),
-                timeout=LOG_INGEST_TIMEOUT,
-            )
+                if response.status_code not in (200, 201):
+                    logger.error(f"OpenObserve ingestion failed for {tenant.slug}: {response.status_code} {response.text}")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Failed to store logs: {response.text}"
+                    )
+        else:
+            # Legacy single-org mode
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{OPENOBSERVE_URL}/api/default/default/_json",
+                    json=enriched_logs,
+                    auth=(OPENOBSERVE_USER, OPENOBSERVE_PASSWORD),
+                    timeout=LOG_INGEST_TIMEOUT,
+                )
 
-            if response.status_code not in (200, 201):
-                logger.error(f"OpenObserve ingestion failed: {response.status_code} {response.text}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to store logs: {response.text}"
-                )
+                if response.status_code not in (200, 201):
+                    logger.error(f"OpenObserve ingestion failed: {response.status_code} {response.text}")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Failed to store logs: {response.text}"
+                    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OpenObserve connection error: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Log store unreachable: {e}"
+        )
 
     return {"status": "ok", "count": len(enriched_logs)}
 

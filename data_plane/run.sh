@@ -6,14 +6,14 @@
 # Usage:
 #   ./run.sh                              # Dev mode (runc)
 #   ./run.sh --gvisor                     # Production mode (gVisor)
-#   ./run.sh --admin                      # Dev + local admin UI
+#   ./run.sh --admin                      # Dev + local admin UI + email proxy
 #   ./run.sh --gvisor --admin --ssh       # Production + admin + SSH
 #   ./run.sh down                         # Stop all services
 #
 # Profiles (from docker-compose.yml):
 #   dev        Agent with runc runtime (default)
 #   standard   Agent with gVisor/runsc runtime
-#   admin      Local admin UI + agent-manager
+#   admin      Local admin UI + agent-manager + email proxy
 #   managed    Agent-manager only (no UI)
 #   auditing   Vector log forwarding
 #   ssh        FRP tunnel for SSH access
@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --gvisor     Use gVisor runtime (default: runc)"
-            echo "  --admin      Enable local admin UI + agent-manager"
+            echo "  --admin      Enable local admin UI + agent-manager + email proxy"
             echo "  --managed    Enable agent-manager only (no UI)"
             echo "  --ssh        Enable SSH access via FRP tunnel"
             echo "  --auditing   Enable log forwarding via Vector"

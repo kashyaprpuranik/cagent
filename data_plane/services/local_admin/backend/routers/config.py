@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 from fastapi import APIRouter, HTTPException
 
-from ..constants import COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, CAGENT_CONFIG_PATH, docker_client
+from ..constants import COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, CAGENT_CONFIG_PATH, READ_ONLY, docker_client
 from ..models import ConfigUpdate
 
 router = APIRouter()
@@ -24,13 +24,16 @@ async def get_config():
         "config": config,
         "raw": content,
         "path": str(config_path),
-        "modified": datetime.fromtimestamp(config_path.stat().st_mtime).isoformat()
+        "modified": datetime.fromtimestamp(config_path.stat().st_mtime).isoformat(),
+        "read_only": READ_ONLY,
     }
 
 
 @router.put("/config")
 async def update_config(update: ConfigUpdate):
     """Update cagent.yaml configuration."""
+    if READ_ONLY:
+        raise HTTPException(403, "Config is read-only in connected mode (managed by control plane)")
     config_path = Path(CAGENT_CONFIG_PATH)
 
     # Read current config
@@ -48,6 +51,8 @@ async def update_config(update: ConfigUpdate):
         current["rate_limits"] = update.rate_limits
     if update.mode is not None:
         current["mode"] = update.mode
+    if update.email is not None:
+        current["email"] = update.email
 
     # Write back
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +64,8 @@ async def update_config(update: ConfigUpdate):
 @router.put("/config/raw")
 async def update_config_raw(body: dict):
     """Update cagent.yaml with raw YAML content."""
+    if READ_ONLY:
+        raise HTTPException(403, "Config is read-only in connected mode (managed by control plane)")
     config_path = Path(CAGENT_CONFIG_PATH)
     content = body.get("content", "")
 
@@ -78,6 +85,8 @@ async def update_config_raw(body: dict):
 @router.post("/config/reload")
 async def reload_config():
     """Trigger config reload (regenerate CoreDNS + Envoy configs)."""
+    if READ_ONLY:
+        raise HTTPException(403, "Config reload is disabled in connected mode (managed by control plane)")
     # This would trigger agent-manager to reload
     # For now, we restart the containers
     results = {}

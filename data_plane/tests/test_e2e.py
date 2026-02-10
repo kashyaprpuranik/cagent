@@ -1,11 +1,14 @@
 """
 End-to-end tests for the full data plane stack.
 
-These tests require the full data plane to be running:
-    cd data_plane && docker-compose up -d
+These tests require the data plane to be running in standalone mode
+with the dev and admin profiles:
+    cd data_plane && docker compose --profile dev --profile admin up -d
+
+Config-write tests are automatically skipped in connected mode.
 
 Run with:
-    pytest tests/test_e2e.py -v --run-e2e
+    sg docker -c "python -m pytest tests/test_e2e.py -v"
 """
 
 import pytest
@@ -214,14 +217,17 @@ class TestLogging:
         assert "Up" in result.stdout, "Log shipper is not running"
 
     def test_envoy_logs_exist(self, data_plane_running):
-        """Envoy should be generating access logs."""
+        """Envoy should be generating access logs (to stdout)."""
         result = subprocess.run(
-            ["docker", "exec", "http-proxy", "ls", "-la", "/var/log/envoy/"],
+            ["docker", "logs", "--tail", "5", "http-proxy"],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=10,
         )
-        # Check if log directory exists and has files
-        assert result.returncode == 0, "Cannot access Envoy log directory"
+        assert result.returncode == 0, "Cannot read http-proxy container logs"
+        # Should have some log output (startup or access logs)
+        combined = result.stdout + result.stderr
+        assert len(combined.strip()) > 0, "No log output from http-proxy"
 
 
 @pytest.mark.e2e
@@ -288,11 +294,22 @@ class TestAgentSecurityHardening:
 
     def test_no_privilege_escalation(self, data_plane_running):
         """no-new-privileges should prevent setuid escalation."""
-        # With no-new-privileges, sudo's setuid bit is ineffective
-        result = exec_in_agent("sudo id 2>&1 || echo SUDO_FAILED")
-        # Either sudo isn't installed, or it fails due to no-new-privileges
-        assert "SUDO_FAILED" in result.stdout or "root" not in result.stdout, \
-            "sudo succeeded — no-new-privileges may not be set!"
+        # Check if agent already runs as root
+        who = exec_in_agent("id -u")
+        if who.stdout.strip() == "0":
+            # Already root — no-new-privileges is set but sudo is a no-op.
+            # Verify the security_opt is in place via container inspect.
+            result = subprocess.run(
+                ["docker", "inspect", "agent", "--format", "{{.HostConfig.SecurityOpt}}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            assert "no-new-privileges" in result.stdout, \
+                "no-new-privileges is not set on agent container"
+        else:
+            # Non-root — sudo's setuid bit should be blocked by no-new-privileges
+            result = exec_in_agent("sudo id 2>&1 || echo SUDO_FAILED")
+            assert "SUDO_FAILED" in result.stdout or "root" not in result.stdout, \
+                "sudo succeeded — no-new-privileges may not be set!"
 
     def test_ipv6_disabled(self, data_plane_running):
         """IPv6 should be disabled to prevent bypass of IPv4 egress controls."""
@@ -333,6 +350,15 @@ def admin_url():
             "docker-compose --profile admin up -d"
         )
     return url
+
+
+def is_connected_mode(admin_url: str) -> bool:
+    """Check if the data plane is running in connected (read-only) mode."""
+    try:
+        r = requests.get(f"{admin_url}/api/info", timeout=5)
+        return r.json().get("mode") == "connected"
+    except Exception:
+        return False
 
 
 def is_container_running(name):
@@ -387,7 +413,7 @@ class TestLocalAdminAPI:
         data = r.json()
         assert data["containers"]["agent"] == "agent"
         assert data["containers"]["dns"] == "dns-filter"
-        assert data["containers"]["envoy"] == "http-proxy"
+        assert data["containers"]["http_proxy"] == "http-proxy"
 
     def test_list_containers(self, admin_url):
         """Should list managed containers with status."""
@@ -449,6 +475,8 @@ class TestLocalAdminAPI:
 
     def test_config_raw_rejects_invalid_yaml(self, admin_url):
         """PUT /api/config/raw should reject invalid YAML with 400."""
+        if is_connected_mode(admin_url):
+            pytest.skip("Config is read-only in connected mode")
         r = requests.put(
             f"{admin_url}/api/config/raw",
             json={"content": "domains:\n  - domain: good.com\n bad_indent"},
@@ -491,6 +519,8 @@ class TestLocalAdminConfigPipeline:
 
     def test_config_update_propagates_to_agent(self, admin_url, data_plane_running):
         """Updating config via local admin should change agent DNS behavior."""
+        if is_connected_mode(admin_url):
+            pytest.skip("Config is read-only in connected mode")
         if not is_container_running("agent-manager"):
             pytest.skip("agent-manager not running (needs --profile admin)")
 
@@ -591,6 +621,9 @@ class TestWebTerminal:
             f"{ws_url}/api/terminal/agent", timeout=5
         )
         # Drain the initial bash prompt / MOTD
+        ws_recv_until(self.ws, "$", max_reads=10)
+        # Disable echo so markers aren't found in the echoed command
+        self.ws.send("stty -echo\n")
         ws_recv_until(self.ws, "$", max_reads=10)
         yield
         self.ws.close()

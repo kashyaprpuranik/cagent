@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@cagent/shared-ui': path.resolve(__dirname, '../../../packages/shared-ui/src/index.ts'),
     },
   },
   server: {

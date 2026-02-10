@@ -1,0 +1,31 @@
+# Ignore everything by default
+*
+
+# Allow workspace plumbing
+!package.json
+!package-lock.json
+
+# Allow shared-ui package
+!packages/
+!packages/shared-ui/
+!packages/shared-ui/**
+
+# Allow control plane frontend
+!control_plane/services/frontend/
+!control_plane/services/frontend/**
+
+# Allow data plane local admin
+!data_plane/services/local_admin/
+!data_plane/services/local_admin/**
+
+# Re-exclude node_modules and build artifacts everywhere
+**/node_modules
+**/dist
+**/.git
+**/*.md
+**/.env*
+**/.vscode
+**/.idea
+**/__pycache__
+**/*.pyc
+**/e2e

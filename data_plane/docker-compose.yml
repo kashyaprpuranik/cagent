@@ -14,9 +14,10 @@
 #   Development mode (no gVisor - for local dev or if gVisor unavailable):
 #     docker-compose --profile dev up -d
 #
-#   With local admin UI:
+#   With local admin UI + email proxy:
 #     docker-compose --profile standard --profile admin up -d
-#     Open http://localhost:8080
+#     Open http://localhost:8081
+#     Note: In connected mode (DATAPLANE_MODE=connected), admin UI is read-only
 #
 #   With auditing (log forwarding):
 #     docker-compose --profile standard --profile auditing up -d
@@ -60,6 +61,8 @@ services:
     runtime: runc
 
     # Security hardening
+    cap_drop:
+      - NET_RAW
     security_opt:
       - no-new-privileges:true
       # Block raw sockets to prevent proxy bypass via packet crafting
@@ -309,7 +312,7 @@ services:
     container_name: agent-manager
     profiles:
       - managed
-      - admin  # Admin UI benefits from agent-manager for config reload
+      - admin
 
     environment:
       # Operation mode: "standalone" or "connected"
@@ -347,8 +350,8 @@ services:
   # ===========================================================================
   local-admin:
     build:
-      context: ./services/local_admin
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: data_plane/services/local_admin/Dockerfile
     container_name: local-admin
     profiles:
       - admin
@@ -356,17 +359,18 @@ services:
     environment:
       - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml
       - DATA_PLANE_DIR=/app/data_plane
+      - DATAPLANE_MODE=${DATAPLANE_MODE:-standalone}
 
     volumes:
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock
-      # Config file (read/write)
+      # Config file (read/write in standalone, read-only in connected)
       - ./configs/cagent.yaml:/etc/cagent/cagent.yaml
       # Data plane directory (for .env and docker-compose access)
       - .:/app/data_plane
 
     ports:
-      - "${LOCAL_ADMIN_PORT:-8080}:8080"
+      - "${LOCAL_ADMIN_PORT:-8081}:8080"
 
     networks:
       - infra-net
@@ -382,8 +386,6 @@ services:
     build:
       context: ./services/email_proxy
     container_name: email-proxy
-    profiles:
-      - email
 
     environment:
       - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml

@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Card, Table, Input, Select, Badge } from '../components/common';
+import { Card, Table, Input, Select, Badge } from '@cagent/shared-ui';
 import { useAuditTrail } from '../hooks/useApi';
 import { useTenant } from '../contexts/TenantContext';
 import type { AuditTrailEntry, AuditTrailFilters } from '../types/api';
 
 const EVENT_TYPE_OPTIONS = [
   { value: '', label: 'All Events' },
-  { value: 'domain_policy_created', label: 'Domain Policy Created' },
-  { value: 'domain_policy_updated', label: 'Domain Policy Updated' },
-  { value: 'domain_policy_deleted', label: 'Domain Policy Deleted' },
+  { value: 'domain_policy_created', label: 'Egress Policy Created' },
+  { value: 'domain_policy_updated', label: 'Egress Policy Updated' },
+  { value: 'domain_policy_deleted', label: 'Egress Policy Deleted' },
   { value: 'ip_acl_created', label: 'IP ACL Created' },
   { value: 'ip_acl_updated', label: 'IP ACL Updated' },
   { value: 'ip_acl_deleted', label: 'IP ACL Deleted' },

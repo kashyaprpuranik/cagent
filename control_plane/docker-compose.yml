@@ -34,7 +34,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://aidevbox:aidevbox@db:5432/control_plane
       - REDIS_URL=redis://cache:6379
-      - OPENOBSERVE_URL=http://log-store:5080
+      - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://log-store:5080}
       # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       # Set to "true" to seed test tenants, tokens, and domain policies (deploy.sh sets this)
@@ -128,8 +128,8 @@ services:
   # ===========================================================================
   frontend:
     build:
-      context: ./services/frontend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: control_plane/services/frontend/Dockerfile
     container_name: frontend
 
     ports:

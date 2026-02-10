@@ -43,6 +43,8 @@ def domain_policy_to_response(policy: DomainPolicy) -> dict:
         "requests_per_minute": policy.requests_per_minute,
         "burst_size": policy.burst_size,
         "bytes_per_hour": policy.bytes_per_hour,
+        "timeout": policy.timeout,
+        "read_only": policy.read_only,
         "has_credential": policy.credential_value_encrypted is not None,
         "credential_header": policy.credential_header,
         "credential_format": policy.credential_format,
@@ -62,6 +64,8 @@ def build_policy_response(policy: DomainPolicy) -> dict:
         "requests_per_minute": policy.requests_per_minute or int(os.environ.get('DEFAULT_RATE_LIMIT_RPM', '120')),
         "burst_size": policy.burst_size or int(os.environ.get('DEFAULT_RATE_LIMIT_BURST', '20')),
         "bytes_per_hour": policy.bytes_per_hour or int(os.environ.get('DEFAULT_EGRESS_LIMIT_BYTES', '104857600')),
+        "timeout": policy.timeout,
+        "read_only": policy.read_only,
         "header_name": None,
         "header_value": None,
     }
@@ -152,6 +156,8 @@ async def create_domain_policy(
         requests_per_minute=policy.requests_per_minute,
         burst_size=policy.burst_size,
         bytes_per_hour=policy.bytes_per_hour,
+        timeout=policy.timeout,
+        read_only=policy.read_only or False,
         credential_header=policy.credential.header if policy.credential else None,
         credential_format=policy.credential.format if policy.credential else None,
         credential_value_encrypted=encrypted_value,
@@ -324,6 +330,10 @@ async def update_domain_policy(
         policy.burst_size = update.burst_size
     if update.bytes_per_hour is not None:
         policy.bytes_per_hour = update.bytes_per_hour
+    if update.timeout is not None:
+        policy.timeout = update.timeout
+    if update.read_only is not None:
+        policy.read_only = update.read_only
 
     # Handle credential update
     if update.clear_credential:

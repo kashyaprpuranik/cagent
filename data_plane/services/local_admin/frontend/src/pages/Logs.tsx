@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { getContainerLogs, createLogStream } from '../api/client';
 
-const CONTAINERS = ['http-proxy', 'dns-filter', 'agent'];
+const CONTAINERS = ['http-proxy', 'dns-filter', 'agent', 'email-proxy'];
 
 interface EnvoyLogEntry {
   timestamp: string;

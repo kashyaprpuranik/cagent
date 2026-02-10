@@ -49,7 +49,7 @@ async def list_tokens(
         agent_id=t.agent_id,
         tenant_id=t.tenant_id,
         is_super_admin=t.is_super_admin or False,
-        roles=t.roles or "admin",
+        roles=t.roles if t.roles is not None else "admin",
         created_at=t.created_at,
         expires_at=t.expires_at,
         last_used_at=t.last_used_at,
@@ -127,16 +127,32 @@ async def create_token(
     if body.expires_in_days:
         expires_at = datetime.utcnow() + timedelta(days=body.expires_in_days)
 
-    # Validate roles
+    # Validate roles — agent tokens get no roles by default, admin tokens get "admin"
     valid_roles = {"admin", "developer"}
-    requested_roles = set(r.strip() for r in (body.roles or "admin").split(","))
-    invalid_roles = requested_roles - valid_roles
-    if invalid_roles:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid roles: {invalid_roles}. Valid roles are: {valid_roles}"
-        )
-    roles_str = ",".join(sorted(requested_roles))
+    if body.token_type == "agent":
+        # Agent tokens get no roles unless explicitly specified
+        raw_roles = body.roles.strip() if body.roles else ""
+        if raw_roles:
+            requested_roles = set(r.strip() for r in raw_roles.split(",") if r.strip())
+            invalid_roles = requested_roles - valid_roles
+            if invalid_roles:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid roles: {invalid_roles}. Valid roles are: {valid_roles}"
+                )
+            roles_str = ",".join(sorted(requested_roles))
+        else:
+            roles_str = ""
+    else:
+        # Admin tokens default to "admin" role
+        requested_roles = set(r.strip() for r in (body.roles or "admin").split(",") if r.strip())
+        invalid_roles = requested_roles - valid_roles
+        if invalid_roles:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid roles: {invalid_roles}. Valid roles are: {valid_roles}"
+            )
+        roles_str = ",".join(sorted(requested_roles))
 
     # Create token record
     db_token = ApiToken(
@@ -171,7 +187,7 @@ async def create_token(
         agent_id=db_token.agent_id,
         tenant_id=db_token.tenant_id,
         is_super_admin=db_token.is_super_admin or False,
-        roles=db_token.roles or "admin",
+        roles=db_token.roles if db_token.roles is not None else "admin",
         token=raw_token,  # Only returned once!
         expires_at=db_token.expires_at
     )
@@ -255,7 +271,7 @@ async def update_token(
         agent_id=db_token.agent_id,
         tenant_id=db_token.tenant_id,
         is_super_admin=db_token.is_super_admin or False,
-        roles=db_token.roles or "admin",
+        roles=db_token.roles if db_token.roles is not None else "admin",
         created_at=db_token.created_at,
         expires_at=db_token.expires_at,
         last_used_at=db_token.last_used_at,

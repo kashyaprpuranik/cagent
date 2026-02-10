@@ -9,6 +9,8 @@ import type {
   CreateDomainPolicyRequest,
   UpdateDomainPolicyRequest,
   DomainPolicyCredential,
+  CreateEmailPolicyRequest,
+  UpdateEmailPolicyRequest,
 } from '../types/api';
 
 // Health
@@ -219,7 +221,7 @@ export function useDeleteTenantIpAcl() {
   });
 }
 
-// Domain Policies
+// Egress Policies (API route: /domain-policies)
 export function useDomainPolicies(params?: { agentId?: string; tenantId?: number | null }) {
   return useQuery({
     queryKey: ['domainPolicies', params?.agentId, params?.tenantId],
@@ -259,6 +261,50 @@ export function useDeleteDomainPolicy() {
     mutationFn: (id: number) => api.deleteDomainPolicy(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['domainPolicies'] });
+    },
+  });
+}
+
+// Email Policies
+export function useEmailPolicies(params?: { agentId?: string; tenantId?: number | null }) {
+  return useQuery({
+    queryKey: ['emailPolicies', params?.agentId, params?.tenantId],
+    queryFn: () => api.getEmailPolicies({
+      agentId: params?.agentId,
+      tenantId: params?.tenantId ?? undefined,
+    }),
+    enabled: params?.tenantId !== null,
+  });
+}
+
+export function useCreateEmailPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ data, tenantId }: { data: CreateEmailPolicyRequest; tenantId?: number }) =>
+      api.createEmailPolicy(data, tenantId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['emailPolicies'] });
+    },
+  });
+}
+
+export function useUpdateEmailPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: UpdateEmailPolicyRequest }) =>
+      api.updateEmailPolicy(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['emailPolicies'] });
+    },
+  });
+}
+
+export function useDeleteEmailPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteEmailPolicy(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['emailPolicies'] });
     },
   });
 }

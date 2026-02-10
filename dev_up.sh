@@ -6,11 +6,10 @@
 # Orchestrates Control Plane (CP) and Data Plane (DP) for development and demos.
 #
 # Usage:
-#   ./dev_up.sh                     # Full stack: CP + DP log seeding, tear down DP
+#   ./dev_up.sh                     # Full stack: CP + DP (kept running after seeding)
 #   ./dev_up.sh --cp-only           # Control plane only
 #   ./dev_up.sh --dp-only           # Data plane only (standalone)
 #   ./dev_up.sh --dp-only --admin   # Data plane with local admin UI
-#   ./dev_up.sh --keep-dp           # Full stack, keep DP running after seeding
 #   ./dev_up.sh down                # Stop everything
 #
 # DP flags (passed through): --admin, --gvisor, --ssh
@@ -29,7 +28,6 @@ SEED_AGENT_TOKEN="seed-agent-token-do-not-use-in-production"
 
 # Defaults
 MODE="full"          # full | cp-only | dp-only
-KEEP_DP=false
 DP_PROFILES=""
 DP_AGENT_PROFILE="dev"
 ACTION="up"
@@ -43,10 +41,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dp-only)
             MODE="dp-only"
-            shift
-            ;;
-        --keep-dp)
-            KEEP_DP=true
             shift
             ;;
         --gvisor)
@@ -73,10 +67,9 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS] [ACTION]"
             echo ""
             echo "Modes:"
-            echo "  (default)       Full stack: CP + DP log seeding, tear down DP"
+            echo "  (default)       Full stack: CP + DP (kept running after seeding)"
             echo "  --cp-only       Control plane only"
             echo "  --dp-only       Data plane only (standalone mode)"
-            echo "  --keep-dp       Full stack, keep DP running after log seeding"
             echo ""
             echo "DP options:"
             echo "  --admin         Include local admin UI"
@@ -87,10 +80,9 @@ while [[ $# -gt 0 ]]; do
             echo "  down            Stop all services (CP + DP)"
             echo ""
             echo "Examples:"
-            echo "  $0                        # Full demo: CP + seed logs from DP"
+            echo "  $0                        # Full stack: CP + DP"
             echo "  $0 --cp-only              # Just the control plane"
             echo "  $0 --dp-only --admin      # Standalone DP with admin UI"
-            echo "  $0 --keep-dp --admin      # Full stack, keep DP + admin running"
             echo "  $0 down                   # Stop everything"
             exit 0
             ;;
@@ -144,8 +136,9 @@ start_dp() {
     local profiles="--profile $DP_AGENT_PROFILE $DP_PROFILES"
 
     if [ "$dp_mode" = "connected" ]; then
-        # Add auditing + managed profiles for connected mode
-        profiles="$profiles --profile auditing --profile managed"
+        # Add auditing + managed + admin profiles for connected mode
+        # Admin UI runs in read-only mode when DATAPLANE_MODE=connected
+        profiles="$profiles --profile auditing --profile managed --profile admin"
 
         # Use CP container name directly (we'll attach DP containers to CP network after start)
         export CONTROL_PLANE_URL="http://backend:8000"
@@ -172,7 +165,8 @@ start_dp() {
         if [ -n "$cp_net" ]; then
             docker network connect "$cp_net" agent-manager 2>/dev/null || true
             docker network connect "$cp_net" log-shipper 2>/dev/null || true
-            echo "  Connected agent-manager + log-shipper to $cp_net"
+            docker network connect "$cp_net" local-admin 2>/dev/null || true
+            echo "  Connected agent-manager + log-shipper + local-admin to $cp_net"
         else
             echo "  WARNING: CP network not found — agent-manager/log-shipper can't reach CP"
         fi
@@ -275,7 +269,7 @@ case $MODE in
         echo ""
         echo "Agent container: docker exec -it agent bash"
         if echo "$DP_PROFILES" | grep -q "admin"; then
-            echo "Admin UI: http://localhost:8080"
+            echo "Admin UI: http://localhost:${LOCAL_ADMIN_PORT:-8081}"
         fi
         ;;
 
@@ -284,29 +278,13 @@ case $MODE in
         start_dp "connected"
         seed_logs
 
-        if [ "$KEEP_DP" = true ]; then
-            echo ""
-            echo "=== Full stack ready (DP kept running) ==="
-            echo ""
-            echo "Access:"
-            echo "  Admin UI:  http://localhost:9080"
-            echo "  API Docs:  http://localhost:8002/docs"
-            echo "  Agent:     docker exec -it agent bash"
-            if echo "$DP_PROFILES" | grep -q "admin"; then
-                echo "  DP Admin:  http://localhost:8080"
-            fi
-        else
-            stop_dp
-
-            echo ""
-            echo "=== Control Plane ready (DP seeded and torn down) ==="
-            echo ""
-            echo "Access:"
-            echo "  Admin UI:  http://localhost:9080"
-            echo "  API Docs:  http://localhost:8002/docs"
-            echo ""
-            echo "Logs from the data plane are now in OpenObserve."
-            echo "  OpenObserve UI: http://localhost:5080"
-        fi
+        echo ""
+        echo "=== Full stack ready ==="
+        echo ""
+        echo "Access:"
+        echo "  CP Admin:  http://localhost:9080"
+        echo "  DP Admin:  http://localhost:${LOCAL_ADMIN_PORT:-8081}  (read-only in connected mode)"
+        echo "  API Docs:  http://localhost:8002/docs"
+        echo "  Agent:     docker exec -it agent bash"
         ;;
 esac

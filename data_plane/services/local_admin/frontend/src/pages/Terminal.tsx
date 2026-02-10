@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Terminal as TerminalIcon, RefreshCw, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { getContainers, createTerminal } from '../api/client';
+import { createTerminal } from '../api/client';
 import '@xterm/xterm/css/xterm.css';
 
 export default function TerminalPage() {
@@ -12,14 +11,8 @@ export default function TerminalPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
 
-  const [selectedContainer, setSelectedContainer] = useState('agent');
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const { data: containers } = useQuery({
-    queryKey: ['containers'],
-    queryFn: getContainers,
-  });
 
   const connect = () => {
     if (!terminalRef.current) return;
@@ -66,14 +59,14 @@ export default function TerminalPage() {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Connect WebSocket
-    const ws = createTerminal(selectedContainer);
+    // Connect WebSocket - always connect to the agent container
+    const ws = createTerminal('agent');
     wsRef.current = ws;
 
     ws.onopen = () => {
       setIsConnected(true);
       setError(null);
-      term.write(`\r\n\x1b[32mConnected to ${selectedContainer}\x1b[0m\r\n\r\n`);
+      term.write('\r\n\x1b[32mConnected to agent\x1b[0m\r\n\r\n');
     };
 
     ws.onmessage = (event) => {
@@ -129,10 +122,6 @@ export default function TerminalPage() {
     };
   }, []);
 
-  const runningContainers = containers
-    ? Object.values(containers.containers).filter((c) => c.status === 'running')
-    : [];
-
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -142,29 +131,15 @@ export default function TerminalPage() {
             Web Terminal
           </h1>
           <p className="text-sm text-gray-400 mt-1">
-            Interactive shell access to containers
+            Interactive shell access to the agent container
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <select
-            value={selectedContainer}
-            onChange={(e) => setSelectedContainer(e.target.value)}
-            disabled={isConnected}
-            className="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"
-          >
-            {runningContainers.map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-
           {!isConnected ? (
             <button
               onClick={connect}
-              disabled={runningContainers.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg"
             >
               <TerminalIcon className="w-4 h-4" />
               Connect
@@ -205,7 +180,7 @@ export default function TerminalPage() {
           className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-gray-500'}`}
         />
         <span className="text-sm text-gray-400">
-          {isConnected ? `Connected to ${selectedContainer}` : 'Disconnected'}
+          {isConnected ? 'Connected to agent' : 'Disconnected'}
         </span>
       </div>
 
@@ -213,15 +188,6 @@ export default function TerminalPage() {
         ref={terminalRef}
         className="flex-1 bg-[#1a1a2e] rounded-lg border border-gray-700 p-2 min-h-[400px]"
       />
-
-      {!isConnected && runningContainers.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
-          <div className="text-center">
-            <TerminalIcon className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-            <p className="text-gray-400">No running containers available</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

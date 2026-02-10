@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Plus, Edit2, Trash2, RefreshCw, RotateCcw, Globe, Search } from 'lucide-react';
-import { Card, Table, Button, Modal, Input, Select, Badge } from '../components/common';
+import { Plus, Edit2, Trash2, RefreshCw, RotateCcw, Globe, Search, Shield, Clock } from 'lucide-react';
+import { Card, Table, Button, Modal, Input, Select, Badge } from '@cagent/shared-ui';
 import {
   useDomainPolicies,
   useCreateDomainPolicy,
@@ -21,6 +21,8 @@ interface FormData {
   requests_per_minute: string;
   burst_size: string;
   bytes_per_hour: string;
+  timeout: string;
+  read_only: boolean;
   enable_credential: boolean;
   credential_header: string;
   credential_format: string;
@@ -36,6 +38,8 @@ const emptyFormData: FormData = {
   requests_per_minute: '',
   burst_size: '',
   bytes_per_hour: '',
+  timeout: '',
+  read_only: false,
   enable_credential: false,
   credential_header: 'Authorization',
   credential_format: 'Bearer {value}',
@@ -99,6 +103,8 @@ export function DomainPolicies() {
       requests_per_minute: policy.requests_per_minute?.toString() || '',
       burst_size: policy.burst_size?.toString() || '',
       bytes_per_hour: policy.bytes_per_hour?.toString() || '',
+      timeout: policy.timeout || '',
+      read_only: policy.read_only || false,
       enable_credential: policy.has_credential || false,
       credential_header: policy.credential_header || 'Authorization',
       credential_format: policy.credential_format || 'Bearer {value}',
@@ -122,6 +128,8 @@ export function DomainPolicies() {
       requests_per_minute: formData.requests_per_minute ? parseInt(formData.requests_per_minute) : undefined,
       burst_size: formData.burst_size ? parseInt(formData.burst_size) : undefined,
       bytes_per_hour: formData.bytes_per_hour ? parseInt(formData.bytes_per_hour) : undefined,
+      timeout: formData.timeout || undefined,
+      read_only: formData.read_only || undefined,
     };
 
     if (formData.enable_credential && formData.credential_value) {
@@ -159,6 +167,8 @@ export function DomainPolicies() {
       requests_per_minute: formData.requests_per_minute ? parseInt(formData.requests_per_minute) : undefined,
       burst_size: formData.burst_size ? parseInt(formData.burst_size) : undefined,
       bytes_per_hour: formData.bytes_per_hour ? parseInt(formData.bytes_per_hour) : undefined,
+      timeout: formData.timeout || undefined,
+      read_only: formData.read_only,
     };
 
     if (formData.enable_credential && formData.credential_value) {
@@ -280,6 +290,29 @@ export function DomainPolicies() {
         ) : (
           <span className="text-dark-500 text-sm">Default</span>
         ),
+    },
+    {
+      key: 'options',
+      header: 'Options',
+      render: (policy: DomainPolicy) => (
+        <div className="flex gap-1.5 flex-wrap">
+          {policy.read_only && (
+            <span className="inline-flex items-center gap-1 text-xs bg-yellow-500/10 text-yellow-400 px-2 py-0.5 rounded">
+              <Shield size={12} />
+              Read-only
+            </span>
+          )}
+          {policy.timeout && (
+            <span className="inline-flex items-center gap-1 text-xs bg-dark-700 text-dark-300 px-2 py-0.5 rounded">
+              <Clock size={12} />
+              {policy.timeout}
+            </span>
+          )}
+          {!policy.read_only && !policy.timeout && (
+            <span className="text-dark-500 text-sm">—</span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'credential',
@@ -440,6 +473,31 @@ export function DomainPolicies() {
         </p>
       </div>
 
+      {/* Options */}
+      <div>
+        <h3 className="text-sm font-medium text-dark-200 mb-3">Options</h3>
+        <div className="space-y-4">
+          <Input
+            label="Timeout"
+            placeholder="30s, 120s, 5m"
+            value={formData.timeout}
+            onChange={(e) => setFormData({ ...formData, timeout: e.target.value })}
+          />
+          <p className="text-xs text-dark-500 -mt-2">
+            Request timeout for Envoy proxy. Leave empty for default.
+          </p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.read_only}
+              onChange={(e) => setFormData({ ...formData, read_only: e.target.checked })}
+              className="w-4 h-4 rounded border-dark-600 bg-dark-900 text-blue-500 focus:ring-blue-500 focus:ring-offset-dark-800"
+            />
+            <span className="text-sm text-dark-300">Read-only (block POST/PUT/DELETE)</span>
+          </label>
+        </div>
+      </div>
+
       {/* Credential */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -500,7 +558,7 @@ export function DomainPolicies() {
             <Globe className="text-blue-400" size={24} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-dark-100">Domain Policies</h1>
+            <h1 className="text-2xl font-bold text-dark-100">Egress Policies</h1>
             <p className="text-dark-400 text-sm mt-1">
               Configure access, rate limits, and credentials for external domains
             </p>
@@ -534,7 +592,7 @@ export function DomainPolicies() {
         )}
         {isLoading || !selectedTenantId ? (
           <div className="text-center py-8 text-dark-400">
-            {selectedTenantId ? 'Loading...' : 'Select a tenant to view domain policies'}
+            {selectedTenantId ? 'Loading...' : 'Select a tenant to view egress policies'}
           </div>
         ) : filteredPolicies.length > 0 ? (
           <Table
@@ -549,7 +607,7 @@ export function DomainPolicies() {
         ) : (
           <div className="text-center py-8 text-dark-400">
             <Globe size={48} className="mx-auto mb-4 opacity-50" />
-            <p>No domain policies configured</p>
+            <p>No egress policies configured</p>
             <p className="text-sm mt-2">
               Add policies to control access, rate limits, and credentials for external domains.
             </p>
@@ -564,7 +622,7 @@ export function DomainPolicies() {
           setCreateModal(false);
           resetForm();
         }}
-        title="Create Domain Policy"
+        title="Create Egress Policy"
         size="lg"
       >
         {renderFormFields(false)}
@@ -594,7 +652,7 @@ export function DomainPolicies() {
           setEditModal(null);
           resetForm();
         }}
-        title="Edit Domain Policy"
+        title="Edit Egress Policy"
         size="lg"
       >
         {renderFormFields(true)}
@@ -664,7 +722,7 @@ export function DomainPolicies() {
       <Modal
         isOpen={!!deleteModal}
         onClose={() => setDeleteModal(null)}
-        title="Delete Domain Policy"
+        title="Delete Egress Policy"
       >
         <div className="space-y-4">
           <p className="text-dark-300">

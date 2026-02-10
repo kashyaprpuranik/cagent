@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { DomainPolicies } from './pages/DomainPolicies';
+import { EmailPolicies } from './pages/EmailPolicies';
 import { IpAcls } from './pages/IpAcls';
 import { AuditTrail } from './pages/AuditLogs';
 import { AgentLogs } from './pages/AgentLogs';
@@ -46,6 +47,7 @@ function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="domain-policies" element={<DomainPolicies />} />
+        <Route path="email-policies" element={<EmailPolicies />} />
         <Route path="ip-acls" element={<IpAcls />} />
         <Route path="audit-trail" element={<AuditTrail />} />
         <Route path="agent-logs" element={<AgentLogs />} />

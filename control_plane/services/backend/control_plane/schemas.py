@@ -37,7 +37,7 @@ class ApiTokenCreate(BaseModel):
     agent_id: Optional[str] = None  # Required if token_type is "agent"
     tenant_id: Optional[int] = None  # Required for admin tokens (not super_admin)
     is_super_admin: bool = False  # Super admin can access all tenants
-    roles: Optional[str] = "admin"  # Comma-separated roles: "admin", "developer", "admin,developer"
+    roles: Optional[str] = None  # Comma-separated roles: "admin", "developer", "admin,developer"
     expires_in_days: Optional[int] = None  # Optional expiry
 
 
@@ -49,7 +49,7 @@ class ApiTokenResponse(BaseModel):
     agent_id: Optional[str]
     tenant_id: Optional[int]
     is_super_admin: bool
-    roles: Optional[str] = "admin"  # Comma-separated roles
+    roles: Optional[str] = None  # Comma-separated roles
     created_at: datetime
     expires_at: Optional[datetime]
     last_used_at: Optional[datetime]
@@ -145,6 +145,10 @@ class DomainPolicyCreate(BaseModel):
     # Egress limiting
     bytes_per_hour: Optional[int] = None
 
+    # Envoy config options
+    timeout: Optional[str] = None  # e.g., "30s", "120s", "5m"
+    read_only: Optional[bool] = None  # Block POST/PUT/DELETE
+
     # Credential (optional)
     credential: Optional[DomainPolicyCredential] = None
 
@@ -158,6 +162,8 @@ class DomainPolicyUpdate(BaseModel):
     requests_per_minute: Optional[int] = None
     burst_size: Optional[int] = None
     bytes_per_hour: Optional[int] = None
+    timeout: Optional[str] = None
+    read_only: Optional[bool] = None
     credential: Optional[DomainPolicyCredential] = None
     clear_credential: Optional[bool] = None  # Set to true to remove credential
 
@@ -175,10 +181,90 @@ class DomainPolicyResponse(BaseModel):
     requests_per_minute: Optional[int]
     burst_size: Optional[int]
     bytes_per_hour: Optional[int]
+    timeout: Optional[str]
+    read_only: Optional[bool]
     has_credential: bool  # True if credential configured
     credential_header: Optional[str]
     credential_format: Optional[str]
     credential_rotated_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# =============================================================================
+# Email Policy Models
+# =============================================================================
+
+class EmailPolicyCredential(BaseModel):
+    """Credential data for an email account."""
+    # OAuth2 fields (gmail, outlook)
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    refresh_token: Optional[str] = None
+    # Password field (generic)
+    password: Optional[str] = None
+
+
+class EmailPolicyCreate(BaseModel):
+    """Create a new email policy."""
+    name: str  # Account name, e.g. "work-gmail"
+    provider: str  # gmail, outlook, generic
+    email: str  # Email address
+    agent_id: Optional[str] = None  # NULL = global
+
+    # Server overrides
+    imap_server: Optional[str] = None
+    imap_port: Optional[int] = None
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
+
+    # Policy
+    allowed_recipients: Optional[List[str]] = None
+    allowed_senders: Optional[List[str]] = None
+    sends_per_hour: Optional[int] = None
+    reads_per_hour: Optional[int] = None
+
+    # Credential (optional)
+    credential: Optional[EmailPolicyCredential] = None
+
+
+class EmailPolicyUpdate(BaseModel):
+    """Update an existing email policy."""
+    enabled: Optional[bool] = None
+    imap_server: Optional[str] = None
+    imap_port: Optional[int] = None
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
+    allowed_recipients: Optional[List[str]] = None
+    allowed_senders: Optional[List[str]] = None
+    sends_per_hour: Optional[int] = None
+    reads_per_hour: Optional[int] = None
+    credential: Optional[EmailPolicyCredential] = None
+    clear_credential: Optional[bool] = None
+
+
+class EmailPolicyResponse(BaseModel):
+    """Email policy response (credential values hidden)."""
+    id: int
+    tenant_id: Optional[int]
+    name: str
+    provider: str
+    email: str
+    enabled: bool
+    agent_id: Optional[str]
+    imap_server: Optional[str]
+    imap_port: Optional[int]
+    smtp_server: Optional[str]
+    smtp_port: Optional[int]
+    allowed_recipients: List[str]
+    allowed_senders: List[str]
+    sends_per_hour: Optional[int]
+    reads_per_hour: Optional[int]
+    has_credential: bool
+    credential_type: Optional[str]
     created_at: datetime
     updated_at: datetime
 

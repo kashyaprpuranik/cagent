@@ -34,7 +34,6 @@ export default function SshTunnelPage() {
     frp_server_addr: '',
     frp_server_port: 7000,
     frp_auth_token: '',
-    agent_id: '',
     stcp_secret_key: '',
   });
 
@@ -102,7 +101,12 @@ export default function SshTunnelPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    configureMutation.mutate(formData);
+    const data = { ...formData };
+    // Auto-generate proxy name if not already set
+    if (!data.stcp_proxy_name) {
+      data.stcp_proxy_name = `agent-${crypto.randomUUID().slice(0, 8)}`;
+    }
+    configureMutation.mutate(data);
   };
 
   if (isLoading) {
@@ -166,8 +170,8 @@ export default function SshTunnelPage() {
 
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div>
-            <span className="text-gray-400 text-sm">Agent ID</span>
-            <p className="text-white">{status?.agent_id || '-'}</p>
+            <span className="text-gray-400 text-sm">Proxy Name</span>
+            <p className="text-white">{status?.stcp_proxy_name || '-'}</p>
           </div>
           <div>
             <span className="text-gray-400 text-sm">FRP Server</span>
@@ -215,7 +219,7 @@ export default function SshTunnelPage() {
                   frp_server_addr: status.frp_server || '',
                   frp_server_port: parseInt(status.frp_server_port || '7000'),
                   frp_auth_token: '',
-                  agent_id: status.agent_id || '',
+                  stcp_proxy_name: status.stcp_proxy_name || '',
                   stcp_secret_key: status.stcp_secret_key || '',
                 });
               }
@@ -357,18 +361,6 @@ export default function SshTunnelPage() {
                     setFormData((prev) => ({ ...prev, frp_auth_token: e.target.value }))
                   }
                   placeholder="Server authentication token"
-                  className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Agent ID</label>
-                <input
-                  type="text"
-                  value={formData.agent_id}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, agent_id: e.target.value }))}
-                  placeholder="unique-agent-id"
                   className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
                   required
                 />

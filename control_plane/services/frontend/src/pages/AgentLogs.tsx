@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Search, RefreshCw } from 'lucide-react';
-import { Card, Table, Input, Select, Button, Badge } from '../components/common';
+import { Card, Table, Input, Select, Button, Badge } from '@cagent/shared-ui';
 import { useAgents } from '../hooks/useApi';
 import { useTenant } from '../contexts/TenantContext';
 import { api } from '../api/client';

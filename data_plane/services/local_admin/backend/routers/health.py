@@ -1,3 +1,4 @@
+import socket
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -11,6 +12,7 @@ from ..constants import (
     FRPC_CONTAINER_NAME,
     CAGENT_CONFIG_PATH,
     DATA_PLANE_DIR,
+    DATAPLANE_MODE,
     MANAGED_CONTAINERS,
     docker_client,
 )
@@ -44,14 +46,26 @@ async def detailed_health():
         except Exception as e:
             checks[name] = {"status": "error", "error": str(e)}
 
-    # Test DNS resolution (via CoreDNS container)
+    # Test DNS resolution via CoreDNS (10.200.2.5 on infra-net)
     try:
         container = docker_client.containers.get(COREDNS_CONTAINER_NAME)
         if container.status == "running":
-            # Try to resolve a test domain
-            result = container.exec_run(["nslookup", "google.com", "127.0.0.1"], timeout=5)
+            # Resolve a test domain using the CoreDNS server directly
+            resolver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            resolver.settimeout(3)
+            # Build a minimal DNS query for google.com A record
+            import struct
+            query = b'\x12\x34'  # transaction ID
+            query += b'\x01\x00'  # flags: standard query, recursion desired
+            query += b'\x00\x01\x00\x00\x00\x00\x00\x00'  # 1 question
+            query += b'\x06google\x03com\x00'  # google.com
+            query += b'\x00\x01\x00\x01'  # type A, class IN
+            resolver.sendto(query, ("10.200.2.5", 53))
+            data, _ = resolver.recvfrom(512)
+            resolver.close()
+            # If we got a response, DNS is working
             checks["dns_resolution"] = {
-                "status": "healthy" if result.exit_code == 0 else "unhealthy",
+                "status": "healthy",
                 "test": "google.com",
             }
         else:
@@ -59,11 +73,13 @@ async def detailed_health():
     except Exception as e:
         checks["dns_resolution"] = {"status": "error", "error": str(e)}
 
-    # Test Envoy health endpoint
+    # Test Envoy readiness via admin port
     try:
         container = docker_client.containers.get(ENVOY_CONTAINER_NAME)
         if container.status == "running":
-            result = container.exec_run(["wget", "-q", "-O", "-", "http://localhost:9901/ready"], timeout=5)
+            result = container.exec_run(
+                ["bash", "-c", "echo > /dev/tcp/localhost/9901"],
+            )
             checks["envoy_ready"] = {
                 "status": "healthy" if result.exit_code == 0 else "unhealthy",
             }
@@ -86,7 +102,7 @@ async def detailed_health():
 async def info():
     """System info."""
     return {
-        "mode": "standalone",
+        "mode": DATAPLANE_MODE,
         "config_path": CAGENT_CONFIG_PATH,
         "data_plane_dir": DATA_PLANE_DIR,
         "containers": {

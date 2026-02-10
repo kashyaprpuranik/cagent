@@ -63,7 +63,7 @@ class TokenInfo:
         self.token_name = token_name
         self.tenant_id = tenant_id  # Tenant this token belongs to
         self.is_super_admin = is_super_admin  # Can access all tenants
-        self.roles = roles or ["admin"]  # Default to admin for backwards compat
+        self.roles = roles if roles is not None else ["admin"]  # Default to admin for backwards compat
         self.api_token_id = api_token_id  # DB primary key of the ApiToken
 
     def has_role(self, role: str) -> bool:
@@ -129,7 +129,11 @@ async def verify_token(
                 tenant_id = agent.tenant_id
 
         # Parse roles (comma-separated string to list)
-        roles = (db_token.roles or "admin").split(",")
+        # Empty string = no roles; None = backwards-compat default to admin
+        if db_token.roles is not None:
+            roles = [r for r in db_token.roles.split(",") if r]
+        else:
+            roles = ["admin"]
 
         info = TokenInfo(
             token_type=db_token.token_type,

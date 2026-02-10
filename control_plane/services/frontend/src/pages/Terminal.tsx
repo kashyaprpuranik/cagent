@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Terminal as TerminalIcon, X, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
-import { Card } from '../components/common/Card';
-import { Button } from '../components/common/Button';
-import { Badge } from '../components/common/Badge';
+import { Card, Button, Badge } from '@cagent/shared-ui';
 import { useTerminal } from '../hooks/useTerminal';
 import { useAgentStatus } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';

@@ -22,6 +22,7 @@ sources:
       - "http-proxy"
       - "dns-filter"
       - "agent-manager"
+      - "email-proxy"
 
   # gVisor debug/audit logs (security-critical)
   # Requires runsc configured with: --debug-log=/var/log/runsc/
@@ -54,6 +55,8 @@ transforms:
 
       .source = if contains(container, "http-proxy") {
         "envoy"
+      } else if contains(container, "email-proxy") {
+        "email-proxy"
       } else if contains(container, "agent-manager") {
         "agent-manager"
       } else if contains(container, "agent") {

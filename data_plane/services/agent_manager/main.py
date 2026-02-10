@@ -19,6 +19,7 @@ import os
 import sys
 import time
 import json
+import hashlib
 import signal
 import logging
 from datetime import datetime
@@ -229,27 +230,32 @@ def restart_coredns():
 
 
 def reload_envoy():
-    """Hot-reload Envoy config via SIGHUP or restart."""
+    """Reload Envoy by restarting the container."""
     try:
         container = docker_client.containers.get(ENVOY_CONTAINER_NAME)
-        # Send SIGHUP to trigger config reload (if Envoy supports it)
-        # Otherwise restart the container
-        container.kill(signal='SIGHUP')
-        logger.info("Sent SIGHUP to Envoy for config reload")
+        container.restart(timeout=5)
+        logger.info("Restarted Envoy to apply new config")
         return True
     except docker.errors.NotFound:
         logger.warning(f"Envoy container '{ENVOY_CONTAINER_NAME}' not found")
         return False
     except Exception as e:
-        # SIGHUP might not be supported, try restart
-        try:
-            container = docker_client.containers.get(ENVOY_CONTAINER_NAME)
-            container.restart(timeout=10)
-            logger.info("Restarted Envoy to apply new config")
-            return True
-        except Exception as e2:
-            logger.error(f"Failed to reload Envoy: {e2}")
-            return False
+        logger.error(f"Failed to restart Envoy: {e}")
+        return False
+
+
+def _stable_hash(content: str) -> str:
+    """Hash content after stripping auto-generated timestamp lines."""
+    stable = "\n".join(
+        line for line in content.splitlines()
+        if "Generated:" not in line
+    )
+    return hashlib.md5(stable.encode()).hexdigest()
+
+
+# Track last written config hashes to avoid unnecessary restarts
+_last_envoy_hash: Optional[str] = None
+_last_corefile_hash: Optional[str] = None
 
 
 def regenerate_configs(additional_domains: list = None) -> bool:
@@ -261,29 +267,42 @@ def regenerate_configs(additional_domains: list = None) -> bool:
     Returns:
         True if configs were regenerated, False otherwise.
     """
+    global _last_envoy_hash, _last_corefile_hash
+
     try:
-        # Load config from cagent.yaml
-        if not config_generator.load_config():
-            # Config hasn't changed and no additional domains
-            if not additional_domains:
-                logger.debug("Config unchanged, skipping regeneration")
-                return False
+        config_changed = config_generator.load_config()
 
-        # TODO: If additional_domains provided, merge them into config
-        # For now, just regenerate from cagent.yaml
+        if not config_changed and not additional_domains:
+            logger.debug("Config unchanged, skipping regeneration")
+            return False
 
-        # Generate CoreDNS Corefile
-        config_generator.write_corefile(COREDNS_COREFILE_PATH)
+        # Generate configs and compute stable hashes (ignoring timestamps)
+        corefile_content = config_generator.generate_corefile()
+        envoy_config = config_generator.generate_envoy_config()
+        envoy_yaml = yaml.dump(envoy_config, default_flow_style=False, sort_keys=False)
 
-        # Generate Envoy config
-        config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
+        corefile_hash = _stable_hash(corefile_content)
+        envoy_hash = _stable_hash(envoy_yaml)
 
-        # Reload services
-        restart_coredns()
-        reload_envoy()
+        corefile_changed = corefile_hash != _last_corefile_hash
+        envoy_changed = envoy_hash != _last_envoy_hash
 
-        logger.info("Regenerated configs from cagent.yaml")
-        return True
+        if corefile_changed:
+            config_generator.write_corefile(COREDNS_COREFILE_PATH)
+            restart_coredns()
+            _last_corefile_hash = corefile_hash
+
+        if envoy_changed:
+            config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
+            reload_envoy()
+            _last_envoy_hash = envoy_hash
+
+        if corefile_changed or envoy_changed:
+            logger.info("Regenerated configs from cagent.yaml")
+            return True
+        else:
+            logger.debug("Generated configs unchanged, skipping restart")
+            return False
 
     except Exception as e:
         logger.error(f"Error regenerating configs: {e}")
@@ -409,12 +428,18 @@ def main_loop():
     heartbeat_count = 0
 
     # Initial config generation from cagent.yaml (always write on startup)
+    global _last_envoy_hash, _last_corefile_hash
     logger.info("Generating initial configs from cagent.yaml...")
     config_generator.load_config()
     config_generator.write_corefile(COREDNS_COREFILE_PATH)
     config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
     restart_coredns()
     reload_envoy()
+    # Snapshot current state so regenerate_configs() can detect changes
+    _last_corefile_hash = _stable_hash(config_generator.generate_corefile())
+    _last_envoy_hash = _stable_hash(
+        yaml.dump(config_generator.generate_envoy_config(), default_flow_style=False, sort_keys=False)
+    )
     logger.info("Initial config generation complete")
 
     while True:

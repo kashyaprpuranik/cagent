@@ -187,7 +187,66 @@ export interface LogHit {
   [key: string]: unknown;
 }
 
-// Domain Policies (Unified)
+// Email Policies - API route: /email-policies
+export interface EmailPolicy {
+  id: number;
+  name: string;
+  provider: 'gmail' | 'outlook' | 'generic';
+  email: string;
+  enabled: boolean;
+  agent_id?: string;
+  imap_server?: string;
+  imap_port?: number;
+  smtp_server?: string;
+  smtp_port?: number;
+  allowed_recipients: string[];
+  allowed_senders: string[];
+  sends_per_hour?: number;
+  reads_per_hour?: number;
+  has_credential: boolean;
+  credential_type?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmailPolicyCredential {
+  client_id?: string;
+  client_secret?: string;
+  refresh_token?: string;
+  password?: string;
+}
+
+export interface CreateEmailPolicyRequest {
+  name: string;
+  provider: 'gmail' | 'outlook' | 'generic';
+  email: string;
+  agent_id?: string;
+  imap_server?: string;
+  imap_port?: number;
+  smtp_server?: string;
+  smtp_port?: number;
+  allowed_recipients?: string[];
+  allowed_senders?: string[];
+  sends_per_hour?: number;
+  reads_per_hour?: number;
+  credential?: EmailPolicyCredential;
+}
+
+export interface UpdateEmailPolicyRequest {
+  enabled?: boolean;
+  imap_server?: string;
+  imap_port?: number;
+  smtp_server?: string;
+  smtp_port?: number;
+  allowed_recipients?: string[];
+  allowed_senders?: string[];
+  sends_per_hour?: number;
+  reads_per_hour?: number;
+  credential?: EmailPolicyCredential;
+  clear_credential?: boolean;
+}
+
+// Egress Policies (Unified) - API route: /domain-policies
 export interface DomainPolicy {
   id: number;
   domain: string;
@@ -199,6 +258,8 @@ export interface DomainPolicy {
   requests_per_minute?: number;
   burst_size?: number;
   bytes_per_hour?: number;
+  timeout?: string;
+  read_only?: boolean;
   has_credential: boolean;
   credential_header?: string;
   credential_format?: string;
@@ -222,6 +283,8 @@ export interface CreateDomainPolicyRequest {
   requests_per_minute?: number;
   burst_size?: number;
   bytes_per_hour?: number;
+  timeout?: string;
+  read_only?: boolean;
   credential?: DomainPolicyCredential;
 }
 
@@ -233,6 +296,8 @@ export interface UpdateDomainPolicyRequest {
   requests_per_minute?: number;
   burst_size?: number;
   bytes_per_hour?: number;
+  timeout?: string;
+  read_only?: boolean;
   credential?: DomainPolicyCredential;
   clear_credential?: boolean;
 }

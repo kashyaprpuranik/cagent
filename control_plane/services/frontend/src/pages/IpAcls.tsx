@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, Trash2, ToggleLeft, ToggleRight, Network } from 'lucide-react';
-import { Card, Table, Button, Modal, Input, Badge } from '../components/common';
+import { Card, Table, Button, Modal, Input, Badge } from '@cagent/shared-ui';
 import {
   useTenantIpAcls,
   useCreateTenantIpAcl,
