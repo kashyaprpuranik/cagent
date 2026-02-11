@@ -203,15 +203,15 @@ sinks:
       strategy: bearer
       token: "${CONTROL_PLANE_TOKEN}"
     batch:
-      max_events: 1
+      max_events: 50
       timeout_secs: 5
     request:
       headers:
         Content-Type: application/json
-      rate_limit_num: 80
+      rate_limit_num: 100
       rate_limit_duration_secs: 60
-      retry_initial_backoff_secs: 5
-      retry_max_duration_secs: 60
+      retry_initial_backoff_secs: 2
+      retry_max_duration_secs: 30
 
   # Local file backup (if CP API unreachable)
   file_backup:

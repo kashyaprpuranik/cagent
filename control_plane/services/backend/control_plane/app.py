@@ -1,10 +1,15 @@
+import logging
+
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
 
 from control_plane.lifespan import lifespan
 from control_plane.rate_limit import limiter
+
+logger = logging.getLogger(__name__)
+
 from control_plane.config import CORS_ORIGINS, BETA_FEATURES
 from control_plane.database import Base, engine
 from control_plane.models import (  # noqa: F401 - ensure models are registered
@@ -28,7 +33,21 @@ app = FastAPI(
 
 # Register rate limiter with app
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def _log_rate_limit_exceeded(request, exc):
+    logger.warning(
+        "Rate limit exceeded: %s %s (key=%s, limit=%s)",
+        request.method, request.url.path,
+        getattr(exc, "detail", ""),
+        str(exc),
+    )
+    return JSONResponse(
+        status_code=429,
+        content={"error": f"Rate limit exceeded: {exc.detail}"},
+    )
+
+app.add_exception_handler(RateLimitExceeded, _log_rate_limit_exceeded)
 
 if CORS_ORIGINS:
     app.add_middleware(
