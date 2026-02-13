@@ -146,6 +146,26 @@ def wait_for_access_log(marker: str, timeout: float = 15.0, poll: float = 1.0) -
         time.sleep(poll)
 
 
+def _wait_for_command_result(agent_id, command, admin_headers, timeout=60, poll=5):
+    """Poll agent status until ``last_command == command`` and a result is set.
+
+    Returns the status dict on success, or ``None`` if *timeout* elapses.
+    """
+    deadline = time.time() + timeout
+    while True:
+        r = requests.get(
+            f"{CP_BASE}/api/v1/agents/{agent_id}/status",
+            headers=admin_headers,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("last_command") == command and data.get("last_command_result"):
+                return data
+        if time.time() >= deadline:
+            return None
+        time.sleep(poll)
+
+
 # ---------------------------------------------------------------------------
 # TestMultiAgentContainers
 # ---------------------------------------------------------------------------
@@ -856,4 +876,596 @@ class TestDomainPolicyTTL:
         data = r.json()
         assert data["matched"] is False, (
             f"Expired policy still matched for {self.TTL_DOMAIN}: {data}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestPathFiltering
+# ---------------------------------------------------------------------------
+
+class TestPathFiltering:
+    """Verify the Lua filter enforces path restrictions from CP policies.
+
+    Uses a unique domain so the Lua cache (300s TTL) is cold.  The domain
+    has no Envoy virtual host, so requests that *pass* Lua hit the catch-all
+    403 with body ``destination_not_allowed``.  Requests blocked by Lua's
+    path filter return ``path_not_allowed``.
+    """
+
+    DOMAIN = "pathtest-e2e.example.com"
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_path_policy(self, admin_headers):
+        """Delete test policies after each test."""
+        yield
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies", headers=admin_headers
+        )
+        if r.status_code == 200:
+            for p in r.json()["items"]:
+                if p["domain"] == self.DOMAIN:
+                    requests.delete(
+                        f"{CP_BASE}/api/v1/domain-policies/{p['id']}",
+                        headers=admin_headers,
+                    )
+
+    def _ensure_policy(self, admin_headers):
+        """Create the path-filtered policy if it doesn't already exist."""
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={
+                "domain": self.DOMAIN,
+                "allowed_paths": ["/allowed", "/allowed/*"],
+            },
+        )
+        assert r.status_code == 200
+        return r.json()
+
+    def _wait_for_path_response(self, path, expected_body, timeout=45, poll=3):
+        """Retry curl until expected_body appears in response (or timeout)."""
+        deadline = time.time() + timeout
+        last_stdout = ""
+        while True:
+            result = exec_in_agent(
+                f"curl -s -x {PROXY} http://{self.DOMAIN}{path}"
+            )
+            last_stdout = result.stdout
+            if expected_body in last_stdout:
+                return last_stdout
+            if time.time() >= deadline:
+                return last_stdout
+            time.sleep(poll)
+
+    def test_blocked_path_rejected(self, cp_running, admin_headers):
+        """A path not in allowed_paths should be rejected by the Lua filter."""
+        self._ensure_policy(admin_headers)
+        body = self._wait_for_path_response("/blocked", "path_not_allowed")
+        assert "path_not_allowed" in body, (
+            f"Expected 'path_not_allowed' in response, got: {body[:300]}"
+        )
+
+    def test_allowed_path_passes_lua(self, cp_running, admin_headers):
+        """An allowed path should pass Lua but hit the Envoy catch-all 403."""
+        self._ensure_policy(admin_headers)
+        body = self._wait_for_path_response("/allowed/test", "destination_not_allowed")
+        assert "path_not_allowed" not in body, (
+            f"Path filter blocked /allowed/test unexpectedly: {body[:300]}"
+        )
+        assert "destination_not_allowed" in body, (
+            f"Expected 'destination_not_allowed' (Envoy catch-all), got: {body[:300]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestPolicyPropagation
+# ---------------------------------------------------------------------------
+
+class TestPolicyPropagation:
+    """Verify CP policy lifecycle is visible via the export endpoint."""
+
+    DOMAIN = "proptest-e2e.example.com"
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_prop_policy(self, admin_headers):
+        """Delete test policies after each test."""
+        yield
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies", headers=admin_headers
+        )
+        if r.status_code == 200:
+            for p in r.json()["items"]:
+                if p["domain"] == self.DOMAIN:
+                    requests.delete(
+                        f"{CP_BASE}/api/v1/domain-policies/{p['id']}",
+                        headers=admin_headers,
+                    )
+
+    def test_new_policy_in_export(self, cp_running, admin_headers, agent_headers):
+        """A newly created policy should appear in the export endpoint."""
+        requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={"domain": self.DOMAIN},
+        )
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/export",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        assert self.DOMAIN in r.json()["domains"], (
+            f"{self.DOMAIN} not in export after creation"
+        )
+
+    def test_disabled_policy_hidden(self, cp_running, admin_headers, agent_headers):
+        """A disabled policy should not appear in the export endpoint."""
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={"domain": self.DOMAIN},
+        )
+        policy_id = r.json()["id"]
+
+        # Disable
+        r = requests.put(
+            f"{CP_BASE}/api/v1/domain-policies/{policy_id}",
+            headers=admin_headers,
+            json={"enabled": False},
+        )
+        assert r.status_code == 200
+
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/export",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        assert self.DOMAIN not in r.json()["domains"], (
+            f"{self.DOMAIN} still in export after disable"
+        )
+
+    def test_deleted_policy_removed(self, cp_running, admin_headers, agent_headers):
+        """A deleted policy should not appear in the export endpoint."""
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={"domain": self.DOMAIN},
+        )
+        policy_id = r.json()["id"]
+
+        # Verify present
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/export",
+            headers=agent_headers,
+        )
+        assert self.DOMAIN in r.json()["domains"]
+
+        # Delete
+        r = requests.delete(
+            f"{CP_BASE}/api/v1/domain-policies/{policy_id}",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200
+
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/export",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        assert self.DOMAIN not in r.json()["domains"], (
+            f"{self.DOMAIN} still in export after deletion"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestCredentialRotation
+# ---------------------------------------------------------------------------
+
+class TestCredentialRotation:
+    """Verify credential rotation via the CP API."""
+
+    DOMAIN = "rotation-e2e.example.com"
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_rotation_policy(self, admin_headers):
+        """Delete test policies after each test."""
+        yield
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies", headers=admin_headers
+        )
+        if r.status_code == 200:
+            for p in r.json()["items"]:
+                if p["domain"] == self.DOMAIN:
+                    requests.delete(
+                        f"{CP_BASE}/api/v1/domain-policies/{p['id']}",
+                        headers=admin_headers,
+                    )
+
+    def test_credential_rotation_via_api(
+        self, cp_running, admin_headers, agent_headers
+    ):
+        """Rotating a credential should update the value returned by for-domain."""
+        # Create policy with initial credential
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={
+                "domain": self.DOMAIN,
+                "credential": {
+                    "header": "Authorization",
+                    "format": "Bearer {value}",
+                    "value": "initial-secret",
+                },
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["has_credential"] is True
+        policy_id = data["id"]
+
+        # Verify initial credential via for-domain
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/for-domain",
+            headers=agent_headers,
+            params={"domain": self.DOMAIN},
+        )
+        assert r.status_code == 200
+        assert "initial-secret" in r.json()["header_value"]
+
+        # Rotate credential
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies/{policy_id}/rotate-credential",
+            headers=admin_headers,
+            json={
+                "header": "Authorization",
+                "format": "Bearer {value}",
+                "value": "rotated-secret",
+            },
+        )
+        assert r.status_code == 200
+        rotated = r.json()
+        assert rotated["credential_rotated_at"] is not None
+
+        # Verify rotated credential via for-domain
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/for-domain",
+            headers=agent_headers,
+            params={"domain": self.DOMAIN},
+        )
+        assert r.status_code == 200
+        assert "rotated-secret" in r.json()["header_value"], (
+            f"Expected 'rotated-secret' in header_value, got: {r.json()['header_value']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestAuditTrail
+# ---------------------------------------------------------------------------
+
+class TestAuditTrail:
+    """Verify audit trail entries for policy mutations."""
+
+    DOMAIN = "audit-e2e.example.com"
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_audit_policy(self, admin_headers):
+        """Delete test policies after each test."""
+        yield
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies", headers=admin_headers
+        )
+        if r.status_code == 200:
+            for p in r.json()["items"]:
+                if p["domain"] == self.DOMAIN:
+                    requests.delete(
+                        f"{CP_BASE}/api/v1/domain-policies/{p['id']}",
+                        headers=admin_headers,
+                    )
+
+    def test_policy_mutations_audited(self, cp_running, admin_headers):
+        """Create, update, and delete should each produce an audit entry."""
+        # Create
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={"domain": self.DOMAIN, "description": "audit test"},
+        )
+        assert r.status_code == 200
+        policy_id = r.json()["id"]
+
+        # Update
+        requests.put(
+            f"{CP_BASE}/api/v1/domain-policies/{policy_id}",
+            headers=admin_headers,
+            json={"description": "audit test updated"},
+        )
+
+        # Delete
+        requests.delete(
+            f"{CP_BASE}/api/v1/domain-policies/{policy_id}",
+            headers=admin_headers,
+        )
+
+        # Check audit trail for create event
+        r = requests.get(
+            f"{CP_BASE}/api/v1/audit-trail",
+            headers=admin_headers,
+            params={"event_type": "domain_policy_created"},
+        )
+        assert r.status_code == 200
+        items = r.json()["items"]
+        created = [e for e in items if self.DOMAIN in e.get("action", "")]
+        assert len(created) >= 1, (
+            f"No audit entry for domain_policy_created with {self.DOMAIN}"
+        )
+        assert created[0]["severity"] == "INFO"
+
+        # Check audit trail for delete event
+        r = requests.get(
+            f"{CP_BASE}/api/v1/audit-trail",
+            headers=admin_headers,
+            params={"event_type": "domain_policy_deleted"},
+        )
+        assert r.status_code == 200
+        items = r.json()["items"]
+        deleted = [e for e in items if self.DOMAIN in e.get("action", "")]
+        assert len(deleted) >= 1, (
+            f"No audit entry for domain_policy_deleted with {self.DOMAIN}"
+        )
+        assert deleted[0]["severity"] == "WARNING"
+
+    def test_audit_tenant_isolation(self, cp_running, admin_headers, acme_admin_headers):
+        """Acme admin should not see default tenant's audit entries."""
+        # Create a policy in default tenant
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={"domain": self.DOMAIN},
+        )
+        assert r.status_code == 200
+
+        # Acme admin reads audit trail
+        r = requests.get(
+            f"{CP_BASE}/api/v1/audit-trail",
+            headers=acme_admin_headers,
+        )
+        assert r.status_code == 200
+        items = r.json()["items"]
+        leaked = [e for e in items if self.DOMAIN in e.get("action", "")]
+        assert len(leaked) == 0, (
+            f"Acme admin can see default tenant domain {self.DOMAIN} in audit trail"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestPerAgentPolicies
+# ---------------------------------------------------------------------------
+
+class TestPerAgentPolicies:
+    """Verify agent-scoped policies appear only for the correct agent."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_agent_policies(self, admin_headers):
+        """Track and delete policies created during tests."""
+        self._created_ids = []
+        yield
+        for pid in self._created_ids:
+            requests.delete(
+                f"{CP_BASE}/api/v1/domain-policies/{pid}",
+                headers=admin_headers,
+            )
+
+    def test_agent_scoped_policy_in_export(
+        self, cp_running, admin_headers, agent_headers
+    ):
+        """A policy scoped to the E2E agent should appear in its export."""
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={
+                "domain": "agentscope-e2e.example.com",
+                "agent_id": AGENT_ID,
+            },
+        )
+        assert r.status_code == 200
+        self._created_ids.append(r.json()["id"])
+
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/export",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        assert "agentscope-e2e.example.com" in r.json()["domains"], (
+            "Agent-scoped policy not in export for the correct agent"
+        )
+
+    def test_other_agent_policy_hidden(
+        self, cp_running, admin_headers, agent_headers
+    ):
+        """A policy scoped to a different agent should NOT appear in export."""
+        r = requests.post(
+            f"{CP_BASE}/api/v1/domain-policies",
+            headers=admin_headers,
+            json={
+                "domain": "otheragent-e2e.example.com",
+                "agent_id": "nonexistent-agent",
+            },
+        )
+        assert r.status_code == 200
+        self._created_ids.append(r.json()["id"])
+
+        r = requests.get(
+            f"{CP_BASE}/api/v1/domain-policies/export",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        assert "otheragent-e2e.example.com" not in r.json()["domains"], (
+            "Policy for a different agent leaked into e2e-agent export"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestAgentLifecycle
+# ---------------------------------------------------------------------------
+
+class TestAgentLifecycle:
+    """Verify stop, start, and wipe commands via the CP API.
+
+    These tests are destructive (stop/start the agent container) so they
+    are placed near the end of the file.
+    """
+
+    def test_stop_command(self, cp_running, admin_headers):
+        """Queue a stop command and verify it succeeds."""
+        r = requests.post(
+            f"{CP_BASE}/api/v1/agents/{AGENT_ID}/stop",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "queued"
+
+        data = _wait_for_command_result(AGENT_ID, "stop", admin_headers, timeout=60)
+        assert data is not None, "Stop command not completed within 60s"
+        assert data["last_command_result"] == "success", (
+            f"Stop command failed: {data}"
+        )
+
+    def test_start_command(self, cp_running, admin_headers):
+        """Queue a start command and verify it succeeds."""
+        # Wait for previous command to clear
+        time.sleep(8)
+        r = requests.post(
+            f"{CP_BASE}/api/v1/agents/{AGENT_ID}/start",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "queued"
+
+        data = _wait_for_command_result(AGENT_ID, "start", admin_headers, timeout=60)
+        assert data is not None, "Start command not completed within 60s"
+        assert data["last_command_result"] == "success", (
+            f"Start command failed: {data}"
+        )
+
+    def test_wipe_command(self, cp_running, admin_headers):
+        """Queue a wipe (no workspace) command and verify it succeeds."""
+        # Wait for previous command to clear
+        time.sleep(8)
+        r = requests.post(
+            f"{CP_BASE}/api/v1/agents/{AGENT_ID}/wipe",
+            headers=admin_headers,
+            json={"wipe_workspace": False},
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "queued"
+
+        data = _wait_for_command_result(AGENT_ID, "wipe", admin_headers, timeout=60)
+        assert data is not None, "Wipe command not completed within 60s"
+        assert data["last_command_result"] == "success", (
+            f"Wipe command failed: {data}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestDynamicScaling
+# ---------------------------------------------------------------------------
+
+class TestDynamicScaling:
+    """Verify dynamic agent container scaling.
+
+    Placed last because it modifies the container count.
+    """
+
+    SCRIPT_DIR = Path(__file__).parent
+    DP_DIR = Path(__file__).parent.parent / "data_plane"
+    COMPOSE_CMD = [
+        "docker", "compose",
+        "-f", "docker-compose.yml",
+        "-f", str(Path(__file__).parent / "docker-compose.e2e.yml"),
+        "--profile", "dev",
+        "--profile", "managed",
+        "--profile", "auditing",
+    ]
+
+    @pytest.fixture(autouse=True)
+    def _restore_scale(self):
+        """Restore to 2 agents after each test."""
+        yield
+        subprocess.run(
+            self.COMPOSE_CMD + ["up", "-d", "--scale", "agent-dev=2", "--no-recreate"],
+            cwd=self.DP_DIR,
+            capture_output=True,
+            timeout=60,
+        )
+        # Wait for scale to stabilise
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if len(_discover_all_agent_containers()) == 2:
+                break
+            time.sleep(2)
+
+    def test_scale_up_agents(self, cp_running):
+        """Scaling to 3 agents should create a third container that can proxy."""
+        subprocess.run(
+            self.COMPOSE_CMD + ["up", "-d", "--scale", "agent-dev=3", "--no-recreate"],
+            cwd=self.DP_DIR,
+            capture_output=True,
+            timeout=60,
+        )
+
+        # Poll until 3 containers are discovered
+        deadline = time.time() + 30
+        names = []
+        while time.time() < deadline:
+            names = _discover_all_agent_containers()
+            if len(names) >= 3:
+                break
+            time.sleep(2)
+        assert len(names) >= 3, (
+            f"Expected >=3 agent containers after scale-up, found {len(names)}: {names}"
+        )
+
+        # Verify all 3 can proxy
+        for name in names:
+            result = exec_in_agent(
+                f"curl -s -o /dev/null -w '%{{http_code}}' -x {PROXY} "
+                f"--connect-timeout 5 http://api.github.com/",
+                container_name=name,
+            )
+            code = result.stdout.strip()
+            assert code.isdigit() and int(code) < 500, (
+                f"{name}: proxy request failed with {code}"
+            )
+
+    def test_scale_down_agents(self, cp_running):
+        """Scaling from 3 to 2 should remove the extra container."""
+        # First scale up to 3
+        subprocess.run(
+            self.COMPOSE_CMD + ["up", "-d", "--scale", "agent-dev=3", "--no-recreate"],
+            cwd=self.DP_DIR,
+            capture_output=True,
+            timeout=60,
+        )
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if len(_discover_all_agent_containers()) >= 3:
+                break
+            time.sleep(2)
+
+        # Scale down to 2
+        subprocess.run(
+            self.COMPOSE_CMD + ["up", "-d", "--scale", "agent-dev=2", "--no-recreate"],
+            cwd=self.DP_DIR,
+            capture_output=True,
+            timeout=60,
+        )
+
+        deadline = time.time() + 30
+        names = []
+        while time.time() < deadline:
+            names = _discover_all_agent_containers()
+            if len(names) == 2:
+                break
+            time.sleep(2)
+        assert len(names) == 2, (
+            f"Expected 2 agent containers after scale-down, found {len(names)}: {names}"
         )

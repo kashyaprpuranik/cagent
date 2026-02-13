@@ -1,7 +1,23 @@
 from datetime import datetime
+from enum import Enum
 from typing import Optional, List
 
 from pydantic import BaseModel
+
+
+class SeccompProfile(str, Enum):
+    standard = "standard"
+    hardened = "hardened"
+    permissive = "permissive"
+
+
+class SecuritySettingsUpdate(BaseModel):
+    seccomp_profile: SeccompProfile
+
+
+class SecuritySettingsResponse(BaseModel):
+    agent_id: str
+    seccomp_profile: str
 
 
 class AuditTrailResponse(BaseModel):
@@ -297,6 +313,7 @@ class AgentHeartbeatResponse(BaseModel):
     ack: bool = True
     command: Optional[str] = None  # wipe, restart, stop, start
     command_args: Optional[dict] = None  # e.g., {"wipe_workspace": true}
+    seccomp_profile: Optional[str] = None  # Desired seccomp profile for container
 
 
 class AgentStatusResponse(BaseModel):
@@ -314,6 +331,7 @@ class AgentStatusResponse(BaseModel):
     last_command_result: Optional[str]
     last_command_at: Optional[datetime]
     online: bool  # True if heartbeat received within last 60s
+    seccomp_profile: Optional[str] = None  # Current seccomp profile
 
     class Config:
         from_attributes = True

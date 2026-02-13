@@ -11,6 +11,7 @@ import type {
   DomainPolicyCredential,
   CreateEmailPolicyRequest,
   UpdateEmailPolicyRequest,
+  UpdateSecuritySettingsRequest,
 } from '../types/api';
 
 // Health
@@ -309,6 +310,27 @@ export function useDeleteDomainPolicy() {
     mutationFn: (id: number) => api.deleteDomainPolicy(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['domainPolicies'] });
+    },
+  });
+}
+
+// Security Settings
+export function useSecuritySettings(agentId: string | null) {
+  return useQuery({
+    queryKey: ['securitySettings', agentId],
+    queryFn: () => api.getSecuritySettings(agentId!),
+    enabled: !!agentId,
+  });
+}
+
+export function useUpdateSecuritySettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, data }: { agentId: string; data: UpdateSecuritySettingsRequest }) =>
+      api.updateSecuritySettings(agentId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['securitySettings'] });
+      queryClient.invalidateQueries({ queryKey: ['agentStatus'] });
     },
   });
 }

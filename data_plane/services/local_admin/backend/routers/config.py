@@ -53,6 +53,8 @@ async def update_config(update: ConfigUpdate):
         current["mode"] = update.mode
     if update.email is not None:
         current["email"] = update.email
+    if update.security is not None:
+        current["security"] = update.security
 
     # Write back
     config_path.parent.mkdir(parents=True, exist_ok=True)

@@ -418,7 +418,22 @@ class ConfigGenerator:
         }
 
     def _build_control_plane_cluster(self) -> dict:
-        """Build cluster for control plane API."""
+        """Build cluster for control plane API.
+
+        Derives address and port from CONTROL_PLANE_URL (same env var used
+        by the agent-manager) so Envoy's Lua httpCall reaches the backend
+        via container-to-container networking.
+        """
+        cp_url = os.environ.get("CONTROL_PLANE_URL", "http://backend:8000")
+        # Strip scheme
+        host_port = cp_url.split("://", 1)[-1]
+        if ":" in host_port:
+            address, port_str = host_port.rsplit(":", 1)
+            port = int(port_str)
+        else:
+            address = host_port
+            port = 8000
+
         return {
             'name': 'control_plane_api',
             'type': 'STRICT_DNS',
@@ -431,8 +446,8 @@ class ConfigGenerator:
                         'endpoint': {
                             'address': {
                                 'socket_address': {
-                                    'address': 'backend',
-                                    'port_value': 8002
+                                    'address': address,
+                                    'port_value': port
                                 }
                             }
                         }

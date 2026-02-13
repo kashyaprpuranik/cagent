@@ -719,6 +719,41 @@ function SettingsEditor({
         </p>
       </div>
 
+      {/* Security */}
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-green-400" />
+          Security
+        </h3>
+
+        <div>
+          <label className="block text-sm text-gray-400 mb-1">Seccomp Profile</label>
+          <select
+            value={config.security?.seccomp_profile || 'standard'}
+            onChange={(e) =>
+              onChange({
+                ...config,
+                security: { ...config.security, seccomp_profile: e.target.value },
+              })
+            }
+            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white disabled:opacity-50"
+            disabled={isReadOnly}
+          >
+            <option value="standard">Standard (default - blocks all, allows ~150)</option>
+            <option value="hardened">Hardened (no mount, ptrace, unshare - production)</option>
+            <option value="permissive">Permissive (allows all, blocks raw sockets - debug only)</option>
+          </select>
+          {config.security?.seccomp_profile === 'permissive' && (
+            <p className="text-xs text-yellow-400 mt-2">
+              Permissive mode reduces container security. Use only for temporary debugging.
+            </p>
+          )}
+          <p className="text-xs text-gray-500 mt-1">
+            Controls which syscalls the agent container can use. Changes take effect on next container recreation.
+          </p>
+        </div>
+      </div>
+
       {/* Mode - hidden in read-only/connected mode */}
       {!isReadOnly && (
         <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
@@ -854,6 +889,9 @@ export default function ConfigPage() {
       '  default:',
       `    requests_per_minute: ${cfg.rate_limits?.default?.requests_per_minute || 120}`,
       `    burst_size: ${cfg.rate_limits?.default?.burst_size || 20}`,
+      '',
+      'security:',
+      `  seccomp_profile: ${cfg.security?.seccomp_profile || 'standard'}`,
       '',
       'domains:',
     ];

@@ -371,6 +371,7 @@ services:
       - COREDNS_COREFILE_PATH=/etc/coredns/Corefile
       - ENVOY_CONFIG_PATH=/etc/envoy/envoy.yaml
       - CONFIG_SYNC_INTERVAL=${CONFIG_SYNC_INTERVAL:-300}
+      - SECCOMP_PROFILES_DIR=/etc/seccomp/profiles
 
     volumes:
       # Docker socket for container management
@@ -381,6 +382,8 @@ services:
       - ./configs/coredns:/etc/coredns
       # HTTP proxy config volume (agent-manager writes generated config here)
       - proxy-config:/etc/envoy
+      # Seccomp profiles for container recreation
+      - ./configs/seccomp/profiles:/etc/seccomp/profiles:ro
 
     # No ports exposed - polling-based, outbound only
     networks:

@@ -178,6 +178,8 @@ class AgentState(Base):
     last_command_at = Column(DateTime)
     # STCP configuration for P2P SSH tunneling
     stcp_secret_key = Column(String(256), nullable=True)  # Encrypted STCP secret
+    # Seccomp profile for container security
+    seccomp_profile = Column(String(20), default="standard")  # standard, hardened, permissive
 
     __table_args__ = (
         Index('ix_agent_state_tenant_deleted', 'tenant_id', 'deleted_at'),

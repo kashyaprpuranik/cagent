@@ -11,6 +11,7 @@ import {
   Container,
   Globe,
   Mail,
+  Shield,
   LucideIcon,
   ChevronDown,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ const navSections: NavSection[] = [
     items: [
       { to: '/domain-policies', icon: Globe, label: 'Egress Policies', adminOnly: true },
       { to: '/email-policies', icon: Mail, label: 'Email Policies', badge: 'Beta', adminOnly: true, beta: 'email_policies' },
+      { to: '/security-settings', icon: Shield, label: 'Security', adminOnly: true },
       { to: '/ip-acls', icon: Network, label: 'IP ACLs', adminOnly: true },
     ],
   },

@@ -9,6 +9,7 @@ import { AgentLogs } from './pages/AgentLogs';
 import { Tokens } from './pages/Tokens';
 import { Tenants } from './pages/Tenants';
 import { Settings } from './pages/Settings';
+import { SecuritySettings } from './pages/SecuritySettings';
 import { Login } from './pages/Login';
 import { Terminal } from './pages/Terminal';
 import { useQuery } from '@tanstack/react-query';
@@ -54,6 +55,7 @@ function App() {
         {features.has('email_policies') && (
           <Route path="email-policies" element={<EmailPolicies />} />
         )}
+        <Route path="security-settings" element={<SecuritySettings />} />
         <Route path="ip-acls" element={<IpAcls />} />
         <Route path="audit-trail" element={<AuditTrail />} />
         <Route path="agent-logs" element={<AgentLogs />} />

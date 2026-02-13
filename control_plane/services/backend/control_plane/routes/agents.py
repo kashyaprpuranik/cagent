@@ -14,6 +14,7 @@ from control_plane.models import AgentState, AuditTrail
 from control_plane.schemas import (
     DataPlaneResponse, AgentHeartbeat, AgentHeartbeatResponse,
     AgentStatusResponse, AgentCommandRequest, STCPSecretResponse, STCPVisitorConfig,
+    SecuritySettingsUpdate, SecuritySettingsResponse,
 )
 from control_plane.crypto import encrypt_secret, decrypt_secret
 from control_plane.auth import (
@@ -190,6 +191,9 @@ async def agent_heartbeat(
         state.pending_command = None
         state.pending_command_args = None
         state.pending_command_at = None
+
+    # Include seccomp profile in response for agent-manager to enforce
+    response.seccomp_profile = state.seccomp_profile or "standard"
 
     # DB fallback: write status fields when Redis is unavailable
     if redis_client is None:
@@ -372,7 +376,74 @@ async def get_agent_status(
         last_command=state.last_command,
         last_command_result=state.last_command_result,
         last_command_at=state.last_command_at,
-        online=online
+        online=online,
+        seccomp_profile=state.seccomp_profile or "standard",
+    )
+
+
+# =============================================================================
+# Security Settings Endpoints
+# =============================================================================
+
+@router.get("/api/v1/agents/{agent_id}/security-settings", response_model=SecuritySettingsResponse)
+@limiter.limit("60/minute")
+async def get_security_settings(
+    request: Request,
+    agent_id: str,
+    db: Session = Depends(get_db),
+    token_info: TokenInfo = Depends(require_admin_role)
+):
+    """Get security settings for an agent (admin only)."""
+    verify_agent_access(token_info, agent_id, db)
+
+    state = db.query(AgentState).filter(
+        AgentState.agent_id == agent_id,
+        AgentState.deleted_at.is_(None)
+    ).first()
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    return SecuritySettingsResponse(
+        agent_id=state.agent_id,
+        seccomp_profile=state.seccomp_profile or "standard",
+    )
+
+
+@router.put("/api/v1/agents/{agent_id}/security-settings", response_model=SecuritySettingsResponse)
+@limiter.limit("10/minute")
+async def update_security_settings(
+    request: Request,
+    agent_id: str,
+    body: SecuritySettingsUpdate,
+    db: Session = Depends(get_db),
+    token_info: TokenInfo = Depends(require_admin_role_with_ip_check)
+):
+    """Update security settings for an agent (admin + IP ACL check)."""
+    verify_agent_access(token_info, agent_id, db)
+
+    state = db.query(AgentState).filter(
+        AgentState.agent_id == agent_id,
+        AgentState.deleted_at.is_(None)
+    ).first()
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    old_profile = state.seccomp_profile or "standard"
+    state.seccomp_profile = body.seccomp_profile.value
+
+    log = AuditTrail(
+        event_type="security_settings_updated",
+        user=token_info.token_name or "admin",
+        action=f"Seccomp profile changed from {old_profile} to {body.seccomp_profile.value} for agent {agent_id}",
+        severity="WARNING",
+        tenant_id=get_audit_tenant_id(token_info, db, state)
+    )
+    db.add(log)
+    db.commit()
+
+    return SecuritySettingsResponse(
+        agent_id=state.agent_id,
+        seccomp_profile=state.seccomp_profile,
     )
 
 

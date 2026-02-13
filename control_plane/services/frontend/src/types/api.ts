@@ -62,6 +62,18 @@ export interface AgentStatus {
   last_command_result?: string;
   last_command_at?: string;
   online: boolean;
+  seccomp_profile?: string;
+}
+
+export type SeccompProfile = 'standard' | 'hardened' | 'permissive';
+
+export interface SecuritySettings {
+  agent_id: string;
+  seccomp_profile: string;
+}
+
+export interface UpdateSecuritySettingsRequest {
+  seccomp_profile: SeccompProfile;
 }
 
 export interface AgentCommandResponse {

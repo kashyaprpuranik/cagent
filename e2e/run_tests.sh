@@ -185,9 +185,10 @@ PYEOF
     docker compose -f docker-compose.yml -f "$SCRIPT_DIR/docker-compose.e2e.yml" \
         --profile dev --profile managed --profile auditing up -d --build --scale agent-dev=2
 
-    # 9. Connect agent-manager and log-shipper to bridge so they can reach CP
+    # 9. Connect agent-manager, log-shipper, and http-proxy to bridge so they can reach CP
     docker network connect e2e-bridge agent-manager 2>/dev/null || true
     docker network connect e2e-bridge log-shipper 2>/dev/null || true
+    docker network connect e2e-bridge http-proxy 2>/dev/null || true
 
     # 10. HTTPS echo server on DP infra-net
     docker rm -f echo-server 2>/dev/null || true

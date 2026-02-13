@@ -44,6 +44,7 @@ class ConfigUpdate(BaseModel):
     rate_limits: Optional[dict] = None
     mode: Optional[str] = None
     email: Optional[dict] = None
+    security: Optional[dict] = None
 
 
 class ContainerAction(BaseModel):

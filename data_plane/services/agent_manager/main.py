@@ -60,6 +60,10 @@ COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Co
 ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
 ENVOY_LUA_PATH = os.environ.get("ENVOY_LUA_PATH", "/etc/envoy/filter.lua")
 
+# Seccomp profiles
+SECCOMP_PROFILES_DIR = os.environ.get("SECCOMP_PROFILES_DIR", "/etc/seccomp/profiles")
+VALID_SECCOMP_PROFILES = {"standard", "hardened", "permissive"}
+
 # Sync configuration
 CONFIG_SYNC_INTERVAL = int(os.environ.get("CONFIG_SYNC_INTERVAL", "300"))  # 5 minutes
 MAX_HEARTBEAT_WORKERS = int(os.environ.get("HEARTBEAT_MAX_WORKERS", "20"))
@@ -113,6 +117,186 @@ def _workspace_volume_for(container) -> Optional[str]:
         if mount.get("Destination") == "/workspace":
             return mount.get("Name")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Seccomp profile management
+# ---------------------------------------------------------------------------
+
+def _load_seccomp_profile(name: str) -> dict:
+    """Read a seccomp profile JSON from disk.
+
+    Args:
+        name: Profile name (standard, hardened, permissive)
+
+    Returns:
+        Parsed JSON dict.
+
+    Raises:
+        FileNotFoundError: If profile does not exist.
+        ValueError: If name is not valid.
+    """
+    if name not in VALID_SECCOMP_PROFILES:
+        raise ValueError(f"Invalid seccomp profile: {name}")
+    profile_path = Path(SECCOMP_PROFILES_DIR) / f"{name}.json"
+    with open(profile_path, "r") as f:
+        return json.load(f)
+
+
+def _get_current_seccomp_label(container) -> Optional[str]:
+    """Read the cagent.seccomp_profile label from a container.
+
+    Returns None for unlabelled containers (including all existing ones
+    before this feature was added).
+    """
+    try:
+        container.reload()
+        labels = container.labels or {}
+        return labels.get("cagent.seccomp_profile")
+    except Exception:
+        return None
+
+
+def recreate_container_with_seccomp(container, profile_name: str) -> tuple:
+    """Recreate an agent container with a new seccomp profile.
+
+    Stops the old container, removes it, creates a new one with the
+    same configuration but the new seccomp profile, and starts it.
+
+    Args:
+        container: Docker container object
+        profile_name: One of standard, hardened, permissive
+
+    Returns:
+        (success: bool, message: str)
+    """
+    name = container.name
+    logger.info(f"Recreating container {name} with seccomp profile: {profile_name}")
+
+    try:
+        # Load new profile
+        profile_json = _load_seccomp_profile(profile_name)
+        inline_json = json.dumps(profile_json)
+
+        # Inspect old container to capture full config
+        container.reload()
+        attrs = container.attrs
+        config = attrs.get("Config", {})
+        host_config = attrs.get("HostConfig", {})
+        network_settings = attrs.get("NetworkSettings", {})
+
+        # Capture configuration
+        image = config.get("Image")
+        env = config.get("Env", [])
+        old_labels = dict(config.get("Labels", {}))
+
+        # Update labels with new seccomp profile
+        old_labels["cagent.seccomp_profile"] = profile_name
+
+        # Volumes/Binds
+        binds = host_config.get("Binds", [])
+
+        # Mounts (named volumes)
+        mounts = []
+        for mount in attrs.get("Mounts", []):
+            mount_type = mount.get("Type", "volume")
+            if mount_type == "volume":
+                mounts.append(docker.types.Mount(
+                    target=mount["Destination"],
+                    source=mount["Name"],
+                    type="volume",
+                    read_only=not mount.get("RW", True),
+                ))
+
+        # DNS
+        dns = host_config.get("Dns", [])
+
+        # Cap drop
+        cap_drop = host_config.get("CapDrop", [])
+
+        # Security opts - keep non-seccomp entries, replace seccomp
+        old_security_opt = host_config.get("SecurityOpt", [])
+        new_security_opt = [
+            opt for opt in old_security_opt
+            if not opt.startswith("seccomp=") and not opt.startswith("seccomp:")
+        ]
+        new_security_opt.append(f"seccomp={inline_json}")
+
+        # Restart policy
+        restart_policy = host_config.get("RestartPolicy", {})
+
+        # Resource limits
+        nano_cpus = host_config.get("NanoCpus")
+        memory = host_config.get("Memory")
+        mem_reservation = host_config.get("MemoryReservation")
+
+        # Log config
+        log_config = host_config.get("LogConfig", {})
+
+        # Networks
+        networks_config = network_settings.get("Networks", {})
+
+        # Stop + remove old container
+        if container.status == "running":
+            container.stop(timeout=10)
+        container.remove(force=True)
+
+        # Build create kwargs
+        create_kwargs = {
+            "image": image,
+            "name": name,
+            "environment": env,
+            "labels": old_labels,
+            "dns": dns if dns else None,
+            "cap_drop": cap_drop if cap_drop else None,
+            "security_opt": new_security_opt,
+            "network_disabled": True,
+            "detach": True,
+        }
+
+        if binds:
+            create_kwargs["volumes"] = binds
+        if mounts:
+            create_kwargs["mounts"] = mounts
+        if restart_policy:
+            create_kwargs["restart_policy"] = restart_policy
+        if nano_cpus:
+            create_kwargs["nano_cpus"] = nano_cpus
+        if memory:
+            create_kwargs["mem_limit"] = memory
+        if mem_reservation:
+            create_kwargs["mem_reservation"] = mem_reservation
+        if log_config and log_config.get("Type"):
+            create_kwargs["log_config"] = docker.types.LogConfig(
+                type=log_config["Type"],
+                config=log_config.get("Config", {}),
+            )
+
+        # Create new container
+        new_container = docker_client.containers.create(**create_kwargs)
+
+        # Connect to original networks
+        for net_name, net_config in networks_config.items():
+            try:
+                network = docker_client.networks.get(net_name)
+                ip_addr = net_config.get("IPAddress")
+                connect_kwargs = {}
+                if ip_addr:
+                    connect_kwargs["ipv4_address"] = ip_addr
+                network.connect(new_container, **connect_kwargs)
+            except Exception as e:
+                logger.warning(f"Could not connect to network {net_name}: {e}")
+
+        # Start
+        new_container.start()
+
+        msg = f"Container {name} recreated with seccomp profile: {profile_name}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        logger.error(f"Failed to recreate container {name} with seccomp profile {profile_name}: {e}")
+        return False, str(e)
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +598,30 @@ def sync_config() -> bool:
 # Heartbeat
 # ---------------------------------------------------------------------------
 
+def _send_bare_heartbeat(agent_name: str, command: str, result: str, message: str):
+    """Send a heartbeat without a live container (e.g., after wipe).
+
+    Used to report command results when the container no longer exists.
+    """
+    if not CONTROL_PLANE_URL or not CONTROL_PLANE_TOKEN:
+        return
+    heartbeat = {
+        "status": "removed",
+        "last_command": command,
+        "last_command_result": result,
+        "last_command_message": message,
+    }
+    try:
+        requests.post(
+            f"{CONTROL_PLANE_URL}/api/v1/agent/heartbeat",
+            json=heartbeat,
+            headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send bare heartbeat for {agent_name}: {e}")
+
+
 def send_heartbeat(container) -> Optional[dict]:
     """Send heartbeat for a single agent container to control plane.
 
@@ -475,23 +683,83 @@ def _heartbeat_and_handle(container):
     """Send heartbeat for one container and execute any pending command.
 
     Runs inside a ThreadPoolExecutor — must be thread-safe.
+    Commands take priority over seccomp updates — only one operation per cycle.
     """
     response = send_heartbeat(container)
-    if response and response.get("command"):
+    if not response:
+        return
+
+    # Commands take priority — execute and return
+    if response.get("command"):
         command = response["command"]
         cmd_args = response.get("command_args")
         logger.info(f"Received command for {container.name}: {command}")
         success, message = execute_command(command, container, cmd_args)
+        result_str = "success" if success else "failed"
         with _command_results_lock:
             _last_command_results[container.name] = {
                 "command": command,
-                "result": "success" if success else "failed",
+                "result": result_str,
                 "message": message,
             }
         logger.info(
             f"Command {command} on {container.name} "
             f"{'succeeded' if success else 'failed'}: {message}"
         )
+        # Wipe removes the container, so it won't be discovered next cycle.
+        # Send the result immediately via a bare heartbeat.
+        if command == "wipe":
+            _send_bare_heartbeat(container.name, command, result_str, message)
+            with _command_results_lock:
+                _last_command_results.pop(container.name, None)
+        return
+
+    # No command — check if seccomp profile needs updating
+    desired_profile = response.get("seccomp_profile")
+    if desired_profile and desired_profile in VALID_SECCOMP_PROFILES:
+        current_label = _get_current_seccomp_label(container)
+        # Skip unlabelled containers (existing deployments) and gVisor containers
+        if current_label is not None and current_label != desired_profile:
+            logger.info(
+                f"Seccomp mismatch on {container.name}: "
+                f"current={current_label}, desired={desired_profile}"
+            )
+            success, message = recreate_container_with_seccomp(container, desired_profile)
+            with _command_results_lock:
+                _last_command_results[container.name] = {
+                    "command": "seccomp_update",
+                    "result": "success" if success else "failed",
+                    "message": message,
+                }
+
+
+def _check_standalone_seccomp(agents):
+    """In standalone mode, check cagent.yaml security.seccomp_profile against containers.
+
+    Only recreates containers that have a cagent.seccomp_profile label
+    (skips unlabelled/gVisor containers).
+    """
+    try:
+        config_path = Path(CAGENT_CONFIG_PATH)
+        if not config_path.exists():
+            return
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
+        desired = config.get("security", {}).get("seccomp_profile", "standard")
+        if desired not in VALID_SECCOMP_PROFILES:
+            logger.warning(f"Invalid seccomp_profile in cagent.yaml: {desired}")
+            return
+
+        for container in agents:
+            current_label = _get_current_seccomp_label(container)
+            if current_label is not None and current_label != desired:
+                logger.info(
+                    f"Standalone seccomp mismatch on {container.name}: "
+                    f"current={current_label}, desired={desired}"
+                )
+                recreate_container_with_seccomp(container, desired)
+    except Exception as e:
+        logger.error(f"Error checking standalone seccomp profiles: {e}")
 
 
 def main_loop():
@@ -561,6 +829,10 @@ def main_loop():
             if (now - last_sync_time) >= CONFIG_SYNC_INTERVAL:
                 sync_config()
                 last_sync_time = now
+
+            # Standalone mode: check seccomp profile from cagent.yaml
+            if DATAPLANE_MODE == "standalone" and agents:
+                _check_standalone_seccomp(agents)
 
         except Exception as e:
             logger.error(f"Error in main loop: {e}")

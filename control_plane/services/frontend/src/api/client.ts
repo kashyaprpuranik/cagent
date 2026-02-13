@@ -22,6 +22,8 @@ import type {
   EmailPolicy,
   CreateEmailPolicyRequest,
   UpdateEmailPolicyRequest,
+  SecuritySettings,
+  UpdateSecuritySettingsRequest,
 } from '../types/api';
 
 const API_BASE = './api/v1';
@@ -390,6 +392,23 @@ export const api = {
       headers: getAuthHeaders(),
     });
     return handleResponse<void>(response);
+  },
+
+  // Security Settings
+  getSecuritySettings: async (agentId: string): Promise<SecuritySettings> => {
+    const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/security-settings`, {
+      headers: getAuthHeaders(),
+    });
+    return handleResponse<SecuritySettings>(response);
+  },
+
+  updateSecuritySettings: async (agentId: string, data: UpdateSecuritySettingsRequest): Promise<SecuritySettings> => {
+    const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/security-settings`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<SecuritySettings>(response);
   },
 
   // Terminal Tickets

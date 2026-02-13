@@ -28,6 +28,10 @@ rate_limits:
     requests_per_minute: 120
     burst_size: 20
 
+# Container security settings
+security:
+  seccomp_profile: standard  # standard, hardened, permissive
+
 # =============================================================================
 # Domain Allowlist
 # =============================================================================

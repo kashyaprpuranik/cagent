@@ -1,0 +1,15 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "comment": "Permissive profile: allow all syscalls, only block raw socket creation (AF_RAW). For debugging only.",
+  "syscalls": [
+    {
+      "names": ["socket"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 0, "value": 3, "op": "SCMP_CMP_EQ" }
+      ],
+      "comment": "Block AF_RAW sockets to prevent proxy bypass"
+    }
+  ]
+}

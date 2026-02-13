@@ -22,6 +22,7 @@ from control_plane.redis_client import (
     publish_policy_changed,
     get_cached_domain_policies,
     cache_domain_policies,
+    invalidate_domain_policy_cache,
 )
 
 router = APIRouter()
@@ -203,6 +204,7 @@ async def create_domain_policy(
 
     redis_client = getattr(request.app.state, "redis", None)
     await publish_policy_changed(redis_client, effective_tenant_id, "created", policy.domain)
+    await invalidate_domain_policy_cache(redis_client, effective_tenant_id)
 
     return domain_policy_to_response(db_policy)
 
@@ -418,6 +420,7 @@ async def update_domain_policy(
 
     redis_client = getattr(request.app.state, "redis", None)
     await publish_policy_changed(redis_client, policy.tenant_id, "updated", policy.domain)
+    await invalidate_domain_policy_cache(redis_client, policy.tenant_id)
 
     return domain_policy_to_response(policy)
 
@@ -457,6 +460,7 @@ async def delete_domain_policy(
 
     redis_client = getattr(request.app.state, "redis", None)
     await publish_policy_changed(redis_client, tenant_id, "deleted", domain)
+    await invalidate_domain_policy_cache(redis_client, tenant_id)
 
     return {"deleted": True, "id": policy_id}
 
