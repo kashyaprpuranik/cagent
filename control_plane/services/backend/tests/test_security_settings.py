@@ -23,7 +23,7 @@ class TestSecuritySettings:
         assert response.status_code == 200
         data = response.json()
         assert data["agent_id"] == "sec-agent"
-        assert data["seccomp_profile"] == "standard"
+        assert data["seccomp_profile"] == "hardened"
 
     def test_update_to_hardened(self, client, auth_headers):
         """Should update seccomp profile to hardened."""
@@ -79,7 +79,7 @@ class TestSecuritySettings:
             json={"status": "running"},
         )
         assert response.status_code == 200
-        assert response.json()["seccomp_profile"] == "standard"
+        assert response.json()["seccomp_profile"] == "hardened"
 
         # Update to hardened
         client.put(
@@ -105,7 +105,7 @@ class TestSecuritySettings:
             headers=auth_headers,
         )
         assert response.status_code == 200
-        assert response.json()["seccomp_profile"] == "standard"
+        assert response.json()["seccomp_profile"] == "hardened"
 
     def test_security_settings_not_found(self, client, auth_headers):
         """Should return 404 for unknown agent."""

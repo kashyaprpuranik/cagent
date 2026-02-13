@@ -197,14 +197,14 @@ async def agent_heartbeat(
     if state.security_profile_id:
         profile = db.query(SecurityProfile).filter(SecurityProfile.id == state.security_profile_id).first()
         if profile:
-            response.seccomp_profile = profile.seccomp_profile or "standard"
+            response.seccomp_profile = profile.seccomp_profile or "hardened"
             response.cpu_limit = profile.cpu_limit
             response.memory_limit_mb = profile.memory_limit_mb
             response.pids_limit = profile.pids_limit
         else:
-            response.seccomp_profile = state.seccomp_profile or "standard"
+            response.seccomp_profile = state.seccomp_profile or "hardened"
     else:
-        response.seccomp_profile = state.seccomp_profile or "standard"
+        response.seccomp_profile = state.seccomp_profile or "hardened"
 
     # DB fallback: write status fields when Redis is unavailable
     if redis_client is None:
@@ -395,7 +395,7 @@ async def get_agent_status(
         last_command_result=state.last_command_result,
         last_command_at=state.last_command_at,
         online=online,
-        seccomp_profile=state.seccomp_profile or "standard",
+        seccomp_profile=state.seccomp_profile or "hardened",
         security_profile_id=state.security_profile_id,
         security_profile_name=profile_name,
     )
@@ -425,7 +425,7 @@ async def get_security_settings(
 
     return SecuritySettingsResponse(
         agent_id=state.agent_id,
-        seccomp_profile=state.seccomp_profile or "standard",
+        seccomp_profile=state.seccomp_profile or "hardened",
     )
 
 
@@ -448,7 +448,7 @@ async def update_security_settings(
     if not state:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    old_profile = state.seccomp_profile or "standard"
+    old_profile = state.seccomp_profile or "hardened"
     state.seccomp_profile = body.seccomp_profile.value
 
     log = AuditTrail(

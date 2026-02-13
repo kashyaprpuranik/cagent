@@ -729,7 +729,7 @@ function SettingsEditor({
         <div>
           <label className="block text-sm text-gray-400 mb-1">Seccomp Profile</label>
           <select
-            value={config.security?.seccomp_profile || 'standard'}
+            value={config.security?.seccomp_profile || 'hardened'}
             onChange={(e) =>
               onChange({
                 ...config,
@@ -891,7 +891,7 @@ export default function ConfigPage() {
       `    burst_size: ${cfg.rate_limits?.default?.burst_size || 20}`,
       '',
       'security:',
-      `  seccomp_profile: ${cfg.security?.seccomp_profile || 'standard'}`,
+      `  seccomp_profile: ${cfg.security?.seccomp_profile || 'hardened'}`,
       '',
       'domains:',
     ];

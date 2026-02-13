@@ -867,7 +867,7 @@ def _check_standalone_seccomp(agents):
             return
         with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
-        desired = config.get("security", {}).get("seccomp_profile", "standard")
+        desired = config.get("security", {}).get("seccomp_profile", "hardened")
         if desired not in VALID_SECCOMP_PROFILES:
             logger.warning(f"Invalid seccomp_profile in cagent.yaml: {desired}")
             return

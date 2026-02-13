@@ -156,7 +156,7 @@ class SecurityProfile(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     description = Column(String(500), nullable=True)
-    seccomp_profile = Column(String(20), default="standard")  # standard, hardened, permissive
+    seccomp_profile = Column(String(20), default="hardened")  # standard, hardened, permissive
 
     # Resource limits (nullable = use container/compose defaults)
     cpu_limit = Column(Float, nullable=True)       # Number of CPUs (e.g., 1.0, 2.0, 0.5)
@@ -211,7 +211,7 @@ class AgentState(Base):
     # STCP configuration for P2P SSH tunneling
     stcp_secret_key = Column(String(256), nullable=True)  # Encrypted STCP secret
     # Seccomp profile for container security
-    seccomp_profile = Column(String(20), default="standard")  # standard, hardened, permissive
+    seccomp_profile = Column(String(20), default="hardened")  # standard, hardened, permissive
     # Security profile assignment
     security_profile_id = Column(Integer, ForeignKey("security_profiles.id"), nullable=True, index=True)
     security_profile = relationship("SecurityProfile", back_populates="agents")

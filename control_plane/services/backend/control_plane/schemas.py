@@ -302,7 +302,7 @@ class SecurityProfileCreate(BaseModel):
     """Create a new security profile."""
     name: str
     description: Optional[str] = None
-    seccomp_profile: Optional[SeccompProfile] = None  # Default: standard
+    seccomp_profile: Optional[SeccompProfile] = None  # Default: hardened
     cpu_limit: Optional[float] = None         # Number of CPUs (e.g., 1.0, 2.0)
     memory_limit_mb: Optional[int] = None     # Memory limit in MB (e.g., 2048)
     pids_limit: Optional[int] = None          # Max number of processes (e.g., 256)

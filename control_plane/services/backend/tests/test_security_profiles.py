@@ -72,7 +72,7 @@ class TestSecurityProfileCRUD:
         profile = _create_profile(client, auth_headers, name="my-profile", description="Test profile")
         assert profile["name"] == "my-profile"
         assert profile["description"] == "Test profile"
-        assert profile["seccomp_profile"] == "standard"
+        assert profile["seccomp_profile"] == "hardened"
         assert profile["agent_count"] == 0
         assert profile["policy_count"] == 0
 
