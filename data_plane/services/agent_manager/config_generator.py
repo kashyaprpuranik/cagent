@@ -424,7 +424,7 @@ class ConfigGenerator:
         by the agent-manager) so Envoy's Lua httpCall reaches the backend
         via container-to-container networking.
         """
-        cp_url = os.environ.get("CONTROL_PLANE_URL", "http://backend:8000")
+        cp_url = os.environ.get("CONTROL_PLANE_URL", "") or "http://backend:8000"
         # Strip scheme
         host_port = cp_url.split("://", 1)[-1]
         if ":" in host_port:

@@ -60,10 +60,36 @@ def is_data_plane_running():
 
 @pytest.fixture(scope="module")
 def data_plane_running():
-    """Verify data plane is running (guaranteed by run_tests.sh)."""
+    """Verify data plane is running and proxy is accepting connections.
+
+    The agent-manager restarts Envoy on startup (config generation), so
+    even after ``run_tests.sh``'s initial sleep the proxy may still be
+    coming back up.  Poll from an agent container until connectivity is
+    confirmed.
+    """
     assert is_data_plane_running(), \
         "Data plane not running — run_tests.sh should have started it"
-    return True
+
+    # Wait for Envoy to accept connections (agent-manager restarts it on startup)
+    agent = _discover_agent_container_name()
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        try:
+            probe = subprocess.run(
+                ["docker", "exec", agent, "sh", "-c",
+                 "nc -z -w 2 10.200.1.10 8443 && echo OK"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if "OK" in probe.stdout:
+                return True
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+            pass
+        time.sleep(3)
+
+    pytest.fail(
+        "Envoy proxy not reachable from agent container after 60s — "
+        "agent-manager may still be restarting it"
+    )
 
 
 @pytest.fixture(scope="module")
