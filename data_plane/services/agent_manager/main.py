@@ -309,9 +309,16 @@ def _get_current_resource_limits(container) -> dict:
         container.reload()
         host_config = container.attrs.get("HostConfig", {})
 
-        # CPU: NanoCpus → float CPUs
-        nano_cpus = host_config.get("NanoCpus", 0)
-        cpu_limit = round(nano_cpus / 1e9, 2) if nano_cpus else None
+        # CPU: prefer CpuQuota/CpuPeriod (set by container.update), fall back to NanoCpus
+        cpu_quota = host_config.get("CpuQuota", 0) or 0
+        cpu_period = host_config.get("CpuPeriod", 0) or 0
+        nano_cpus = host_config.get("NanoCpus", 0) or 0
+        if cpu_quota > 0 and cpu_period > 0:
+            cpu_limit = round(cpu_quota / cpu_period, 2)
+        elif nano_cpus > 0:
+            cpu_limit = round(nano_cpus / 1e9, 2)
+        else:
+            cpu_limit = None
 
         # Memory: bytes → MB (0 means unlimited)
         memory = host_config.get("Memory", 0)
