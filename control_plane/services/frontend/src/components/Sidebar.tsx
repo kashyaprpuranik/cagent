@@ -12,6 +12,8 @@ import {
   Globe,
   Mail,
   Shield,
+  ShieldCheck,
+  Gauge,
   LucideIcon,
   ChevronDown,
 } from 'lucide-react';
@@ -47,15 +49,17 @@ const navSections: NavSection[] = [
   {
     title: 'Configuration',
     items: [
+      { to: '/profiles', icon: ShieldCheck, label: 'Profiles', adminOnly: true },
       { to: '/domain-policies', icon: Globe, label: 'Egress Policies', adminOnly: true },
-      { to: '/email-policies', icon: Mail, label: 'Email Policies', badge: 'Beta', adminOnly: true, beta: 'email_policies' },
       { to: '/runtime-policies', icon: Shield, label: 'Runtime Policies', adminOnly: true },
-      { to: '/ip-acls', icon: Network, label: 'IP ACLs', adminOnly: true },
+      { to: '/resource-policies', icon: Gauge, label: 'Resource Policies', adminOnly: true },
+      { to: '/email-policies', icon: Mail, label: 'Email Policies', badge: 'Beta', adminOnly: true, beta: 'email_policies' },
     ],
   },
   {
     title: 'Administration',
     items: [
+      { to: '/ip-acls', icon: Network, label: 'IP ACLs', adminOnly: true },
       { to: '/tokens', icon: Key, label: 'API Tokens', adminOnly: true },
       { to: '/tenants', icon: Building2, label: 'Tenants', superAdminOnly: true },
       { to: '/settings', icon: Settings, label: 'Settings' },

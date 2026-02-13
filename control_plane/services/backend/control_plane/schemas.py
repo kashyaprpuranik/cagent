@@ -149,7 +149,7 @@ class DomainPolicyCreate(BaseModel):
     domain: str  # e.g., "api.openai.com", "*.github.com"
     alias: Optional[str] = None  # e.g., "openai" -> openai.devbox.local
     description: Optional[str] = None
-    agent_id: Optional[str] = None  # NULL = global
+    profile_id: Optional[int] = None  # NULL = tenant baseline
 
     # Path restrictions (empty = all paths allowed)
     allowed_paths: Optional[List[str]] = None  # ["/v1/chat/*", "/v1/models"]
@@ -197,7 +197,7 @@ class DomainPolicyResponse(BaseModel):
     alias: Optional[str]
     description: Optional[str]
     enabled: bool
-    agent_id: Optional[str]
+    profile_id: Optional[int] = None
     allowed_paths: List[str]
     requests_per_minute: Optional[int]
     burst_size: Optional[int]
@@ -294,6 +294,54 @@ class EmailPolicyResponse(BaseModel):
         from_attributes = True
 
 
+# =============================================================================
+# Security Profile Models
+# =============================================================================
+
+class SecurityProfileCreate(BaseModel):
+    """Create a new security profile."""
+    name: str
+    description: Optional[str] = None
+    seccomp_profile: Optional[SeccompProfile] = None  # Default: standard
+    cpu_limit: Optional[float] = None         # Number of CPUs (e.g., 1.0, 2.0)
+    memory_limit_mb: Optional[int] = None     # Memory limit in MB (e.g., 2048)
+    pids_limit: Optional[int] = None          # Max number of processes (e.g., 256)
+
+
+class SecurityProfileUpdate(BaseModel):
+    """Update an existing security profile."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    seccomp_profile: Optional[SeccompProfile] = None
+    cpu_limit: Optional[float] = None
+    memory_limit_mb: Optional[int] = None
+    pids_limit: Optional[int] = None
+
+
+class SecurityProfileResponse(BaseModel):
+    """Security profile response."""
+    id: int
+    tenant_id: int
+    name: str
+    description: Optional[str]
+    seccomp_profile: str
+    cpu_limit: Optional[float] = None
+    memory_limit_mb: Optional[int] = None
+    pids_limit: Optional[int] = None
+    agent_count: int = 0
+    policy_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AgentProfileAssignment(BaseModel):
+    """Assign a security profile to an agent."""
+    profile_id: int
+
+
 class AgentHeartbeat(BaseModel):
     """Heartbeat sent by agent-manager to control plane."""
     status: str  # running, stopped, not_found
@@ -314,6 +362,10 @@ class AgentHeartbeatResponse(BaseModel):
     command: Optional[str] = None  # wipe, restart, stop, start
     command_args: Optional[dict] = None  # e.g., {"wipe_workspace": true}
     seccomp_profile: Optional[str] = None  # Desired seccomp profile for container
+    # Resource limits (from security profile)
+    cpu_limit: Optional[float] = None         # Number of CPUs (e.g., 1.0, 2.0)
+    memory_limit_mb: Optional[int] = None     # Memory limit in MB
+    pids_limit: Optional[int] = None          # Max number of processes
 
 
 class AgentStatusResponse(BaseModel):
@@ -332,6 +384,8 @@ class AgentStatusResponse(BaseModel):
     last_command_at: Optional[datetime]
     online: bool  # True if heartbeat received within last 60s
     seccomp_profile: Optional[str] = None  # Current seccomp profile
+    security_profile_id: Optional[int] = None
+    security_profile_name: Optional[str] = None
 
     class Config:
         from_attributes = True

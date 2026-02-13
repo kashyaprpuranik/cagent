@@ -1189,13 +1189,13 @@ class TestAuditTrail:
         r = requests.get(
             f"{CP_BASE}/api/v1/audit-trail",
             headers=admin_headers,
-            params={"event_type": "domain_policy_created"},
+            params={"event_type": "egress_policy_created"},
         )
         assert r.status_code == 200
         items = r.json()["items"]
         created = [e for e in items if self.DOMAIN in e.get("action", "")]
         assert len(created) >= 1, (
-            f"No audit entry for domain_policy_created with {self.DOMAIN}"
+            f"No audit entry for egress_policy_created with {self.DOMAIN}"
         )
         assert created[0]["severity"] == "INFO"
 
@@ -1203,13 +1203,13 @@ class TestAuditTrail:
         r = requests.get(
             f"{CP_BASE}/api/v1/audit-trail",
             headers=admin_headers,
-            params={"event_type": "domain_policy_deleted"},
+            params={"event_type": "egress_policy_deleted"},
         )
         assert r.status_code == 200
         items = r.json()["items"]
         deleted = [e for e in items if self.DOMAIN in e.get("action", "")]
         assert len(deleted) >= 1, (
-            f"No audit entry for domain_policy_deleted with {self.DOMAIN}"
+            f"No audit entry for egress_policy_deleted with {self.DOMAIN}"
         )
         assert deleted[0]["severity"] == "WARNING"
 

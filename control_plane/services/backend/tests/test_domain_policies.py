@@ -59,7 +59,7 @@ class TestDomainPolicies:
         assert data["credential_format"] == "Bearer {value}"
 
     def test_create_duplicate_domain_policy_fails(self, client, auth_headers):
-        """Should reject duplicate domain (same domain + agent_id)."""
+        """Should reject duplicate domain (same domain + profile_id + tenant)."""
         policy_data = {
             "domain": "duplicate.example.com",
             "requests_per_minute": 60,
@@ -288,104 +288,116 @@ class TestDomainPolicyLookup:
         assert data["matched"] is False
 
 
-class TestPerAgentDomainPolicies:
-    """Test per-agent domain policy configuration."""
+class TestProfileScopedDomainPolicies:
+    """Test profile-scoped domain policy configuration."""
 
-    def test_create_agent_scoped_policy(self, client, auth_headers):
-        """Should create domain policy scoped to a specific agent."""
+    def test_create_profile_scoped_policy(self, client, auth_headers):
+        """Should create domain policy scoped to a specific profile."""
+        # Create a profile first
+        profile_resp = client.post(
+            "/api/v1/security-profiles",
+            headers=auth_headers,
+            json={"name": "dp-test-profile"},
+        )
+        profile_id = profile_resp.json()["id"]
+
         response = client.post(
             "/api/v1/domain-policies",
             headers=auth_headers,
             json={
-                "domain": "agent-specific.example.com",
-                "description": "Agent-specific domain",
-                "agent_id": "scoped-agent",
+                "domain": "profile-specific.example.com",
+                "description": "Profile-scoped domain",
+                "profile_id": profile_id,
             }
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["agent_id"] == "scoped-agent"
+        assert data["profile_id"] == profile_id
 
-    def test_filter_policies_by_agent_id(self, client, auth_headers):
-        """Should filter domain policies by agent_id."""
-        # Create global policy
+    def test_filter_policies_by_profile_id(self, client, auth_headers):
+        """Should filter domain policies by profile_id."""
+        profile_resp = client.post(
+            "/api/v1/security-profiles",
+            headers=auth_headers,
+            json={"name": "dp-filter-profile"},
+        )
+        profile_id = profile_resp.json()["id"]
+
+        # Create unscoped policy
         client.post(
             "/api/v1/domain-policies",
             headers=auth_headers,
-            json={"domain": "global-filter.example.com"}
+            json={"domain": "unscoped-filter.example.com"}
         )
-        # Create agent-specific policy
+        # Create profile-scoped policy
         client.post(
             "/api/v1/domain-policies",
             headers=auth_headers,
             json={
-                "domain": "filter-agent.example.com",
-                "agent_id": "filter-agent",
+                "domain": "scoped-filter.example.com",
+                "profile_id": profile_id,
             }
         )
 
-        # List with agent_id filter
-        response = client.get("/api/v1/domain-policies?agent_id=filter-agent", headers=auth_headers)
+        # List with profile_id filter
+        response = client.get(f"/api/v1/domain-policies?profile_id={profile_id}", headers=auth_headers)
         assert response.status_code == 200
         policies = response.json()["items"]
-        # Should only include filter-agent policies
-        for policy in policies:
-            assert policy.get("agent_id") == "filter-agent" or policy.get("agent_id") is None
+        domains = [p["domain"] for p in policies]
+        assert "scoped-filter.example.com" in domains
+        assert "unscoped-filter.example.com" not in domains
 
-    def test_agent_token_sees_own_and_global_policies(self, client, auth_headers):
-        """Agent token should see its own policies plus global policies."""
+    def test_agent_token_sees_profile_policies(self, client, auth_headers):
+        """Agent token should see policies from its assigned profile."""
         # Create agent and get a token for it
         client.post(
-            "/api/v1/agent/heartbeat?agent_id=policy-test-agent",
+            "/api/v1/agent/heartbeat?agent_id=dp-profile-agent",
             headers=auth_headers,
             json={"status": "running"}
         )
-
-        # Create agent token
         token_response = client.post(
             "/api/v1/tokens",
             headers=auth_headers,
-            json={"name": "policy-test-token", "token_type": "agent", "agent_id": "policy-test-agent"}
+            json={"name": "dp-profile-token", "token_type": "agent", "agent_id": "dp-profile-agent"}
         )
         agent_token = token_response.json()["token"]
         agent_headers = {"Authorization": f"Bearer {agent_token}"}
 
-        # Create global policy with credential
+        # Create profiles
+        profile_a_resp = client.post("/api/v1/security-profiles", headers=auth_headers, json={"name": "dp-prof-a"})
+        profile_a_id = profile_a_resp.json()["id"]
+        profile_b_resp = client.post("/api/v1/security-profiles", headers=auth_headers, json={"name": "dp-prof-b"})
+        profile_b_id = profile_b_resp.json()["id"]
+
+        # Assign profile-a to agent
+        client.put(
+            "/api/v1/agents/dp-profile-agent/profile",
+            headers=auth_headers,
+            json={"profile_id": profile_a_id},
+        )
+
+        # Create policy in profile-a with credential
         client.post(
             "/api/v1/domain-policies",
             headers=auth_headers,
             json={
-                "domain": "global-policy.example.com",
+                "domain": "in-profile.example.com",
+                "profile_id": profile_a_id,
                 "credential": {
                     "header": "X-API-Key",
                     "format": "{value}",
-                    "value": "global-value",
+                    "value": "profile-value",
                 },
             }
         )
 
-        # Create agent-specific policy with credential
+        # Create policy in profile-b (agent should NOT see this)
         client.post(
             "/api/v1/domain-policies",
             headers=auth_headers,
             json={
-                "domain": "agent-policy.example.com",
-                "agent_id": "policy-test-agent",
-                "credential": {
-                    "header": "X-API-Key",
-                    "format": "{value}",
-                    "value": "agent-value",
-                },
-            }
-        )
-
-        # Create policy for different agent
-        client.post(
-            "/api/v1/domain-policies",
-            headers=auth_headers,
-            json={
-                "domain": "other-policy.example.com",
-                "agent_id": "other-agent",
+                "domain": "other-profile.example.com",
+                "profile_id": profile_b_id,
                 "credential": {
                     "header": "X-API-Key",
                     "format": "{value}",
@@ -394,87 +406,68 @@ class TestPerAgentDomainPolicies:
             }
         )
 
-        # Agent should see global policy
+        # Agent should see profile-a policy
         response = client.get(
-            "/api/v1/domain-policies/for-domain?domain=global-policy.example.com",
+            "/api/v1/domain-policies/for-domain?domain=in-profile.example.com",
             headers=agent_headers
         )
         assert response.status_code == 200
         assert response.json()["matched"] is True
 
-        # Agent should see its own policy
+        # Agent should NOT see profile-b policy
         response = client.get(
-            "/api/v1/domain-policies/for-domain?domain=agent-policy.example.com",
-            headers=agent_headers
-        )
-        assert response.status_code == 200
-        assert response.json()["matched"] is True
-
-        # Agent should NOT see other agent's policy
-        response = client.get(
-            "/api/v1/domain-policies/for-domain?domain=other-policy.example.com",
+            "/api/v1/domain-policies/for-domain?domain=other-profile.example.com",
             headers=agent_headers
         )
         assert response.status_code == 200
         assert response.json()["matched"] is False
 
-    def test_agent_specific_policy_takes_precedence(self, client, auth_headers):
-        """Agent-specific policies should take precedence over global policies."""
+    def test_agent_falls_back_to_default_profile(self, client, auth_headers):
+        """Agent without assigned profile should see policies from 'default' profile."""
         # Create agent and get a token for it
         client.post(
-            "/api/v1/agent/heartbeat?agent_id=precedence-agent",
+            "/api/v1/agent/heartbeat?agent_id=dp-default-agent",
             headers=auth_headers,
             json={"status": "running"}
         )
         token_response = client.post(
             "/api/v1/tokens",
             headers=auth_headers,
-            json={"name": "precedence-token", "token_type": "agent", "agent_id": "precedence-agent"}
+            json={"name": "dp-default-token", "token_type": "agent", "agent_id": "dp-default-agent"}
         )
         agent_token = token_response.json()["token"]
         agent_headers = {"Authorization": f"Bearer {agent_token}"}
 
-        # Create global policy
-        client.post(
-            "/api/v1/domain-policies",
-            headers=auth_headers,
-            json={
-                "domain": "precedence.example.com",
-                "requests_per_minute": 100,
-                "credential": {
-                    "header": "X-API-Key",
-                    "format": "{value}",
-                    "value": "global-key",
-                },
-            }
-        )
+        # Create "default" profile
+        default_resp = client.post("/api/v1/security-profiles", headers=auth_headers, json={"name": "default"})
+        default_profile_id = default_resp.json()["id"]
 
-        # Create agent-specific policy for same domain
+        # Create policy in default profile
         client.post(
             "/api/v1/domain-policies",
             headers=auth_headers,
             json={
-                "domain": "precedence.example.com",
-                "agent_id": "precedence-agent",
+                "domain": "default-profile-policy.example.com",
+                "profile_id": default_profile_id,
                 "requests_per_minute": 50,
                 "credential": {
                     "header": "X-API-Key",
                     "format": "{value}",
-                    "value": "agent-key",
+                    "value": "default-key",
                 },
             }
         )
 
-        # Agent should get agent-specific policy (takes precedence)
+        # Agent (no profile assigned) should see default profile policy
         response = client.get(
-            "/api/v1/domain-policies/for-domain?domain=precedence.example.com",
+            "/api/v1/domain-policies/for-domain?domain=default-profile-policy.example.com",
             headers=agent_headers
         )
         assert response.status_code == 200
         data = response.json()
         assert data["matched"] is True
-        assert data["requests_per_minute"] == 50  # Agent-specific, not global 100
-        assert data["header_value"] == "agent-key"  # Agent-specific, not global
+        assert data["requests_per_minute"] == 50
+        assert data["header_value"] == "default-key"
 
 
 class TestDomainPolicyExportAndGetById:

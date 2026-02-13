@@ -63,6 +63,8 @@ export interface AgentStatus {
   last_command_at?: string;
   online: boolean;
   seccomp_profile?: string;
+  security_profile_id?: number;
+  security_profile_name?: string;
 }
 
 export type SeccompProfile = 'standard' | 'hardened' | 'permissive';
@@ -265,7 +267,7 @@ export interface DomainPolicy {
   alias?: string;
   description?: string;
   enabled: boolean;
-  agent_id?: string;
+  profile_id?: number;
   allowed_paths: string[];
   requests_per_minute?: number;
   burst_size?: number;
@@ -291,7 +293,7 @@ export interface CreateDomainPolicyRequest {
   domain: string;
   alias?: string;
   description?: string;
-  agent_id?: string;
+  profile_id?: number;
   allowed_paths?: string[];
   requests_per_minute?: number;
   burst_size?: number;
@@ -314,4 +316,38 @@ export interface UpdateDomainPolicyRequest {
   read_only?: boolean;
   credential?: DomainPolicyCredential;
   clear_credential?: boolean;
+}
+
+// Security Profiles
+export interface SecurityProfile {
+  id: number;
+  tenant_id: number;
+  name: string;
+  description?: string;
+  seccomp_profile: string;
+  cpu_limit?: number;
+  memory_limit_mb?: number;
+  pids_limit?: number;
+  agent_count: number;
+  policy_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSecurityProfileRequest {
+  name: string;
+  description?: string;
+}
+
+export interface UpdateSecurityProfileRequest {
+  name?: string;
+  description?: string;
+  seccomp_profile?: SeccompProfile;
+  cpu_limit?: number;
+  memory_limit_mb?: number;
+  pids_limit?: number;
+}
+
+export interface AssignProfileRequest {
+  profile_id: number;
 }

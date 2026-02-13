@@ -11,7 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from control_plane.database import get_db
-from control_plane.models import DomainPolicy, AuditTrail
+from control_plane.models import DomainPolicy, AuditTrail, AgentState, SecurityProfile
 from control_plane.schemas import (
     DomainPolicyCreate, DomainPolicyUpdate, DomainPolicyResponse, DomainPolicyCredential,
 )
@@ -54,7 +54,7 @@ def domain_policy_to_response(policy: DomainPolicy) -> dict:
         "alias": policy.alias,
         "description": policy.description,
         "enabled": policy.enabled,
-        "agent_id": policy.agent_id,
+        "profile_id": policy.profile_id,
         "allowed_paths": policy.allowed_paths or [],
         "requests_per_minute": policy.requests_per_minute,
         "burst_size": policy.burst_size,
@@ -106,12 +106,12 @@ async def list_domain_policies(
     request: Request,
     db: Session = Depends(get_db),
     token_info: TokenInfo = Depends(require_admin_role),
-    agent_id: Optional[str] = None,
     tenant_id: Optional[int] = None,
+    profile_id: Optional[int] = Query(default=None, description="Filter by profile ID. Use 0 for baseline (no profile)."),
     limit: int = Query(default=100, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
-    """List domain policies. Filter by tenant_id (super admin) or agent_id."""
+    """List domain policies. Filter by tenant_id (super admin) or profile_id."""
     query = db.query(DomainPolicy)
 
     # Tenant filtering
@@ -123,10 +123,12 @@ async def list_domain_policies(
         # Non-super-admin sees only their tenant's policies
         query = query.filter(DomainPolicy.tenant_id == token_info.tenant_id)
 
-    if agent_id:
-        query = query.filter(
-            (DomainPolicy.agent_id == agent_id) | (DomainPolicy.agent_id.is_(None))
-        )
+    if profile_id is not None:
+        if profile_id == 0:
+            # Special value: baseline policies (no profile)
+            query = query.filter(DomainPolicy.profile_id.is_(None))
+        else:
+            query = query.filter(DomainPolicy.profile_id == profile_id)
 
     # Filter out expired policies
     query = _filter_not_expired(query)
@@ -155,10 +157,18 @@ async def create_domain_policy(
         # Non-super-admin policies are always scoped to their tenant
         effective_tenant_id = token_info.tenant_id
 
-    # Check for duplicates within same tenant
+    # Verify profile exists in same tenant if provided
+    if policy.profile_id is not None:
+        profile = db.query(SecurityProfile).filter(SecurityProfile.id == policy.profile_id).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Security profile not found")
+        if profile.tenant_id != effective_tenant_id:
+            raise HTTPException(status_code=400, detail="Security profile must belong to the same tenant")
+
+    # Check for duplicates within same tenant (including profile_id)
     existing = db.query(DomainPolicy).filter(
         DomainPolicy.domain == policy.domain,
-        DomainPolicy.agent_id == policy.agent_id,
+        DomainPolicy.profile_id == policy.profile_id,
         DomainPolicy.tenant_id == effective_tenant_id
     ).first()
     if existing:
@@ -174,7 +184,7 @@ async def create_domain_policy(
         domain=policy.domain,
         alias=policy.alias,
         description=policy.description,
-        agent_id=policy.agent_id,
+        profile_id=policy.profile_id,
         allowed_paths=policy.allowed_paths or [],
         requests_per_minute=policy.requests_per_minute,
         burst_size=policy.burst_size,
@@ -191,10 +201,10 @@ async def create_domain_policy(
 
     # Audit log
     log = AuditTrail(
-        event_type="domain_policy_created",
+        event_type="egress_policy_created",
         user=token_info.token_name or "admin",
-        action=f"Domain policy created: {policy.domain}",
-        details=json.dumps({"domain": policy.domain, "agent_id": policy.agent_id, "has_credential": policy.credential is not None}),
+        action=f"Egress policy created: {policy.domain}",
+        details=json.dumps({"domain": policy.domain, "profile_id": policy.profile_id, "has_credential": policy.credential is not None}),
         severity="INFO",
         tenant_id=effective_tenant_id
     )
@@ -224,14 +234,26 @@ async def get_policy_for_domain(
     """
     query = db.query(DomainPolicy).filter(DomainPolicy.enabled == True)
 
-    # Tenant isolation
+    # Resolve profile for agent token
     if token_info.token_type == "agent" and token_info.agent_id:
-        # Agent tokens only see their agent's policies + global policies
-        query = query.filter(
-            (DomainPolicy.agent_id == token_info.agent_id) | (DomainPolicy.agent_id.is_(None))
-        )
+        agent = db.query(AgentState).filter(AgentState.agent_id == token_info.agent_id).first()
+        profile = None
+        if agent and agent.security_profile_id:
+            profile = db.query(SecurityProfile).filter(SecurityProfile.id == agent.security_profile_id).first()
+
+        if not profile and agent:
+            # Fall back to "default" profile for the tenant
+            profile = db.query(SecurityProfile).filter(
+                SecurityProfile.name == "default",
+                SecurityProfile.tenant_id == agent.tenant_id,
+            ).first()
+
+        if profile:
+            query = query.filter(DomainPolicy.profile_id == profile.id)
+        else:
+            # No profile at all — return nothing
+            query = query.filter(DomainPolicy.profile_id == -1)
     elif not token_info.is_super_admin:
-        # Non-super-admin sees only their tenant's policies
         if not token_info.tenant_id:
             raise HTTPException(status_code=403, detail="Token must be scoped to a tenant")
         query = query.filter(DomainPolicy.tenant_id == token_info.tenant_id)
@@ -246,7 +268,6 @@ async def get_policy_for_domain(
         alias = domain.replace(".devbox.local", "")
         for policy in policies:
             if policy.alias == alias:
-                # Build response with credential
                 result = build_policy_response(policy)
                 if policy.domain.startswith("*."):
                     result["target_domain"] = policy.domain[2:]
@@ -254,12 +275,12 @@ async def get_policy_for_domain(
                     result["target_domain"] = policy.domain
                 return result
 
-    # Find matching policy (agent-specific takes precedence)
+    # Find matching policy
     matching_policy = None
     for policy in policies:
         if match_domain(policy.domain, domain):
-            if matching_policy is None or (policy.agent_id is not None and matching_policy.agent_id is None):
-                matching_policy = policy
+            matching_policy = policy
+            break
 
     if not matching_policy:
         # Return defaults
@@ -305,12 +326,25 @@ async def export_domain_policies(
 
     query = db.query(DomainPolicy).filter(DomainPolicy.enabled == True)
 
-    # Tenant isolation
+    # Resolve profile for agent token
     if token_info.token_type == "agent" and token_info.agent_id:
-        # Agent tokens only see their agent's policies + global policies
-        query = query.filter(
-            (DomainPolicy.agent_id == token_info.agent_id) | (DomainPolicy.agent_id.is_(None))
-        )
+        agent = db.query(AgentState).filter(AgentState.agent_id == token_info.agent_id).first()
+        profile = None
+        if agent and agent.security_profile_id:
+            profile = db.query(SecurityProfile).filter(SecurityProfile.id == agent.security_profile_id).first()
+
+        if not profile and agent:
+            # Fall back to "default" profile for the tenant
+            profile = db.query(SecurityProfile).filter(
+                SecurityProfile.name == "default",
+                SecurityProfile.tenant_id == agent.tenant_id,
+            ).first()
+
+        if profile:
+            query = query.filter(DomainPolicy.profile_id == profile.id)
+        else:
+            # No profile at all — return nothing
+            query = query.filter(DomainPolicy.profile_id == -1)
     elif not token_info.is_super_admin:
         # Non-super-admin sees only their tenant's policies
         if not token_info.tenant_id:
@@ -407,9 +441,9 @@ async def update_domain_policy(
 
     # Audit log
     log = AuditTrail(
-        event_type="domain_policy_updated",
+        event_type="egress_policy_updated",
         user=token_info.token_name or "admin",
-        action=f"Domain policy updated: {policy.domain}",
+        action=f"Egress policy updated: {policy.domain}",
         details=json.dumps({"policy_id": policy_id, "domain": policy.domain}),
         severity="INFO",
         tenant_id=policy.tenant_id
@@ -448,9 +482,9 @@ async def delete_domain_policy(
 
     # Audit log
     log = AuditTrail(
-        event_type="domain_policy_deleted",
+        event_type="egress_policy_deleted",
         user=token_info.token_name or "admin",
-        action=f"Domain policy deleted: {domain}",
+        action=f"Egress policy deleted: {domain}",
         details=json.dumps({"policy_id": policy_id, "domain": domain}),
         severity="WARNING",
         tenant_id=tenant_id
@@ -487,9 +521,9 @@ async def rotate_domain_policy_credential(
     policy.credential_rotated_at = datetime.now(timezone.utc)
 
     log = AuditTrail(
-        event_type="domain_policy_credential_rotated",
+        event_type="egress_policy_credential_rotated",
         user=token_info.token_name or "admin",
-        action=f"Domain policy credential rotated: {policy.domain}",
+        action=f"Egress policy credential rotated: {policy.domain}",
         details=json.dumps({"policy_id": policy_id, "domain": policy.domain}),
         severity="WARNING",
         tenant_id=policy.tenant_id

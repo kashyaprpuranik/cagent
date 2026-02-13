@@ -12,6 +12,9 @@ import type {
   CreateEmailPolicyRequest,
   UpdateEmailPolicyRequest,
   UpdateSecuritySettingsRequest,
+  CreateSecurityProfileRequest,
+  UpdateSecurityProfileRequest,
+  AssignProfileRequest,
 } from '../types/api';
 
 // Health
@@ -271,11 +274,11 @@ export function useDiagnosis(domain: string | null, agentId?: string | null) {
 }
 
 // Egress Policies (API route: /domain-policies)
-export function useDomainPolicies(params?: { agentId?: string; tenantId?: number | null }) {
+export function useDomainPolicies(params?: { profileId?: number; tenantId?: number | null }) {
   return useQuery({
-    queryKey: ['domainPolicies', params?.agentId, params?.tenantId],
+    queryKey: ['domainPolicies', params?.profileId, params?.tenantId],
     queryFn: () => api.getDomainPolicies({
-      agentId: params?.agentId,
+      profileId: params?.profileId,
       tenantId: params?.tenantId ?? undefined,
     }),
     enabled: params?.tenantId !== null, // Wait for tenant to be set if using tenant filter
@@ -332,6 +335,72 @@ export function useUpdateSecuritySettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['securitySettings'] });
       queryClient.invalidateQueries({ queryKey: ['agentStatus'] });
+    },
+  });
+}
+
+// Security Profiles
+export function useSecurityProfiles(tenantId?: number | null) {
+  return useQuery({
+    queryKey: ['securityProfiles', tenantId],
+    queryFn: () => api.getSecurityProfiles(tenantId ?? undefined),
+    enabled: tenantId !== null,
+  });
+}
+
+export function useCreateSecurityProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ data, tenantId }: { data: CreateSecurityProfileRequest; tenantId?: number }) =>
+      api.createSecurityProfile(data, tenantId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['securityProfiles'] });
+    },
+  });
+}
+
+export function useUpdateSecurityProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: UpdateSecurityProfileRequest }) =>
+      api.updateSecurityProfile(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['securityProfiles'] });
+    },
+  });
+}
+
+export function useDeleteSecurityProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteSecurityProfile(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['securityProfiles'] });
+    },
+  });
+}
+
+export function useAssignAgentProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, data }: { agentId: string; data: AssignProfileRequest }) =>
+      api.assignAgentProfile(agentId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['securityProfiles'] });
+      queryClient.invalidateQueries({ queryKey: ['agentStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['dataPlanes'] });
+    },
+  });
+}
+
+export function useUnassignAgentProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (agentId: string) => api.unassignAgentProfile(agentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['securityProfiles'] });
+      queryClient.invalidateQueries({ queryKey: ['agentStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['dataPlanes'] });
     },
   });
 }

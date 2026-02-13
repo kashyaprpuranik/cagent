@@ -299,6 +299,87 @@ def recreate_container_with_seccomp(container, profile_name: str) -> tuple:
         return False, str(e)
 
 
+def _get_current_resource_limits(container) -> dict:
+    """Read current resource limits from a running container.
+
+    Returns dict with cpu_limit (float, CPUs), memory_limit_mb (int), pids_limit (int).
+    Values are None if not set / unlimited.
+    """
+    try:
+        container.reload()
+        host_config = container.attrs.get("HostConfig", {})
+
+        # CPU: NanoCpus → float CPUs
+        nano_cpus = host_config.get("NanoCpus", 0)
+        cpu_limit = round(nano_cpus / 1e9, 2) if nano_cpus else None
+
+        # Memory: bytes → MB (0 means unlimited)
+        memory = host_config.get("Memory", 0)
+        memory_limit_mb = int(memory / (1024 * 1024)) if memory else None
+
+        # PIDs
+        pids_limit = host_config.get("PidsLimit", 0)
+        # Docker returns 0 or -1 for unlimited
+        if pids_limit is not None and pids_limit <= 0:
+            pids_limit = None
+
+        return {
+            "cpu_limit": cpu_limit,
+            "memory_limit_mb": memory_limit_mb,
+            "pids_limit": pids_limit,
+        }
+    except Exception as e:
+        logger.warning(f"Could not read resource limits for {container.name}: {e}")
+        return {"cpu_limit": None, "memory_limit_mb": None, "pids_limit": None}
+
+
+def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, pids_limit=None) -> tuple:
+    """Update resource limits on a running container without recreation.
+
+    Uses Docker's container.update() API for live changes.
+
+    Args:
+        container: Docker container object
+        cpu_limit: Number of CPUs (e.g., 1.0, 2.0). None = no change.
+        memory_limit_mb: Memory limit in MB. None = no change.
+        pids_limit: Max PIDs. None = no change.
+
+    Returns:
+        (success: bool, message: str)
+    """
+    name = container.name
+    update_kwargs = {}
+
+    if cpu_limit is not None:
+        # Convert CPUs to cpu_quota/cpu_period
+        cpu_period = 100000  # 100ms (Docker default)
+        cpu_quota = int(cpu_limit * cpu_period)
+        update_kwargs["cpu_period"] = cpu_period
+        update_kwargs["cpu_quota"] = cpu_quota
+
+    if memory_limit_mb is not None:
+        mem_bytes = memory_limit_mb * 1024 * 1024
+        update_kwargs["mem_limit"] = mem_bytes
+        # Set swap to same as memory (disable swap)
+        update_kwargs["memswap_limit"] = mem_bytes
+
+    if pids_limit is not None:
+        update_kwargs["pids_limit"] = pids_limit
+
+    if not update_kwargs:
+        return True, "No resource changes needed"
+
+    try:
+        logger.info(f"Updating resource limits on {name}: {update_kwargs}")
+        container.update(**update_kwargs)
+        msg = f"Resource limits updated on {name}"
+        logger.info(msg)
+        return True, msg
+    except Exception as e:
+        logger.error(f"Failed to update resource limits on {name}: {e}")
+        return False, str(e)
+
+
 # ---------------------------------------------------------------------------
 # Status helpers
 # ---------------------------------------------------------------------------
@@ -716,6 +797,7 @@ def _heartbeat_and_handle(container):
         return
 
     # No command — check if seccomp profile needs updating
+    seccomp_changed = False
     desired_profile = response.get("seccomp_profile")
     if desired_profile and desired_profile in VALID_SECCOMP_PROFILES:
         current_label = _get_current_seccomp_label(container)
@@ -726,12 +808,44 @@ def _heartbeat_and_handle(container):
                 f"current={current_label}, desired={desired_profile}"
             )
             success, message = recreate_container_with_seccomp(container, desired_profile)
+            seccomp_changed = True
             with _command_results_lock:
                 _last_command_results[container.name] = {
                     "command": "seccomp_update",
                     "result": "success" if success else "failed",
                     "message": message,
                 }
+
+    # Check resource limits (skip if seccomp just triggered a recreation)
+    if not seccomp_changed:
+        desired_cpu = response.get("cpu_limit")
+        desired_mem = response.get("memory_limit_mb")
+        desired_pids = response.get("pids_limit")
+
+        if desired_cpu is not None or desired_mem is not None or desired_pids is not None:
+            current = _get_current_resource_limits(container)
+            needs_update = False
+
+            if desired_cpu is not None and current["cpu_limit"] != desired_cpu:
+                needs_update = True
+            if desired_mem is not None and current["memory_limit_mb"] != desired_mem:
+                needs_update = True
+            if desired_pids is not None and current["pids_limit"] != desired_pids:
+                needs_update = True
+
+            if needs_update:
+                success, message = update_container_resources(
+                    container,
+                    cpu_limit=desired_cpu,
+                    memory_limit_mb=desired_mem,
+                    pids_limit=desired_pids,
+                )
+                with _command_results_lock:
+                    _last_command_results[container.name] = {
+                        "command": "resource_update",
+                        "result": "success" if success else "failed",
+                        "message": message,
+                    }
 
 
 def _check_standalone_seccomp(agents):
@@ -761,6 +875,40 @@ def _check_standalone_seccomp(agents):
                 recreate_container_with_seccomp(container, desired)
     except Exception as e:
         logger.error(f"Error checking standalone seccomp profiles: {e}")
+
+
+def _check_standalone_resources(agents):
+    """In standalone mode, apply resource limits from cagent.yaml resources section."""
+    try:
+        config_path = Path(CAGENT_CONFIG_PATH)
+        if not config_path.exists():
+            return
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
+        resources = config.get("resources", {})
+        if not resources:
+            return
+
+        desired_cpu = resources.get("cpu_limit")
+        desired_mem = resources.get("memory_limit_mb")
+        desired_pids = resources.get("pids_limit")
+
+        if desired_cpu is None and desired_mem is None and desired_pids is None:
+            return
+
+        for container in agents:
+            current = _get_current_resource_limits(container)
+            needs_update = False
+            if desired_cpu is not None and current["cpu_limit"] != desired_cpu:
+                needs_update = True
+            if desired_mem is not None and current["memory_limit_mb"] != desired_mem:
+                needs_update = True
+            if desired_pids is not None and current["pids_limit"] != desired_pids:
+                needs_update = True
+            if needs_update:
+                update_container_resources(container, desired_cpu, desired_mem, desired_pids)
+    except Exception as e:
+        logger.error(f"Error checking standalone resource limits: {e}")
 
 
 def main_loop():
@@ -831,9 +979,10 @@ def main_loop():
                 sync_config()
                 last_sync_time = now
 
-            # Standalone mode: check seccomp profile from cagent.yaml
+            # Standalone mode: check seccomp profile and resource limits from cagent.yaml
             if DATAPLANE_MODE == "standalone" and agents:
                 _check_standalone_seccomp(agents)
+                _check_standalone_resources(agents)
 
         except Exception as e:
             logger.error(f"Error in main loop: {e}")

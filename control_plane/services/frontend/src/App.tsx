@@ -10,6 +10,8 @@ import { Tokens } from './pages/Tokens';
 import { Tenants } from './pages/Tenants';
 import { Settings } from './pages/Settings';
 import { RuntimePolicies } from './pages/RuntimePolicies';
+import { ResourcePolicies } from './pages/ResourcePolicies';
+import { SecurityProfiles } from './pages/SecurityProfiles';
 import { Login } from './pages/Login';
 import { Terminal } from './pages/Terminal';
 import { useQuery } from '@tanstack/react-query';
@@ -55,7 +57,9 @@ function App() {
         {features.has('email_policies') && (
           <Route path="email-policies" element={<EmailPolicies />} />
         )}
+        <Route path="profiles" element={<SecurityProfiles />} />
         <Route path="runtime-policies" element={<RuntimePolicies />} />
+        <Route path="resource-policies" element={<ResourcePolicies />} />
         <Route path="ip-acls" element={<IpAcls />} />
         <Route path="audit-trail" element={<AuditTrail />} />
         <Route path="agent-logs" element={<AgentLogs />} />
@@ -73,6 +77,7 @@ function App() {
       <Route path="/audit-logs" element={<Navigate to="/audit-trail" replace />} />
       <Route path="/admin-logs" element={<Navigate to="/audit-trail" replace />} />
       <Route path="/security-settings" element={<Navigate to="/runtime-policies" replace />} />
+      <Route path="/security-profiles" element={<Navigate to="/profiles" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

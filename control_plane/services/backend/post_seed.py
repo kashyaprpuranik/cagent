@@ -65,6 +65,46 @@ def get_tenant_id(token, slug):
     sys.exit(1)
 
 
+def get_or_create_default_profile(token, tenant_id, tenant_name, created, skipped):
+    """Get or create the 'default' security profile for a tenant. Returns profile_id."""
+    # Check if default profile already exists
+    status, data = api_call(
+        "GET", "/security-profiles", token,
+        params={"tenant_id": str(tenant_id)},
+    )
+    if status == 200:
+        profiles = data.get("items", data) if isinstance(data, dict) else data
+        for profile in profiles:
+            if profile.get("name") == "default":
+                return profile["id"]
+
+    # Create default profile
+    status, data = api_call(
+        "POST", "/security-profiles", token,
+        body={"name": "default", "description": "Default profile for all agents"},
+        params={"tenant_id": str(tenant_id)},
+    )
+    label = f"[{tenant_name}] Profile 'default'"
+    if status == 200:
+        created.append(label)
+        return data["id"]
+    elif status == 400 and "already exists" in data.get("detail", ""):
+        skipped.append(f"{label} (exists)")
+        # Re-fetch to get the id
+        status2, data2 = api_call(
+            "GET", "/security-profiles", token,
+            params={"tenant_id": str(tenant_id)},
+        )
+        if status2 == 200:
+            profiles = data2.get("items", data2) if isinstance(data2, dict) else data2
+            for profile in profiles:
+                if profile.get("name") == "default":
+                    return profile["id"]
+    else:
+        print(f"WARNING: Failed to create {label}: {data}")
+    return None
+
+
 def create_policies(token, tenant_id, tenant_name, policies, created, skipped):
     """Create domain policies for a tenant."""
     for policy in policies:
@@ -74,8 +114,6 @@ def create_policies(token, tenant_id, tenant_name, policies, created, skipped):
             params={"tenant_id": str(tenant_id)},
         )
         label = f"[{tenant_name}] Domain policy '{policy['domain']}'"
-        if policy.get("agent_id"):
-            label += f" (agent: {policy['agent_id']})"
         if status == 200:
             created.append(label)
         elif status == 400 and "already exists" in data.get("detail", ""):
@@ -136,7 +174,20 @@ def post_seed():
     skipped = []
 
     # =========================================================================
-    # 1. Default tenant — global domain policies
+    # 0. Create default profiles for each tenant
+    # =========================================================================
+    default_profile_id = get_or_create_default_profile(token, default_tenant_id, "default", created, skipped)
+    acme_profile_id = get_or_create_default_profile(token, acme_tenant_id, "acme", created, skipped)
+
+    if not default_profile_id:
+        print("ERROR: Could not create default profile for default tenant")
+        sys.exit(1)
+    if not acme_profile_id:
+        print("ERROR: Could not create default profile for acme tenant")
+        sys.exit(1)
+
+    # =========================================================================
+    # 1. Default tenant — domain policies (assigned to default profile)
     # =========================================================================
     default_policies = [
         {
@@ -147,6 +198,7 @@ def post_seed():
             "requests_per_minute": 60,
             "burst_size": 10,
             "allowed_paths": ["/v1/chat/*", "/v1/completions", "/v1/embeddings", "/v1/models"],
+            "profile_id": default_profile_id,
         },
         {
             "domain": "api.anthropic.com",
@@ -156,10 +208,12 @@ def post_seed():
             "requests_per_minute": 60,
             "burst_size": 10,
             "allowed_paths": ["/v1/messages", "/v1/complete"],
+            "profile_id": default_profile_id,
         },
         {
             "domain": "github.com",
             "description": "GitHub web",
+            "profile_id": default_profile_id,
         },
         {
             "domain": "api.github.com",
@@ -168,105 +222,104 @@ def post_seed():
             "timeout": "30s",
             "requests_per_minute": 100,
             "burst_size": 20,
+            "profile_id": default_profile_id,
         },
         {
             "domain": "raw.githubusercontent.com",
             "description": "GitHub raw content",
+            "profile_id": default_profile_id,
         },
         {
             "domain": "objects.githubusercontent.com",
             "description": "GitHub objects",
+            "profile_id": default_profile_id,
         },
         {
             "domain": "gist.githubusercontent.com",
             "description": "GitHub gist content",
+            "profile_id": default_profile_id,
         },
         {
             "domain": "codeload.github.com",
             "description": "GitHub code downloads",
+            "profile_id": default_profile_id,
         },
         {
             "domain": "pypi.org",
             "description": "Python Package Index",
             "read_only": True,
+            "profile_id": default_profile_id,
         },
         {
             "domain": "files.pythonhosted.org",
             "description": "Python package downloads",
             "read_only": True,
+            "profile_id": default_profile_id,
         },
         {
             "domain": "registry.npmjs.org",
             "description": "NPM Registry",
             "read_only": True,
+            "profile_id": default_profile_id,
         },
         {
             "domain": "registry.yarnpkg.com",
             "description": "Yarn Registry",
             "read_only": True,
+            "profile_id": default_profile_id,
+        },
+        {
+            "domain": "huggingface.co",
+            "alias": "huggingface",
+            "description": "HuggingFace models",
+            "timeout": "300s",
+            "requests_per_minute": 30,
+            "burst_size": 5,
+            "profile_id": default_profile_id,
+        },
+        {
+            "domain": "cdn-lfs.huggingface.co",
+            "description": "HuggingFace LFS - large model downloads",
+            "timeout": "600s",
+            "profile_id": default_profile_id,
+        },
+        {
+            "domain": "*.aws.amazon.com",
+            "description": "AWS APIs",
+            "profile_id": default_profile_id,
         },
     ]
 
     create_policies(token, default_tenant_id, "default", default_policies, created, skipped)
 
     # =========================================================================
-    # 2. Default tenant — agent-specific policies for test-agent
-    # =========================================================================
-    default_agent_policies = [
-        {
-            "domain": "huggingface.co",
-            "alias": "huggingface",
-            "description": "HuggingFace - test-agent only",
-            "timeout": "300s",
-            "requests_per_minute": 30,
-            "burst_size": 5,
-            "agent_id": "test-agent",
-            "credential": {
-                "header": "Authorization",
-                "format": "Bearer {value}",
-                "value": "hf_dummy_token_for_testing",
-            },
-        },
-        {
-            "domain": "cdn-lfs.huggingface.co",
-            "description": "HuggingFace LFS - large model downloads",
-            "timeout": "600s",
-            "agent_id": "test-agent",
-        },
-        {
-            "domain": "*.aws.amazon.com",
-            "description": "AWS APIs - test-agent only",
-            "agent_id": "test-agent",
-        },
-    ]
-
-    create_policies(token, default_tenant_id, "default", default_agent_policies, created, skipped)
-
-    # =========================================================================
-    # 3. Acme Corp tenant — domain policies
+    # 2. Acme Corp tenant — domain policies (assigned to acme default profile)
     # =========================================================================
     acme_policies = [
         {
             "domain": "api.openai.com",
             "alias": "openai",
             "description": "OpenAI API",
+            "profile_id": acme_profile_id,
         },
         {
             "domain": "api.stripe.com",
             "alias": "stripe",
             "description": "Stripe Payments API",
+            "profile_id": acme_profile_id,
         },
         {
             "domain": "api.twilio.com",
             "alias": "twilio",
             "description": "Twilio Communications API",
+            "profile_id": acme_profile_id,
         },
     ]
 
     create_policies(token, acme_tenant_id, "acme", acme_policies, created, skipped)
 
     # =========================================================================
-    # 4. Email policies — default tenant
+    # 3. Email policies — default tenant
     # =========================================================================
     default_email_policies = [
         {
@@ -283,7 +336,7 @@ def post_seed():
     create_email_policies(token, default_tenant_id, "default", default_email_policies, created, skipped)
 
     # =========================================================================
-    # 5. Email policies — acme tenant
+    # 4. Email policies — acme tenant
     # =========================================================================
     acme_email_policies = [
         {
@@ -300,7 +353,7 @@ def post_seed():
     create_email_policies(token, acme_tenant_id, "acme", acme_email_policies, created, skipped)
 
     # =========================================================================
-    # 6. IP ACLs — allow all IPs for development (both tenants)
+    # 5. IP ACLs — allow all IPs for development (both tenants)
     # =========================================================================
     dev_acls = [
         {

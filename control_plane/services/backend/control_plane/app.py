@@ -14,9 +14,9 @@ from control_plane.config import CORS_ORIGINS, BETA_FEATURES
 from control_plane.database import Base, engine
 from control_plane.models import (  # noqa: F401 - ensure models are registered
     Tenant, TenantIpAcl, AuditTrail, DomainPolicy, EmailPolicy,
-    AgentState, TerminalSession, ApiToken, WebSocketTicket,
+    SecurityProfile, AgentState, TerminalSession, ApiToken, WebSocketTicket,
 )
-from control_plane.routes import health, logs, domain_policies, email_policies, agents, terminal, tenants, ip_acls, tokens, analytics
+from control_plane.routes import health, logs, domain_policies, email_policies, agents, terminal, tenants, ip_acls, tokens, analytics, security_profiles
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -64,6 +64,7 @@ app.include_router(logs.router)
 app.include_router(domain_policies.router)
 if "email" in BETA_FEATURES:
     app.include_router(email_policies.router)
+app.include_router(security_profiles.router)
 app.include_router(agents.router)
 app.include_router(terminal.router)
 app.include_router(tenants.router)

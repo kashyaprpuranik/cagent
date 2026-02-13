@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, UniqueConstraint, Index, JSON, event
+from sqlalchemy import Column, Integer, Float, String, DateTime, Text, Boolean, ForeignKey, UniqueConstraint, Index, JSON, event
 from sqlalchemy.orm import relationship
 
 from control_plane.database import Base
@@ -21,6 +21,7 @@ class Tenant(Base):
     agents = relationship("AgentState", back_populates="tenant")
     tokens = relationship("ApiToken", back_populates="tenant")
     ip_acls = relationship("TenantIpAcl", back_populates="tenant", cascade="all, delete-orphan")
+    security_profiles = relationship("SecurityProfile", back_populates="tenant", cascade="all, delete-orphan")
 
 
 class TenantIpAcl(Base):
@@ -73,7 +74,10 @@ class DomainPolicy(Base):
     alias = Column(String(50))  # e.g., "openai" -> openai.devbox.local
     description = Column(String(500))
     enabled = Column(Boolean, default=True, index=True)
-    agent_id = Column(String(100), nullable=True, index=True)  # NULL = tenant-global
+    profile_id = Column(Integer, ForeignKey("security_profiles.id"), nullable=True, index=True)  # NULL = tenant baseline
+
+    # Relationship
+    security_profile = relationship("SecurityProfile", back_populates="domain_policies")
 
     # Path restrictions (JSON array of patterns, empty = all paths allowed)
     allowed_paths = Column(JSON, default=list)  # ["/v1/chat/*", "/v1/models"]
@@ -102,8 +106,8 @@ class DomainPolicy(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
-        # Unique constraint: one policy per domain per agent per tenant
-        UniqueConstraint('domain', 'agent_id', 'tenant_id', name='uq_domain_policy_tenant'),
+        # Unique constraint: one policy per domain per profile per tenant
+        UniqueConstraint('domain', 'profile_id', 'tenant_id', name='uq_domain_policy_tenant'),
         Index('ix_domain_policy_tenant_enabled', 'tenant_id', 'enabled'),
     )
 
@@ -144,6 +148,34 @@ class EmailPolicy(Base):
     )
 
 
+class SecurityProfile(Base):
+    """Named, tenant-scoped bundle of egress policies and seccomp settings."""
+    __tablename__ = "security_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(500), nullable=True)
+    seccomp_profile = Column(String(20), default="standard")  # standard, hardened, permissive
+
+    # Resource limits (nullable = use container/compose defaults)
+    cpu_limit = Column(Float, nullable=True)       # Number of CPUs (e.g., 1.0, 2.0, 0.5)
+    memory_limit_mb = Column(Integer, nullable=True)  # Memory limit in MB (e.g., 2048)
+    pids_limit = Column(Integer, nullable=True)       # Max number of processes (e.g., 256)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="security_profiles")
+    domain_policies = relationship("DomainPolicy", back_populates="security_profile")
+    agents = relationship("AgentState", back_populates="security_profile")
+
+    __table_args__ = (
+        UniqueConstraint('name', 'tenant_id', name='uq_security_profile_name_tenant'),
+        Index('ix_security_profile_tenant', 'tenant_id'),
+    )
+
+
 class AgentState(Base):
     """Stores agent status (from heartbeats) and pending commands."""
     __tablename__ = "agent_state"
@@ -180,6 +212,9 @@ class AgentState(Base):
     stcp_secret_key = Column(String(256), nullable=True)  # Encrypted STCP secret
     # Seccomp profile for container security
     seccomp_profile = Column(String(20), default="standard")  # standard, hardened, permissive
+    # Security profile assignment
+    security_profile_id = Column(Integer, ForeignKey("security_profiles.id"), nullable=True, index=True)
+    security_profile = relationship("SecurityProfile", back_populates="agents")
 
     __table_args__ = (
         Index('ix_agent_state_tenant_deleted', 'tenant_id', 'deleted_at'),

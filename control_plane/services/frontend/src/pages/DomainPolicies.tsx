@@ -1,22 +1,21 @@
-import { useState, useMemo } from 'react';
-import { Plus, Edit2, Trash2, RefreshCw, RotateCcw, Globe, Search, Shield, Clock } from 'lucide-react';
-import { Card, Table, Button, Modal, Input, Select, Badge } from '@cagent/shared-ui';
+import { useState, useMemo, useEffect } from 'react';
+import { Plus, Edit2, Trash2, RefreshCw, RotateCcw, Globe, Search, Shield, Clock, ChevronDown } from 'lucide-react';
+import { Card, Table, Button, Modal, Input, Badge } from '@cagent/shared-ui';
 import {
   useDomainPolicies,
   useCreateDomainPolicy,
   useUpdateDomainPolicy,
   useDeleteDomainPolicy,
   useRotateDomainPolicyCredential,
-  useAgents,
+  useSecurityProfiles,
 } from '../hooks/useApi';
 import { useTenant } from '../contexts/TenantContext';
-import type { DomainPolicy, DataPlane, CreateDomainPolicyRequest, UpdateDomainPolicyRequest } from '../types/api';
+import type { DomainPolicy, CreateDomainPolicyRequest, UpdateDomainPolicyRequest } from '../types/api';
 
 interface FormData {
   domain: string;
   alias: string;
   description: string;
-  agent_id: string;
   allowed_paths: string;
   requests_per_minute: string;
   burst_size: string;
@@ -33,7 +32,6 @@ const emptyFormData: FormData = {
   domain: '',
   alias: '',
   description: '',
-  agent_id: '',
   allowed_paths: '',
   requests_per_minute: '',
   burst_size: '',
@@ -48,9 +46,26 @@ const emptyFormData: FormData = {
 
 export function DomainPolicies() {
   const { selectedTenantId } = useTenant();
+  const { data: profiles } = useSecurityProfiles(selectedTenantId);
+  const [selectedProfileId, setSelectedProfileId] = useState<number | undefined>(undefined);
 
-  const { data: policies = [], isLoading, refetch } = useDomainPolicies({ tenantId: selectedTenantId });
-  const { data: agents = [] } = useAgents();
+  // Auto-select the first profile (usually "default") when profiles load
+  useEffect(() => {
+    if (profiles?.length && selectedProfileId === undefined) {
+      const defaultProfile = profiles.find(p => p.name === 'default');
+      setSelectedProfileId(defaultProfile?.id ?? profiles[0].id);
+    }
+  }, [profiles, selectedProfileId]);
+
+  // Reset profile selection when tenant changes
+  useEffect(() => {
+    setSelectedProfileId(undefined);
+  }, [selectedTenantId]);
+
+  const { data: policies = [], isLoading, refetch } = useDomainPolicies({
+    profileId: selectedProfileId,
+    tenantId: selectedTenantId,
+  });
   const createPolicy = useCreateDomainPolicy();
   const updatePolicy = useUpdateDomainPolicy();
   const deletePolicy = useDeleteDomainPolicy();
@@ -70,22 +85,13 @@ export function DomainPolicies() {
     value: '',
   });
 
-  const agentOptions = [
-    { value: '', label: 'Global (all agents)' },
-    ...agents.map((agent: DataPlane) => ({
-      value: agent.agent_id,
-      label: agent.agent_id,
-    })),
-  ];
-
   const filteredPolicies = useMemo(() => {
     if (!domainFilter) return policies;
     const q = domainFilter.toLowerCase();
     return policies.filter((p: DomainPolicy) =>
       p.domain.toLowerCase().includes(q) ||
       (p.alias && p.alias.toLowerCase().includes(q)) ||
-      (p.description && p.description.toLowerCase().includes(q)) ||
-      (p.agent_id && p.agent_id.toLowerCase().includes(q))
+      (p.description && p.description.toLowerCase().includes(q))
     );
   }, [policies, domainFilter]);
 
@@ -98,7 +104,6 @@ export function DomainPolicies() {
       domain: policy.domain,
       alias: policy.alias || '',
       description: policy.description || '',
-      agent_id: policy.agent_id || '',
       allowed_paths: (policy.allowed_paths || []).join('\n'),
       requests_per_minute: policy.requests_per_minute?.toString() || '',
       burst_size: policy.burst_size?.toString() || '',
@@ -123,7 +128,7 @@ export function DomainPolicies() {
       domain: formData.domain,
       alias: formData.alias || undefined,
       description: formData.description || undefined,
-      agent_id: formData.agent_id || undefined,
+      profile_id: selectedProfileId,
       allowed_paths: paths.length > 0 ? paths : undefined,
       requests_per_minute: formData.requests_per_minute ? parseInt(formData.requests_per_minute) : undefined,
       burst_size: formData.burst_size ? parseInt(formData.burst_size) : undefined,
@@ -332,16 +337,6 @@ export function DomainPolicies() {
         ),
     },
     {
-      key: 'agent',
-      header: 'Agent',
-      render: (policy: DomainPolicy) =>
-        policy.agent_id ? (
-          <Badge variant="info">{policy.agent_id}</Badge>
-        ) : (
-          <span className="text-dark-500 text-sm">Global</span>
-        ),
-    },
-    {
       key: 'status',
       header: 'Status',
       render: (policy: DomainPolicy) => (
@@ -388,21 +383,12 @@ export function DomainPolicies() {
             onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
             disabled={isEdit}
           />
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Alias (optional)"
-              placeholder="openai"
-              value={formData.alias}
-              onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
-            />
-            <Select
-              label="Agent (optional)"
-              options={agentOptions}
-              value={formData.agent_id}
-              onChange={(e) => setFormData({ ...formData, agent_id: e.target.value })}
-              disabled={isEdit}
-            />
-          </div>
+          <Input
+            label="Alias (optional)"
+            placeholder="openai"
+            value={formData.alias}
+            onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
+          />
           {formData.alias && (
             <p className="text-xs text-dark-500">
               Alias creates a shortcut: <code className="text-blue-400">{formData.alias}.devbox.local</code> → {formData.domain || 'domain'}
@@ -576,13 +562,38 @@ export function DomainPolicies() {
         </div>
       </div>
 
+      {/* Profile Selector */}
+      <div>
+        <label className="block text-sm font-medium text-dark-300 mb-2">
+          Profile
+        </label>
+        <div className="relative w-72">
+          <select
+            value={selectedProfileId ?? ''}
+            onChange={(e) => setSelectedProfileId(Number(e.target.value))}
+            className="w-full appearance-none bg-dark-800 border border-dark-600 rounded-lg px-3 py-2 pr-8 text-sm text-dark-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+            {!profiles?.length && (
+              <option value="">No profiles available</option>
+            )}
+            {profiles?.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <ChevronDown
+            size={16}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-400 pointer-events-none"
+          />
+        </div>
+      </div>
+
       <Card>
         {policies.length > 0 && (
           <div className="mb-4">
             <div className="relative max-w-sm">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-500" />
               <Input
-                placeholder="Filter by domain, alias, or agent..."
+                placeholder="Filter by domain, alias, or description..."
                 className="pl-9"
                 value={domainFilter}
                 onChange={(e) => setDomainFilter(e.target.value)}

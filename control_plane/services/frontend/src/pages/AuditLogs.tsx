@@ -7,9 +7,14 @@ import type { AuditTrailEntry, AuditTrailFilters } from '../types/api';
 
 const EVENT_TYPE_OPTIONS = [
   { value: '', label: 'All Events' },
-  { value: 'domain_policy_created', label: 'Egress Policy Created' },
-  { value: 'domain_policy_updated', label: 'Egress Policy Updated' },
-  { value: 'domain_policy_deleted', label: 'Egress Policy Deleted' },
+  { value: 'egress_policy_created', label: 'Egress Policy Created' },
+  { value: 'egress_policy_updated', label: 'Egress Policy Updated' },
+  { value: 'egress_policy_deleted', label: 'Egress Policy Deleted' },
+  { value: 'security_profile_created', label: 'Security Profile Created' },
+  { value: 'security_profile_updated', label: 'Security Profile Updated' },
+  { value: 'security_profile_deleted', label: 'Security Profile Deleted' },
+  { value: 'agent_profile_assigned', label: 'Agent Profile Assigned' },
+  { value: 'agent_profile_unassigned', label: 'Agent Profile Unassigned' },
   { value: 'ip_acl_created', label: 'IP ACL Created' },
   { value: 'ip_acl_updated', label: 'IP ACL Updated' },
   { value: 'ip_acl_deleted', label: 'IP ACL Deleted' },

@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from control_plane.database import get_db
-from control_plane.models import AgentState, AuditTrail
+from control_plane.models import AgentState, AuditTrail, SecurityProfile
 from control_plane.schemas import (
     DataPlaneResponse, AgentHeartbeat, AgentHeartbeatResponse,
     AgentStatusResponse, AgentCommandRequest, STCPSecretResponse, STCPVisitorConfig,
@@ -192,8 +192,19 @@ async def agent_heartbeat(
         state.pending_command_args = None
         state.pending_command_at = None
 
-    # Include seccomp profile in response for agent-manager to enforce
-    response.seccomp_profile = state.seccomp_profile or "standard"
+    # Include seccomp profile and resource limits in response for agent-manager to enforce
+    # Profile takes precedence over per-agent setting
+    if state.security_profile_id:
+        profile = db.query(SecurityProfile).filter(SecurityProfile.id == state.security_profile_id).first()
+        if profile:
+            response.seccomp_profile = profile.seccomp_profile or "standard"
+            response.cpu_limit = profile.cpu_limit
+            response.memory_limit_mb = profile.memory_limit_mb
+            response.pids_limit = profile.pids_limit
+        else:
+            response.seccomp_profile = state.seccomp_profile or "standard"
+    else:
+        response.seccomp_profile = state.seccomp_profile or "standard"
 
     # DB fallback: write status fields when Redis is unavailable
     if redis_client is None:
@@ -363,6 +374,13 @@ async def get_agent_status(
     redis_client = getattr(request.app.state, "redis", None)
     online = await _check_agent_online(redis_client, state)
 
+    # Resolve profile name if assigned
+    profile_name = None
+    if state.security_profile_id:
+        profile = db.query(SecurityProfile).filter(SecurityProfile.id == state.security_profile_id).first()
+        if profile:
+            profile_name = profile.name
+
     return AgentStatusResponse(
         agent_id=state.agent_id,
         status=state.status or "unknown",
@@ -378,6 +396,8 @@ async def get_agent_status(
         last_command_at=state.last_command_at,
         online=online,
         seccomp_profile=state.seccomp_profile or "standard",
+        security_profile_id=state.security_profile_id,
+        security_profile_name=profile_name,
     )
 
 

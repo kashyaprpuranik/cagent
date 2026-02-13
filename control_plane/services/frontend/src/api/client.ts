@@ -24,6 +24,10 @@ import type {
   UpdateEmailPolicyRequest,
   SecuritySettings,
   UpdateSecuritySettingsRequest,
+  SecurityProfile,
+  CreateSecurityProfileRequest,
+  UpdateSecurityProfileRequest,
+  AssignProfileRequest,
 } from '../types/api';
 
 const API_BASE = './api/v1';
@@ -312,10 +316,10 @@ export const api = {
   },
 
   // Egress Policies (API route: /domain-policies)
-  getDomainPolicies: async (params?: { agentId?: string; tenantId?: number }): Promise<DomainPolicy[]> => {
+  getDomainPolicies: async (params?: { profileId?: number; tenantId?: number }): Promise<DomainPolicy[]> => {
     const searchParams = new URLSearchParams();
-    if (params?.agentId) {
-      searchParams.append('agent_id', params.agentId);
+    if (params?.profileId !== undefined) {
+      searchParams.append('profile_id', String(params.profileId));
     }
     if (params?.tenantId !== undefined) {
       searchParams.append('tenant_id', String(params.tenantId));
@@ -503,6 +507,62 @@ export const api = {
       body: JSON.stringify(credential),
     });
     return handleResponse<DomainPolicy>(response);
+  },
+
+  // Security Profiles
+  getSecurityProfiles: async (tenantId?: number): Promise<SecurityProfile[]> => {
+    const url = tenantId !== undefined
+      ? `${API_BASE}/security-profiles?tenant_id=${tenantId}`
+      : `${API_BASE}/security-profiles`;
+    const response = await fetch(url, { headers: getAuthHeaders() });
+    const data = await handleResponse<PaginatedResponse<SecurityProfile>>(response);
+    return data.items;
+  },
+
+  createSecurityProfile: async (data: CreateSecurityProfileRequest, tenantId?: number): Promise<SecurityProfile> => {
+    const url = tenantId !== undefined
+      ? `${API_BASE}/security-profiles?tenant_id=${tenantId}`
+      : `${API_BASE}/security-profiles`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<SecurityProfile>(response);
+  },
+
+  updateSecurityProfile: async (id: number, data: UpdateSecurityProfileRequest): Promise<SecurityProfile> => {
+    const response = await fetch(`${API_BASE}/security-profiles/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<SecurityProfile>(response);
+  },
+
+  deleteSecurityProfile: async (id: number): Promise<void> => {
+    const response = await fetch(`${API_BASE}/security-profiles/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    return handleResponse<void>(response);
+  },
+
+  assignAgentProfile: async (agentId: string, data: AssignProfileRequest): Promise<{ agent_id: string; profile_id: number; profile_name: string }> => {
+    const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/profile`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(response);
+  },
+
+  unassignAgentProfile: async (agentId: string): Promise<{ agent_id: string; profile_id: null }> => {
+    const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/profile`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    return handleResponse(response);
   },
 };
 

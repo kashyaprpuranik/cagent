@@ -3,7 +3,7 @@ import { ChevronDown, AlertTriangle, CheckCircle } from 'lucide-react';
 import { Card } from '@cagent/shared-ui';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
-import { useDataPlanes, useSecuritySettings, useUpdateSecuritySettings } from '../hooks/useApi';
+import { useSecurityProfiles, useUpdateSecurityProfile } from '../hooks/useApi';
 import type { SeccompProfile } from '../types/api';
 
 const PROFILE_INFO: Record<SeccompProfile, { label: string; description: string; variant: 'default' | 'warning' | 'success' }> = {
@@ -27,39 +27,43 @@ const PROFILE_INFO: Record<SeccompProfile, { label: string; description: string;
 export function RuntimePolicies() {
   const { user } = useAuth();
   const { selectedTenantId } = useTenant();
-  const { data: dataPlanes } = useDataPlanes(selectedTenantId);
+  const { data: profiles, isLoading } = useSecurityProfiles(selectedTenantId);
+  const updateProfile = useUpdateSecurityProfile();
 
   const hasAdminRole = user?.roles?.includes('admin') || user?.is_super_admin;
 
-  const [manualAgentId, setManualAgentId] = useState<string | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<number | undefined>(undefined);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const agentList = dataPlanes ?? [];
-
-  // Derive effective agent ID inline — no useEffect delay
-  const selectedAgentId = manualAgentId && agentList.some(a => a.agent_id === manualAgentId)
-    ? manualAgentId
-    : agentList[0]?.agent_id ?? null;
-
-  // Reset manual selection when tenant changes
+  // Auto-select the default profile
   useEffect(() => {
-    setManualAgentId(null);
+    if (profiles?.length && selectedProfileId === undefined) {
+      const defaultProfile = profiles.find(p => p.name === 'default');
+      setSelectedProfileId(defaultProfile?.id ?? profiles[0].id);
+    }
+  }, [profiles, selectedProfileId]);
+
+  // Reset when tenant changes
+  useEffect(() => {
+    setSelectedProfileId(undefined);
   }, [selectedTenantId]);
 
-  const { data: settings, isLoading } = useSecuritySettings(selectedAgentId);
-  const updateSettings = useUpdateSecuritySettings();
+  // Compute effective profile: use selectedProfileId, or derive from profiles directly
+  const effectiveProfileId = selectedProfileId ?? profiles?.find(p => p.name === 'default')?.id ?? profiles?.[0]?.id;
+  const selectedProfile = profiles?.find(p => p.id === effectiveProfileId);
+  const currentSeccomp = (selectedProfile?.seccomp_profile || 'standard') as SeccompProfile;
 
-  const handleProfileChange = (profile: SeccompProfile) => {
-    if (!selectedAgentId || !hasAdminRole) return;
+  const handleProfileChange = (seccomp: SeccompProfile) => {
+    if (!effectiveProfileId || !hasAdminRole) return;
     setError(null);
     setSuccess(null);
 
-    updateSettings.mutate(
-      { agentId: selectedAgentId, data: { seccomp_profile: profile } },
+    updateProfile.mutate(
+      { id: effectiveProfileId, data: { seccomp_profile: seccomp } },
       {
         onSuccess: () => {
-          setSuccess('Profile updated. Change will take effect on next heartbeat cycle (~30s).');
+          setSuccess('Seccomp profile updated. Change will take effect on next heartbeat cycle (~30s).');
           setTimeout(() => setSuccess(null), 5000);
         },
         onError: (err) => {
@@ -68,8 +72,6 @@ export function RuntimePolicies() {
       }
     );
   };
-
-  const currentProfile = (settings?.seccomp_profile || 'standard') as SeccompProfile;
 
   return (
     <div className="space-y-6">
@@ -80,28 +82,26 @@ export function RuntimePolicies() {
         </p>
       </div>
 
-      {/* Agent Selector */}
+      {/* Profile Selector */}
       <div>
         <label className="block text-sm font-medium text-dark-300 mb-2">
-          Agent
+          Profile
         </label>
         <div className="relative w-72">
           <select
-            value={selectedAgentId || ''}
+            value={effectiveProfileId ?? ''}
             onChange={(e) => {
-              setManualAgentId(e.target.value || null);
+              setSelectedProfileId(Number(e.target.value));
               setSuccess(null);
               setError(null);
             }}
             className="w-full appearance-none bg-dark-800 border border-dark-600 rounded-lg px-3 py-2 pr-8 text-sm text-dark-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           >
-            {agentList.length === 0 && (
-              <option value="">No agents connected</option>
+            {!profiles?.length && (
+              <option value="">No profiles available</option>
             )}
-            {agentList.map((agent: { agent_id: string }) => (
-              <option key={agent.agent_id} value={agent.agent_id}>
-                {agent.agent_id}
-              </option>
+            {profiles?.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
           <ChevronDown
@@ -126,81 +126,81 @@ export function RuntimePolicies() {
       )}
 
       {/* Profile Selection */}
-      {selectedAgentId && (
+      {isLoading ? (
+        <p className="text-dark-400">Loading profiles...</p>
+      ) : effectiveProfileId ? (
         <Card title="Seccomp Profile">
-          {isLoading ? (
-            <p className="text-dark-400">Loading...</p>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-sm text-dark-400">
-                Select the syscall filtering profile for this agent&apos;s container.
-                Changes require a container recreation and take effect on the next heartbeat cycle.
-              </p>
+          <div className="space-y-4">
+            <p className="text-sm text-dark-400">
+              Select the syscall filtering profile for agents assigned to &ldquo;{selectedProfile?.name}&rdquo;.
+              Changes require a container recreation and take effect on the next heartbeat cycle.
+            </p>
 
-              <div className="space-y-3">
-                {(Object.entries(PROFILE_INFO) as [SeccompProfile, typeof PROFILE_INFO['standard']][]).map(
-                  ([key, info]) => (
-                    <label
-                      key={key}
-                      className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
-                        currentProfile === key
-                          ? 'border-blue-500 bg-blue-900/20'
-                          : 'border-dark-600 hover:border-dark-500 bg-dark-800'
-                      } ${!hasAdminRole ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name="seccomp_profile"
-                        value={key}
-                        checked={currentProfile === key}
-                        onChange={() => handleProfileChange(key)}
-                        disabled={!hasAdminRole || updateSettings.isPending}
-                        className="mt-1 w-4 h-4 text-blue-600 bg-dark-800 border-dark-600"
-                      />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-dark-100">{info.label}</span>
-                          {info.variant === 'success' && (
-                            <span className="text-[10px] font-medium bg-green-600/20 text-green-400 px-1.5 py-0.5 rounded">
-                              Production
-                            </span>
-                          )}
-                          {info.variant === 'warning' && (
-                            <span className="text-[10px] font-medium bg-yellow-600/20 text-yellow-400 px-1.5 py-0.5 rounded">
-                              Debug only
-                            </span>
-                          )}
-                          {key === 'standard' && (
-                            <span className="text-[10px] font-medium bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">
-                              Default
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-dark-400 mt-1">{info.description}</p>
+            <div className="space-y-3">
+              {(Object.entries(PROFILE_INFO) as [SeccompProfile, typeof PROFILE_INFO['standard']][]).map(
+                ([key, info]) => (
+                  <label
+                    key={key}
+                    className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                      currentSeccomp === key
+                        ? 'border-blue-500 bg-blue-900/20'
+                        : 'border-dark-600 hover:border-dark-500 bg-dark-800'
+                    } ${!hasAdminRole ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="seccomp_profile"
+                      value={key}
+                      checked={currentSeccomp === key}
+                      onChange={() => handleProfileChange(key)}
+                      disabled={!hasAdminRole || updateProfile.isPending}
+                      className="mt-1 w-4 h-4 text-blue-600 bg-dark-800 border-dark-600"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-dark-100">{info.label}</span>
+                        {info.variant === 'success' && (
+                          <span className="text-[10px] font-medium bg-green-600/20 text-green-400 px-1.5 py-0.5 rounded">
+                            Production
+                          </span>
+                        )}
+                        {info.variant === 'warning' && (
+                          <span className="text-[10px] font-medium bg-yellow-600/20 text-yellow-400 px-1.5 py-0.5 rounded">
+                            Debug only
+                          </span>
+                        )}
+                        {key === 'standard' && (
+                          <span className="text-[10px] font-medium bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">
+                            Default
+                          </span>
+                        )}
                       </div>
-                    </label>
-                  )
-                )}
-              </div>
-
-              {currentProfile === 'permissive' && (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-yellow-900/30 border border-yellow-700 text-yellow-300 text-sm">
-                  <AlertTriangle size={16} className="flex-shrink-0" />
-                  <span>
-                    Permissive mode significantly reduces container security.
-                    Use only for temporary debugging and switch back when done.
-                  </span>
-                </div>
-              )}
-
-              {!hasAdminRole && (
-                <p className="text-sm text-dark-500">
-                  Admin role required to change runtime policies.
-                </p>
+                      <p className="text-sm text-dark-400 mt-1">{info.description}</p>
+                    </div>
+                  </label>
+                )
               )}
             </div>
-          )}
+
+            {currentSeccomp === 'permissive' && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-yellow-900/30 border border-yellow-700 text-yellow-300 text-sm">
+                <AlertTriangle size={16} className="flex-shrink-0" />
+                <span>
+                  Permissive mode significantly reduces container security.
+                  Use only for temporary debugging and switch back when done.
+                </span>
+              </div>
+            )}
+
+            {!hasAdminRole && (
+              <p className="text-sm text-dark-500">
+                Admin role required to change runtime policies.
+              </p>
+            )}
+          </div>
         </Card>
+      ) : (
+        <p className="text-dark-400">No profiles available. Create a profile first.</p>
       )}
     </div>
   );
