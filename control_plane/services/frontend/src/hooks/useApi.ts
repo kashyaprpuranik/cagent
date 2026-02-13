@@ -314,12 +314,13 @@ export function useDeleteDomainPolicy() {
   });
 }
 
-// Security Settings
+// Security Settings (Runtime Policies)
 export function useSecuritySettings(agentId: string | null) {
   return useQuery({
     queryKey: ['securitySettings', agentId],
     queryFn: () => api.getSecuritySettings(agentId!),
     enabled: !!agentId,
+    staleTime: 30_000, // Cache for 30s - settings rarely change
   });
 }
 

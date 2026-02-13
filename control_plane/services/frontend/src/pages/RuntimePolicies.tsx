@@ -24,29 +24,27 @@ const PROFILE_INFO: Record<SeccompProfile, { label: string; description: string;
   },
 };
 
-export function SecuritySettings() {
+export function RuntimePolicies() {
   const { user } = useAuth();
   const { selectedTenantId } = useTenant();
   const { data: dataPlanes } = useDataPlanes(selectedTenantId);
 
   const hasAdminRole = user?.roles?.includes('admin') || user?.is_super_admin;
 
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [manualAgentId, setManualAgentId] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const agentList = dataPlanes ?? [];
 
-  // Auto-select first agent
-  useEffect(() => {
-    if (!selectedAgentId && agentList.length > 0) {
-      setSelectedAgentId(agentList[0].agent_id);
-    }
-  }, [agentList, selectedAgentId]);
+  // Derive effective agent ID inline — no useEffect delay
+  const selectedAgentId = manualAgentId && agentList.some(a => a.agent_id === manualAgentId)
+    ? manualAgentId
+    : agentList[0]?.agent_id ?? null;
 
-  // Reset selection when tenant changes
+  // Reset manual selection when tenant changes
   useEffect(() => {
-    setSelectedAgentId(null);
+    setManualAgentId(null);
   }, [selectedTenantId]);
 
   const { data: settings, isLoading } = useSecuritySettings(selectedAgentId);
@@ -65,7 +63,7 @@ export function SecuritySettings() {
           setTimeout(() => setSuccess(null), 5000);
         },
         onError: (err) => {
-          setError((err as Error).message || 'Failed to update security settings');
+          setError((err as Error).message || 'Failed to update runtime policy');
         },
       }
     );
@@ -76,7 +74,7 @@ export function SecuritySettings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-dark-100">Security Settings</h1>
+        <h1 className="text-2xl font-bold text-dark-100">Runtime Policies</h1>
         <p className="text-sm text-dark-400 mt-1">
           Configure seccomp profiles to control syscall access for agent containers
         </p>
@@ -91,7 +89,7 @@ export function SecuritySettings() {
           <select
             value={selectedAgentId || ''}
             onChange={(e) => {
-              setSelectedAgentId(e.target.value || null);
+              setManualAgentId(e.target.value || null);
               setSuccess(null);
               setError(null);
             }}
@@ -197,7 +195,7 @@ export function SecuritySettings() {
 
               {!hasAdminRole && (
                 <p className="text-sm text-dark-500">
-                  Admin role required to change security settings.
+                  Admin role required to change runtime policies.
                 </p>
               )}
             </div>

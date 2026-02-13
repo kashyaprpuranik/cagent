@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "workspaces": [
+    "packages/shared-ui",
+    "control_plane/services/frontend",
+    "data_plane/services/local_admin/frontend"
+  ]
+}

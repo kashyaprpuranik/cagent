@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal as TerminalIcon, RefreshCw, X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Terminal as TerminalIcon, RefreshCw, X, ChevronDown } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { createTerminal } from '../api/client';
+import { createTerminal, getContainers } from '../api/client';
 import '@xterm/xterm/css/xterm.css';
+
+const INFRA_CONTAINERS = new Set(['dns-filter', 'http-proxy', 'email-proxy', 'tunnel-client']);
 
 export default function TerminalPage() {
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -11,11 +14,33 @@ export default function TerminalPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
 
+  const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Fetch containers to discover agent containers dynamically
+  const { data: containersData } = useQuery({
+    queryKey: ['containers'],
+    queryFn: getContainers,
+    refetchInterval: 10000,
+  });
+
+  // Extract agent containers (anything not infrastructure)
+  const agentContainers = containersData
+    ? Object.values(containersData.containers)
+        .filter((c) => !INFRA_CONTAINERS.has(c.name) && c.status === 'running')
+        .map((c) => c.name)
+    : [];
+
+  // Auto-select first agent container
+  useEffect(() => {
+    if (!selectedContainer && agentContainers.length > 0) {
+      setSelectedContainer(agentContainers[0]);
+    }
+  }, [agentContainers, selectedContainer]);
+
   const connect = () => {
-    if (!terminalRef.current) return;
+    if (!terminalRef.current || !selectedContainer) return;
 
     // Clean up previous connection
     disconnect();
@@ -59,14 +84,14 @@ export default function TerminalPage() {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Connect WebSocket - always connect to the agent container
-    const ws = createTerminal('agent');
+    // Connect WebSocket to the selected container
+    const ws = createTerminal(selectedContainer);
     wsRef.current = ws;
 
     ws.onopen = () => {
       setIsConnected(true);
       setError(null);
-      term.write('\r\n\x1b[32mConnected to agent\x1b[0m\r\n\r\n');
+      term.write(`\r\n\x1b[32mConnected to ${selectedContainer}\x1b[0m\r\n\r\n`);
     };
 
     ws.onmessage = (event) => {
@@ -131,15 +156,42 @@ export default function TerminalPage() {
             Web Terminal
           </h1>
           <p className="text-sm text-gray-400 mt-1">
-            Interactive shell access to the agent container
+            Interactive shell access to agent containers
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Container Selector */}
+          <div className="relative">
+            <select
+              value={selectedContainer || ''}
+              onChange={(e) => {
+                const newContainer = e.target.value || null;
+                if (isConnected) disconnect();
+                setSelectedContainer(newContainer);
+              }}
+              className="appearance-none bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 pr-8 text-sm text-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+              {agentContainers.length === 0 && (
+                <option value="">No agent containers</option>
+              )}
+              {agentContainers.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              size={16}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+            />
+          </div>
+
           {!isConnected ? (
             <button
               onClick={connect}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg"
+              disabled={!selectedContainer}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <TerminalIcon className="w-4 h-4" />
               Connect
@@ -180,7 +232,7 @@ export default function TerminalPage() {
           className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-gray-500'}`}
         />
         <span className="text-sm text-gray-400">
-          {isConnected ? 'Connected to agent' : 'Disconnected'}
+          {isConnected ? `Connected to ${selectedContainer}` : 'Disconnected'}
         </span>
       </div>
 

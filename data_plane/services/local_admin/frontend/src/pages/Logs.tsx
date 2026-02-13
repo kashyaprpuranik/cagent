@@ -13,7 +13,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
 } from 'lucide-react';
-import { getContainerLogs, getInfo, createLogStream } from '../api/client';
+import { getContainerLogs, getContainers, getInfo, createLogStream } from '../api/client';
 
 interface EnvoyLogEntry {
   timestamp: string;
@@ -165,10 +165,23 @@ function StatCard({
 export default function LogsPage() {
   const { data: infoData } = useQuery({ queryKey: ['info'], queryFn: getInfo });
   const emailEnabled = infoData?.features?.includes('email');
-  const containers = useMemo(
-    () => ['http-proxy', 'dns-filter', 'agent', ...(emailEnabled ? ['email-proxy'] : [])],
-    [emailEnabled]
-  );
+  const { data: containersData } = useQuery({
+    queryKey: ['containers'],
+    queryFn: getContainers,
+    staleTime: 30_000,
+  });
+
+  const INFRA_NAMES = useMemo(() => new Set(['dns-filter', 'http-proxy', 'email-proxy', 'tunnel-client']), []);
+
+  const containers = useMemo(() => {
+    // Discover agent containers dynamically, keep infra containers static
+    const agentNames = containersData
+      ? Object.values(containersData.containers)
+          .filter((c) => !INFRA_NAMES.has(c.name))
+          .map((c) => c.name)
+      : [];
+    return ['http-proxy', 'dns-filter', ...agentNames, ...(emailEnabled ? ['email-proxy'] : [])];
+  }, [containersData, emailEnabled, INFRA_NAMES]);
   const [selectedContainer, setSelectedContainer] = useState('http-proxy');
   const [logs, setLogs] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);

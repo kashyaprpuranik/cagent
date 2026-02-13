@@ -113,18 +113,13 @@ async def ingest_logs(
         )
 
     # DB lookups — release connection before the slow HTTP call to OpenObserve
+    # Auto-create agent state if it doesn't exist (same as heartbeat endpoint).
+    # This avoids a race where Vector ships logs before the first heartbeat.
+    from control_plane.routes.agents import get_or_create_agent_state
+
     db = SessionLocal()
     try:
-        agent = db.query(AgentState).filter(
-            AgentState.agent_id == token_info.agent_id,
-            AgentState.deleted_at.is_(None)
-        ).first()
-
-        if not agent:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Agent {token_info.agent_id} not found"
-            )
+        agent = get_or_create_agent_state(db, token_info.agent_id, token_info.tenant_id)
 
         tenant_id = agent.tenant_id
 
