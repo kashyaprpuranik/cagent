@@ -21,6 +21,14 @@ interface LogEntry {
   syscall_result?: string;
 }
 
+const TIME_RANGE_OPTIONS = [
+  { value: '1', label: 'Last 1 hour' },
+  { value: '6', label: 'Last 6 hours' },
+  { value: '24', label: 'Last 24 hours' },
+  { value: '72', label: 'Last 3 days' },
+  { value: '168', label: 'Last 7 days' },
+];
+
 export function AgentLogs() {
   const { selectedTenantId } = useTenant();
   // Filter agents by selected tenant
@@ -29,16 +37,23 @@ export function AgentLogs() {
   const [logSource, setLogSource] = useState<string>('');
   const [searchText, setSearchText] = useState<string>('');
   const [limit, setLimit] = useState<number>(100);
+  const [timeRangeHours, setTimeRangeHours] = useState<string>('6');
 
   const { data: logsData, isLoading, refetch } = useQuery({
-    queryKey: ['agentLogs', selectedTenantId, selectedAgent, logSource, searchText, limit],
-    queryFn: () => api.queryAgentLogs({
-      query: searchText,
-      source: logSource || undefined,
-      agent_id: selectedAgent || undefined,
-      tenant_id: selectedTenantId ?? undefined,
-      limit,
-    }),
+    queryKey: ['agentLogs', selectedTenantId, selectedAgent, logSource, searchText, limit, timeRangeHours],
+    queryFn: () => {
+      const end = new Date();
+      const start = new Date(end.getTime() - Number(timeRangeHours) * 3600_000);
+      return api.queryAgentLogs({
+        query: searchText,
+        source: logSource || undefined,
+        agent_id: selectedAgent || undefined,
+        tenant_id: selectedTenantId ?? undefined,
+        limit,
+        start: start.toISOString(),
+        end: end.toISOString(),
+      });
+    },
     enabled: selectedTenantId !== null,  // Wait for tenant to be selected
     refetchInterval: false,
   });
@@ -175,7 +190,7 @@ export function AgentLogs() {
 
       <Card>
         {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
           <Select
             value={selectedAgent}
             onChange={(e) => setSelectedAgent(e.target.value)}
@@ -185,6 +200,11 @@ export function AgentLogs() {
             value={logSource}
             onChange={(e) => setLogSource(e.target.value)}
             options={sourceOptions}
+          />
+          <Select
+            value={timeRangeHours}
+            onChange={(e) => setTimeRangeHours(e.target.value)}
+            options={TIME_RANGE_OPTIONS}
           />
           <div className="relative">
             <Search

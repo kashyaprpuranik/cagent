@@ -62,7 +62,9 @@ function App() {
         <Route path="tokens" element={<Tokens />} />
         <Route path="tenants" element={<Tenants />} />
         <Route path="settings" element={<Settings />} />
-        <Route path="terminal/:agentId" element={<Terminal />} />
+        {features.has('terminal') && (
+          <Route path="terminal/:agentId" element={<Terminal />} />
+        )}
       </Route>
       {/* Redirects for legacy routes */}
       <Route path="/secrets" element={<Navigate to="/domain-policies" replace />} />

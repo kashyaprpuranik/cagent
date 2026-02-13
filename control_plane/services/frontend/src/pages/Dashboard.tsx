@@ -32,12 +32,15 @@ import {
   useCreateDomainPolicy,
 } from '../hooks/useApi';
 import { api } from '../api/client';
+import { useQuery } from '@tanstack/react-query';
 
 export function Dashboard() {
   const { user } = useAuth();
   const { selectedTenantId } = useTenant();
   const navigate = useNavigate();
   const { data: health } = useHealth();
+  const { data: info } = useQuery({ queryKey: ['info'], queryFn: () => api.getInfo() });
+  const features = new Set(info?.features || []);
   // Pass tenant filter - super admins see agents for selected tenant, others see their tenant's agents
   const { data: dataPlanes, refetch: refetchDataPlanes } = useDataPlanes(selectedTenantId);
 
@@ -400,8 +403,8 @@ export function Dashboard() {
                     </Button>
                   </>
                 )}
-                {/* Terminal button - requires developer role */}
-                {hasDeveloperRole && (
+                {/* Terminal button - beta feature, requires developer role */}
+                {features.has('terminal') && hasDeveloperRole && (
                   <Button
                     variant="secondary"
                     size="sm"

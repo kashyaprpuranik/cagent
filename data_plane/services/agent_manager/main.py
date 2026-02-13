@@ -577,8 +577,9 @@ def sync_config() -> bool:
             logger.warning(f"Failed to fetch domain policies: {response.status_code}, using cagent.yaml")
             return regenerate_configs()
 
-        # Parse domain policies
-        policies = response.json()
+        # Parse domain policies (paginated response: {items: [...], total: N})
+        data = response.json()
+        policies = data.get("items", data) if isinstance(data, dict) else data
         cp_domains = [p["domain"] for p in policies if p.get("enabled", True)]
 
         logger.info(f"Fetched {len(cp_domains)} domain policies from control plane")

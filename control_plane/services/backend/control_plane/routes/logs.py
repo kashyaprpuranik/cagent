@@ -329,7 +329,7 @@ async def query_agent_logs(
         end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
 
     if not start:
-        start_time = end_time - timedelta(hours=1)
+        start_time = end_time - timedelta(hours=6)
     else:
         start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
 

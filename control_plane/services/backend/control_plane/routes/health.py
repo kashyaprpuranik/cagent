@@ -61,6 +61,8 @@ async def get_info():
     ]
     if "email" in BETA_FEATURES:
         features.append("email_policies")
+    if "terminal" in BETA_FEATURES:
+        features.append("terminal")
     return {
         "name": "AI Devbox Control Plane",
         "version": "1.0.0",
