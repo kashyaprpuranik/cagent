@@ -106,7 +106,7 @@ There is also:
 ### Running Tests
 
 ```bash
-# CP + DP unit tests (default)
+# CP + DP unit tests + frontend type-check (default)
 ./run_tests.sh
 
 # CP backend tests only
@@ -114,6 +114,9 @@ There is also:
 
 # DP unit/config tests only
 ./run_tests.sh --dp
+
+# Frontend type-check only (tsc --noEmit for both UIs)
+./run_tests.sh --frontend
 
 # All tests including E2E (requires Docker)
 ./run_tests.sh --e2e

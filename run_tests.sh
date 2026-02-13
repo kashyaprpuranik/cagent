@@ -2,10 +2,11 @@
 # Run all tests across the Cagent project.
 #
 # Usage:
-#   ./run_tests.sh                # CP + DP unit/config tests only
+#   ./run_tests.sh                # CP + DP unit/config + frontend type-check
 #   ./run_tests.sh --e2e          # all tests including DP e2e and CP+DP e2e
 #   ./run_tests.sh --cp           # CP backend tests only
 #   ./run_tests.sh --dp           # DP unit/config tests only
+#   ./run_tests.sh --frontend     # Frontend type-check only (tsc)
 #   ./run_tests.sh --dp-e2e       # DP e2e tests only
 #   ./run_tests.sh --cp-dp-e2e    # CP+DP integration e2e tests only
 
@@ -15,6 +16,7 @@ REPO_ROOT=$(cd "$(dirname "$0")" && pwd)
 
 RUN_CP=false
 RUN_DP=false
+RUN_FRONTEND=false
 RUN_DP_E2E=false
 RUN_CP_DP_E2E=false
 EXPLICIT=false
@@ -23,16 +25,18 @@ for arg in "$@"; do
     case "$arg" in
         --cp)         RUN_CP=true; EXPLICIT=true ;;
         --dp)         RUN_DP=true; EXPLICIT=true ;;
+        --frontend)   RUN_FRONTEND=true; EXPLICIT=true ;;
         --dp-e2e)     RUN_DP_E2E=true; EXPLICIT=true ;;
         --cp-dp-e2e)  RUN_CP_DP_E2E=true; EXPLICIT=true ;;
-        --e2e)        RUN_CP=true; RUN_DP=true; RUN_DP_E2E=true; RUN_CP_DP_E2E=true; EXPLICIT=true ;;
+        --e2e)        RUN_CP=true; RUN_DP=true; RUN_FRONTEND=true; RUN_DP_E2E=true; RUN_CP_DP_E2E=true; EXPLICIT=true ;;
     esac
 done
 
-# Default: CP + DP unit/config tests (no e2e)
+# Default: CP + DP unit/config tests + frontend type-check (no e2e)
 if [ "$EXPLICIT" = false ]; then
     RUN_CP=true
     RUN_DP=true
+    RUN_FRONTEND=true
 fi
 
 FAILED=()
@@ -63,6 +67,44 @@ if [ "$RUN_DP" = true ]; then
         echo ""
         echo "DP unit/config tests: FAILED"
         FAILED+=("DP unit/config")
+    fi
+    echo ""
+fi
+
+# ── Frontend Type-Check (tsc) ─────────────────────────────────────────────
+if [ "$RUN_FRONTEND" = true ]; then
+    echo "=== Frontend Type-Check ==="
+    echo ""
+
+    FRONTEND_OK=true
+
+    # Ensure dependencies are installed (workspace install from repo root)
+    npm install --workspaces --include-workspace-root --silent 2>/dev/null || true
+
+    # CP admin UI
+    echo "--- CP admin UI (tsc) ---"
+    if (cd "$REPO_ROOT/control_plane/services/frontend" && ./node_modules/.bin/tsc --noEmit 2>&1); then
+        echo "  CP frontend: OK"
+    else
+        echo "  CP frontend: FAILED"
+        FRONTEND_OK=false
+    fi
+
+    # DP local admin UI
+    echo "--- DP local admin UI (tsc) ---"
+    if (cd "$REPO_ROOT/data_plane/services/local_admin/frontend" && ./node_modules/.bin/tsc --noEmit 2>&1); then
+        echo "  DP local admin frontend: OK"
+    else
+        echo "  DP local admin frontend: FAILED"
+        FRONTEND_OK=false
+    fi
+
+    echo ""
+    if [ "$FRONTEND_OK" = true ]; then
+        echo "Frontend type-check: PASSED"
+    else
+        echo "Frontend type-check: FAILED"
+        FAILED+=("Frontend type-check")
     fi
     echo ""
 fi
