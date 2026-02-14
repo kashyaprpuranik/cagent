@@ -10,6 +10,7 @@ AGENT_CONTAINER_FALLBACK = "agent"
 COREDNS_CONTAINER_NAME = "dns-filter"
 ENVOY_CONTAINER_NAME = "http-proxy"
 EMAIL_PROXY_CONTAINER_NAME = "email-proxy"
+AGENT_MANAGER_CONTAINER_NAME = "agent-manager"
 FRPC_CONTAINER_NAME = "tunnel-client"
 CAGENT_CONFIG_PATH = os.environ.get("CAGENT_CONFIG_PATH", "/etc/cagent/cagent.yaml")
 DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/data_plane")
@@ -42,14 +43,26 @@ def discover_agent_container_names() -> List[str]:
     return [AGENT_CONTAINER_FALLBACK]
 
 
+def _container_exists(name: str) -> bool:
+    """Check if a Docker container exists (running or stopped)."""
+    try:
+        docker_client.containers.get(name)
+        return True
+    except Exception:
+        return False
+
+
 def get_managed_containers() -> List[str]:
     """Build the managed-container list dynamically.
 
     Agent containers are discovered by label; infrastructure containers are
-    static.
+    static.  Optional containers (agent-manager, email-proxy) are included
+    only when they actually exist.
     """
     names = discover_agent_container_names()
     names.extend([COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME])
+    if _container_exists(AGENT_MANAGER_CONTAINER_NAME):
+        names.append(AGENT_MANAGER_CONTAINER_NAME)
     if "email" in BETA_FEATURES:
         names.append(EMAIL_PROXY_CONTAINER_NAME)
     return names
