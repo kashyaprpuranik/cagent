@@ -1458,29 +1458,29 @@ def _safe_int(s: str) -> int:
 def _get_container_resources(container_name: str) -> dict:
     """Read resource limits from a container via docker inspect.
 
-    CPU is read from CpuQuota/CpuPeriod (set by container.update()) with
-    NanoCpus as fallback (set at container creation).
+    CPU is read from NanoCpus (set by docker-compose --cpus and our
+    low-level update) with CpuQuota/CpuPeriod as fallback.
     """
     result = subprocess.run(
         ["docker", "inspect", "--format",
-         "{{json .HostConfig.CpuQuota}} {{json .HostConfig.CpuPeriod}} "
-         "{{json .HostConfig.NanoCpus}} {{json .HostConfig.Memory}} "
+         "{{json .HostConfig.NanoCpus}} {{json .HostConfig.CpuQuota}} "
+         "{{json .HostConfig.CpuPeriod}} {{json .HostConfig.Memory}} "
          "{{json .HostConfig.PidsLimit}}",
          container_name],
         capture_output=True, text=True, timeout=10,
     )
     parts = result.stdout.strip().split()
-    cpu_quota = _safe_int(parts[0]) if len(parts) > 0 else 0
-    cpu_period = _safe_int(parts[1]) if len(parts) > 1 else 0
-    nano_cpus = _safe_int(parts[2]) if len(parts) > 2 else 0
+    nano_cpus = _safe_int(parts[0]) if len(parts) > 0 else 0
+    cpu_quota = _safe_int(parts[1]) if len(parts) > 1 else 0
+    cpu_period = _safe_int(parts[2]) if len(parts) > 2 else 0
     memory_bytes = _safe_int(parts[3]) if len(parts) > 3 else 0
     pids = _safe_int(parts[4]) if len(parts) > 4 else 0
 
-    # CPU: prefer quota/period (set by live update), fall back to NanoCpus
-    if cpu_quota > 0 and cpu_period > 0:
-        cpu_limit = round(cpu_quota / cpu_period, 2)
-    elif nano_cpus > 0:
+    # CPU: prefer NanoCpus (set by compose and our update), fall back to quota/period
+    if nano_cpus > 0:
         cpu_limit = round(nano_cpus / 1e9, 2)
+    elif cpu_quota > 0 and cpu_period > 0:
+        cpu_limit = round(cpu_quota / cpu_period, 2)
     else:
         cpu_limit = None
 

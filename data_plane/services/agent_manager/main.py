@@ -79,6 +79,10 @@ docker_client = docker.from_env()
 _command_results_lock = threading.Lock()
 _last_command_results: dict = {}
 
+# Track containers that have profile-based resource limits applied,
+# so we know to clear them when the profile is unassigned.
+_containers_with_resource_limits: set = set()
+
 
 # ---------------------------------------------------------------------------
 # Container discovery
@@ -309,14 +313,15 @@ def _get_current_resource_limits(container) -> dict:
         container.reload()
         host_config = container.attrs.get("HostConfig", {})
 
-        # CPU: prefer CpuQuota/CpuPeriod (set by container.update), fall back to NanoCpus
+        # CPU: prefer NanoCpus (set by update and docker-compose --cpus),
+        # fall back to CpuQuota/CpuPeriod
+        nano_cpus = host_config.get("NanoCpus", 0) or 0
         cpu_quota = host_config.get("CpuQuota", 0) or 0
         cpu_period = host_config.get("CpuPeriod", 0) or 0
-        nano_cpus = host_config.get("NanoCpus", 0) or 0
-        if cpu_quota > 0 and cpu_period > 0:
-            cpu_limit = round(cpu_quota / cpu_period, 2)
-        elif nano_cpus > 0:
+        if nano_cpus > 0:
             cpu_limit = round(nano_cpus / 1e9, 2)
+        elif cpu_quota > 0 and cpu_period > 0:
+            cpu_limit = round(cpu_quota / cpu_period, 2)
         else:
             cpu_limit = None
 
@@ -343,7 +348,10 @@ def _get_current_resource_limits(container) -> dict:
 def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, pids_limit=None) -> tuple:
     """Update resource limits on a running container without recreation.
 
-    Uses Docker's container.update() API for live changes.
+    Uses Docker's low-level /containers/{id}/update API directly because
+    the Python SDK's container.update() is missing support for NanoCPUs
+    and PidsLimit. We use NanoCPUs (not CpuQuota/CpuPeriod) to avoid
+    conflicts with containers created via docker-compose --cpus.
 
     Args:
         container: Docker container object
@@ -355,39 +363,27 @@ def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, 
         (success: bool, message: str)
     """
     name = container.name
-    update_kwargs = {}
+    data = {}
 
     if cpu_limit is not None:
-        # Convert CPUs to cpu_quota/cpu_period
-        cpu_period = 100000  # 100ms (Docker default)
-        cpu_quota = int(cpu_limit * cpu_period)
-        update_kwargs["cpu_period"] = cpu_period
-        update_kwargs["cpu_quota"] = cpu_quota
+        data["NanoCPUs"] = int(cpu_limit * 1e9)
 
     if memory_limit_mb is not None:
         mem_bytes = memory_limit_mb * 1024 * 1024
-        update_kwargs["mem_limit"] = mem_bytes
-        # Set swap to same as memory (disable swap)
-        update_kwargs["memswap_limit"] = mem_bytes
+        data["Memory"] = mem_bytes
+        data["MemorySwap"] = mem_bytes  # Disable swap
 
-    # pids_limit is not supported by container.update() in the Python SDK —
-    # handle it via the low-level API directly.
-    pids_update_needed = pids_limit is not None
+    if pids_limit is not None:
+        data["PidsLimit"] = pids_limit
 
-    if not update_kwargs and not pids_update_needed:
+    if not data:
         return True, "No resource changes needed"
 
     try:
-        if update_kwargs:
-            logger.info(f"Updating resource limits on {name}: {update_kwargs}")
-            container.update(**update_kwargs)
-
-        if pids_update_needed:
-            logger.info(f"Updating PID limit on {name}: {pids_limit}")
-            url = container.client.api._url('/containers/{0}/update', container.id)
-            res = container.client.api._post_json(url, data={"PidsLimit": pids_limit})
-            container.client.api._result(res, True)
-
+        logger.info(f"Updating resource limits on {name}: {data}")
+        url = container.client.api._url('/containers/{0}/update', container.id)
+        res = container.client.api._post_json(url, data=data)
+        container.client.api._result(res, True)
         msg = f"Resource limits updated on {name}"
         logger.info(msg)
         return True, msg
@@ -839,6 +835,7 @@ def _heartbeat_and_handle(container):
         desired_pids = response.get("pids_limit")
 
         if desired_cpu is not None or desired_mem is not None or desired_pids is not None:
+            # Profile has resource limits — apply them
             current = _get_current_resource_limits(container)
             needs_update = False
 
@@ -856,12 +853,25 @@ def _heartbeat_and_handle(container):
                     memory_limit_mb=desired_mem,
                     pids_limit=desired_pids,
                 )
+                if success:
+                    _containers_with_resource_limits.add(container.name)
                 with _command_results_lock:
                     _last_command_results[container.name] = {
                         "command": "resource_update",
                         "result": "success" if success else "failed",
                         "message": message,
                     }
+        elif container.name in _containers_with_resource_limits:
+            # Profile unassigned — clear previously applied limits
+            try:
+                logger.info(f"Clearing resource limits on {container.name} (profile unassigned)")
+                data = {"NanoCPUs": 0, "Memory": 0, "MemorySwap": -1, "PidsLimit": 0}
+                url = container.client.api._url('/containers/{0}/update', container.id)
+                res = container.client.api._post_json(url, data=data)
+                container.client.api._result(res, True)
+                _containers_with_resource_limits.discard(container.name)
+            except Exception as e:
+                logger.warning(f"Failed to clear resource limits on {container.name}: {e}")
 
 
 def _check_standalone_seccomp(agents):
