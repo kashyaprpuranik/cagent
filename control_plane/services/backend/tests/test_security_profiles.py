@@ -762,3 +762,109 @@ class TestResourceLimits:
         data = resp.json()
         assert data["cpu_limit"] == 2.0
         assert data["memory_limit_mb"] == 4096
+
+
+# =============================================================================
+# Bulk Assignment Tests
+# =============================================================================
+
+class TestBulkAssignment:
+    def test_bulk_assign(self, client, auth_headers, db_session):
+        """Assign a profile to multiple agents at once."""
+        tenant_id = _get_default_tenant_id(db_session)
+        a1 = _create_agent(db_session, "bulk-a1", tenant_id)
+        a2 = _create_agent(db_session, "bulk-a2", tenant_id)
+        a3 = _create_agent(db_session, "bulk-a3", tenant_id)
+        profile = _create_profile(client, auth_headers, name="bulk-profile")
+
+        resp = client.post(
+            "/api/v1/agents/bulk-profile",
+            json={"agent_ids": [a1.agent_id, a2.agent_id, a3.agent_id], "profile_id": profile["id"]},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert set(data["updated"]) == {a1.agent_id, a2.agent_id, a3.agent_id}
+        assert data["profile_id"] == profile["id"]
+        assert data["profile_name"] == "bulk-profile"
+
+        # Verify all agents got the profile
+        for aid in [a1.agent_id, a2.agent_id, a3.agent_id]:
+            status = client.get(f"/api/v1/agents/{aid}/status", headers=auth_headers).json()
+            assert status["security_profile_id"] == profile["id"]
+
+    def test_bulk_unassign(self, client, auth_headers, db_session):
+        """Unassign profile from multiple agents at once (profile_id=null)."""
+        tenant_id = _get_default_tenant_id(db_session)
+        a1 = _create_agent(db_session, "bulk-un-a1", tenant_id)
+        a2 = _create_agent(db_session, "bulk-un-a2", tenant_id)
+        profile = _create_profile(client, auth_headers, name="bulk-un-profile")
+
+        # Assign first
+        client.post(
+            "/api/v1/agents/bulk-profile",
+            json={"agent_ids": [a1.agent_id, a2.agent_id], "profile_id": profile["id"]},
+            headers=auth_headers,
+        )
+
+        # Unassign
+        resp = client.post(
+            "/api/v1/agents/bulk-profile",
+            json={"agent_ids": [a1.agent_id, a2.agent_id], "profile_id": None},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["profile_id"] is None
+        assert data["profile_name"] is None
+
+        # Verify all agents are unassigned
+        for aid in [a1.agent_id, a2.agent_id]:
+            status = client.get(f"/api/v1/agents/{aid}/status", headers=auth_headers).json()
+            assert status["security_profile_id"] is None
+
+    def test_bulk_assign_empty_list(self, client, auth_headers):
+        """400 on empty agent_ids."""
+        resp = client.post(
+            "/api/v1/agents/bulk-profile",
+            json={"agent_ids": [], "profile_id": 1},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    def test_bulk_assign_nonexistent_agent(self, client, auth_headers, db_session):
+        """404 if any agent_id doesn't exist."""
+        tenant_id = _get_default_tenant_id(db_session)
+        a1 = _create_agent(db_session, "bulk-exist-a1", tenant_id)
+        profile = _create_profile(client, auth_headers, name="bulk-exist-profile")
+
+        resp = client.post(
+            "/api/v1/agents/bulk-profile",
+            json={"agent_ids": [a1.agent_id, "nonexistent-agent"], "profile_id": profile["id"]},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404
+        assert "nonexistent-agent" in resp.json()["detail"]
+
+    def test_bulk_assign_cross_tenant(self, client, auth_headers, acme_admin_headers, db_session):
+        """403 if agents belong to a different tenant."""
+        acme_tenant_id = _get_acme_tenant_id(db_session)
+        agent = _create_agent(db_session, "bulk-cross-agent", acme_tenant_id)
+        profile = _create_profile(client, auth_headers, name="bulk-cross-profile")
+
+        resp = client.post(
+            "/api/v1/agents/bulk-profile",
+            json={"agent_ids": [agent.agent_id], "profile_id": profile["id"]},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 403
+
+    def test_bulk_assign_rbac(self, client, dev_headers, auth_headers, db_session):
+        """Developer role is blocked from bulk assignment."""
+        resp = client.post(
+            "/api/v1/agents/bulk-profile",
+            json={"agent_ids": ["any-agent"], "profile_id": 1},
+            headers=dev_headers,
+        )
+        assert resp.status_code == 403

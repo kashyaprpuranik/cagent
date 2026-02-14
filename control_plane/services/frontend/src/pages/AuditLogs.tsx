@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Card, Table, Input, Select, Badge } from '@cagent/shared-ui';
 import { useAuditTrail } from '../hooks/useApi';
 import { useTenant } from '../contexts/TenantContext';
+import { useAuth } from '../contexts/AuthContext';
 import type { AuditTrailEntry, AuditTrailFilters } from '../types/api';
 
 const EVENT_TYPE_OPTIONS = [
@@ -21,15 +22,25 @@ const EVENT_TYPE_OPTIONS = [
   { value: 'agent_wipe_requested', label: 'Agent Wipe' },
   { value: 'token_created', label: 'Token Created' },
   { value: 'token_deleted', label: 'Token Deleted' },
-  { value: 'tenant_created', label: 'Tenant Created' },
-  { value: 'tenant_deleted', label: 'Tenant Deleted' },
   { value: 'terminal_session_start', label: 'Terminal Start' },
   { value: 'terminal_session_end', label: 'Terminal End' },
   { value: 'stcp_secret_generated', label: 'STCP Secret Generated' },
 ];
 
+const SUPER_ADMIN_EVENT_TYPE_OPTIONS = [
+  { value: 'tenant_created', label: 'Tenant Created' },
+  { value: 'tenant_deleted', label: 'Tenant Deleted' },
+];
+
 export function AuditTrail() {
+  const { user } = useAuth();
   const { selectedTenantId } = useTenant();
+  const eventTypeOptions = useMemo(
+    () => user?.is_super_admin
+      ? [...EVENT_TYPE_OPTIONS, ...SUPER_ADMIN_EVENT_TYPE_OPTIONS]
+      : EVENT_TYPE_OPTIONS,
+    [user?.is_super_admin],
+  );
   const [filters, setFilters] = useState<AuditTrailFilters>({
     limit: 25,
     offset: 0,
@@ -141,7 +152,7 @@ export function AuditTrail() {
           <Select
             value={filters.event_type || ''}
             onChange={(e) => updateFilter('event_type', e.target.value)}
-            options={EVENT_TYPE_OPTIONS}
+            options={eventTypeOptions}
           />
           <Input
             placeholder="Filter by user"

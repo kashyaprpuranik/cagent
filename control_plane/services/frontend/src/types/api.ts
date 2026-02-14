@@ -10,6 +10,7 @@ export interface DataPlane {
   online: boolean;
   tenant_id?: number;
   last_heartbeat?: string;
+  security_profile_name?: string;
 }
 
 export interface AuditTrailEntry {
@@ -350,4 +351,9 @@ export interface UpdateSecurityProfileRequest {
 
 export interface AssignProfileRequest {
   profile_id: number;
+}
+
+export interface BulkAssignProfileRequest {
+  agent_ids: string[];
+  profile_id: number | null;
 }

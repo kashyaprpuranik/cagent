@@ -41,6 +41,7 @@ class DataPlaneResponse(BaseModel):
     online: bool
     tenant_id: Optional[int]
     last_heartbeat: Optional[datetime]
+    security_profile_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -340,6 +341,12 @@ class SecurityProfileResponse(BaseModel):
 class AgentProfileAssignment(BaseModel):
     """Assign a security profile to an agent."""
     profile_id: int
+
+
+class BulkAgentProfileAssignment(BaseModel):
+    """Bulk assign/unassign a security profile to multiple agents."""
+    agent_ids: List[str]
+    profile_id: Optional[int] = None  # null = unassign
 
 
 class AgentHeartbeat(BaseModel):

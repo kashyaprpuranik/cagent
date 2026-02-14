@@ -9,7 +9,7 @@ from control_plane.database import get_db
 from control_plane.models import SecurityProfile, AgentState, DomainPolicy, AuditTrail
 from control_plane.schemas import (
     SecurityProfileCreate, SecurityProfileUpdate, SecurityProfileResponse,
-    AgentProfileAssignment,
+    AgentProfileAssignment, BulkAgentProfileAssignment,
 )
 from control_plane.auth import TokenInfo, require_admin_role, require_admin_role_with_ip_check
 from control_plane.rate_limit import limiter
@@ -337,3 +337,78 @@ async def unassign_agent_profile(
     await invalidate_domain_policy_cache(redis_client, agent.tenant_id)
 
     return {"agent_id": agent_id, "profile_id": None}
+
+
+# =============================================================================
+# Bulk Agent Profile Assignment
+# =============================================================================
+
+@router.post("/api/v1/agents/bulk-profile")
+@limiter.limit("30/minute")
+async def bulk_assign_agent_profile(
+    request: Request,
+    body: BulkAgentProfileAssignment,
+    db: Session = Depends(get_db),
+    token_info: TokenInfo = Depends(require_admin_role_with_ip_check),
+):
+    """Bulk assign or unassign a security profile to/from multiple agents."""
+    if not body.agent_ids:
+        raise HTTPException(status_code=400, detail="agent_ids must not be empty")
+
+    # Load all agents
+    agents = db.query(AgentState).filter(
+        AgentState.agent_id.in_(body.agent_ids),
+        AgentState.deleted_at.is_(None),
+    ).all()
+
+    found_ids = {a.agent_id for a in agents}
+    missing = [aid for aid in body.agent_ids if aid not in found_ids]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Agents not found: {', '.join(missing)}")
+
+    # Tenant check: all agents must belong to the caller's tenant (unless super admin)
+    if not token_info.is_super_admin:
+        for agent in agents:
+            if agent.tenant_id != token_info.tenant_id:
+                raise HTTPException(status_code=403, detail="All agents must belong to your tenant")
+
+    profile_name = None
+    if body.profile_id is not None:
+        profile = db.query(SecurityProfile).filter(SecurityProfile.id == body.profile_id).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Security profile not found")
+        # Profile must belong to same tenant as agents
+        agent_tenant_ids = {a.tenant_id for a in agents}
+        if len(agent_tenant_ids) > 1:
+            raise HTTPException(status_code=400, detail="All agents must belong to the same tenant")
+        agent_tenant_id = agent_tenant_ids.pop()
+        if profile.tenant_id != agent_tenant_id:
+            raise HTTPException(status_code=400, detail="Profile and agents must belong to the same tenant")
+        profile_name = profile.name
+
+    # Update all agents in one transaction
+    for agent in agents:
+        agent.security_profile_id = body.profile_id
+
+    action = (
+        f"Security profile '{profile_name}' bulk-assigned to {len(agents)} agents: {', '.join(body.agent_ids)}"
+        if body.profile_id is not None
+        else f"Security profile bulk-unassigned from {len(agents)} agents: {', '.join(body.agent_ids)}"
+    )
+    log = AuditTrail(
+        event_type="agent_profile_bulk_assigned" if body.profile_id is not None else "agent_profile_bulk_unassigned",
+        user=token_info.token_name or "admin",
+        action=action,
+        details=json.dumps({"agent_ids": body.agent_ids, "profile_id": body.profile_id, "profile_name": profile_name}),
+        severity="INFO",
+        tenant_id=token_info.tenant_id or (agents[0].tenant_id if agents else None),
+    )
+    db.add(log)
+    db.commit()
+
+    redis_client = getattr(request.app.state, "redis", None)
+    tenant_ids = {a.tenant_id for a in agents}
+    for tid in tenant_ids:
+        await invalidate_domain_policy_cache(redis_client, tid)
+
+    return {"updated": body.agent_ids, "profile_id": body.profile_id, "profile_name": profile_name}

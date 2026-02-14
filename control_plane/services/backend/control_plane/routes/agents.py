@@ -115,6 +115,14 @@ async def list_agents(
     total = query.count()
     agents = query.offset(offset).limit(limit).all()
     redis_client = getattr(request.app.state, "redis", None)
+
+    # Batch-resolve security profile names
+    profile_ids = {a.security_profile_id for a in agents if a.security_profile_id}
+    profile_names: dict[int, str] = {}
+    if profile_ids:
+        for p in db.query(SecurityProfile).filter(SecurityProfile.id.in_(profile_ids)).all():
+            profile_names[p.id] = p.name
+
     items = []
     for agent in agents:
         online = await _check_agent_online(redis_client, agent)
@@ -124,7 +132,8 @@ async def list_agents(
             status=agent.status or "unknown",
             online=online,
             tenant_id=agent.tenant_id,
-            last_heartbeat=agent.last_heartbeat
+            last_heartbeat=agent.last_heartbeat,
+            security_profile_name=profile_names.get(agent.security_profile_id) if agent.security_profile_id else None,
         ))
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 

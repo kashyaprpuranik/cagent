@@ -15,6 +15,7 @@ import type {
   CreateSecurityProfileRequest,
   UpdateSecurityProfileRequest,
   AssignProfileRequest,
+  BulkAssignProfileRequest,
 } from '../types/api';
 
 // Health
@@ -397,6 +398,18 @@ export function useUnassignAgentProfile() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (agentId: string) => api.unassignAgentProfile(agentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['securityProfiles'] });
+      queryClient.invalidateQueries({ queryKey: ['agentStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['dataPlanes'] });
+    },
+  });
+}
+
+export function useBulkAssignAgentProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: BulkAssignProfileRequest) => api.bulkAssignAgentProfile(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['securityProfiles'] });
       queryClient.invalidateQueries({ queryKey: ['agentStatus'] });

@@ -28,6 +28,7 @@ import type {
   CreateSecurityProfileRequest,
   UpdateSecurityProfileRequest,
   AssignProfileRequest,
+  BulkAssignProfileRequest,
 } from '../types/api';
 
 const API_BASE = './api/v1';
@@ -561,6 +562,15 @@ export const api = {
     const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/profile`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
+    });
+    return handleResponse(response);
+  },
+
+  bulkAssignAgentProfile: async (data: BulkAssignProfileRequest): Promise<{ updated: string[]; profile_id: number | null; profile_name: string | null }> => {
+    const response = await fetch(`${API_BASE}/agents/bulk-profile`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
     });
     return handleResponse(response);
   },

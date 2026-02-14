@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, ShieldCheck, AlertTriangle, CheckCircle, X, Users } from 'lucide-react';
 import { Card } from '@cagent/shared-ui';
 import { useTenant } from '../contexts/TenantContext';
@@ -8,9 +8,7 @@ import {
   useUpdateSecurityProfile,
   useDeleteSecurityProfile,
   useDataPlanes,
-  useAssignAgentProfile,
-  useUnassignAgentProfile,
-  useAgentStatus,
+  useBulkAssignAgentProfile,
 } from '../hooks/useApi';
 import type { SecurityProfile, CreateSecurityProfileRequest, UpdateSecurityProfileRequest } from '../types/api';
 
@@ -106,20 +104,39 @@ export function SecurityProfiles() {
   const createProfile = useCreateSecurityProfile();
   const updateProfile = useUpdateSecurityProfile();
   const deleteProfile = useDeleteSecurityProfile();
-  const assignProfile = useAssignAgentProfile();
-  const unassignProfile = useUnassignAgentProfile();
+  const bulkAssign = useBulkAssignAgentProfile();
 
   const [showModal, setShowModal] = useState(false);
   const [editingProfile, setEditingProfile] = useState<SecurityProfile | undefined>();
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Agent assignment state
-  const [assignAgentId, setAssignAgentId] = useState('');
-  const [assignProfileId, setAssignProfileId] = useState('');
+  // Bulk assignment state
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+  const [bulkProfileId, setBulkProfileId] = useState('');
 
-  // For showing current profile of selected agent
-  const { data: agentStatus } = useAgentStatus(assignAgentId || null);
+  const agentIds = useMemo(() => agents?.map((a) => a.agent_id) ?? [], [agents]);
+  const allSelected = agentIds.length > 0 && selectedAgentIds.size === agentIds.length;
+
+  const toggleAgent = (agentId: string) => {
+    setSelectedAgentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedAgentIds(new Set());
+    } else {
+      setSelectedAgentIds(new Set(agentIds));
+    }
+  };
 
   const handleCreate = (data: CreateSecurityProfileRequest | UpdateSecurityProfileRequest) => {
     setError(null);
@@ -164,14 +181,15 @@ export function SecurityProfiles() {
     });
   };
 
-  const handleAssign = () => {
-    if (!assignAgentId || !assignProfileId) return;
+  const handleBulkAssign = () => {
+    if (selectedAgentIds.size === 0 || !bulkProfileId) return;
     setError(null);
-    assignProfile.mutate(
-      { agentId: assignAgentId, data: { profile_id: Number(assignProfileId) } },
+    bulkAssign.mutate(
+      { agent_ids: Array.from(selectedAgentIds), profile_id: Number(bulkProfileId) },
       {
-        onSuccess: () => {
-          setSuccess('Profile assigned to agent');
+        onSuccess: (data) => {
+          setSelectedAgentIds(new Set());
+          setSuccess(`Profile assigned to ${data.updated.length} agent(s)`);
           setTimeout(() => setSuccess(null), 3000);
         },
         onError: (err) => setError((err as Error).message),
@@ -179,16 +197,20 @@ export function SecurityProfiles() {
     );
   };
 
-  const handleUnassign = () => {
-    if (!assignAgentId) return;
+  const handleBulkUnassign = () => {
+    if (selectedAgentIds.size === 0) return;
     setError(null);
-    unassignProfile.mutate(assignAgentId, {
-      onSuccess: () => {
-        setSuccess('Profile unassigned from agent');
-        setTimeout(() => setSuccess(null), 3000);
-      },
-      onError: (err) => setError((err as Error).message),
-    });
+    bulkAssign.mutate(
+      { agent_ids: Array.from(selectedAgentIds), profile_id: null },
+      {
+        onSuccess: (data) => {
+          setSelectedAgentIds(new Set());
+          setSuccess(`Profile unassigned from ${data.updated.length} agent(s)`);
+          setTimeout(() => setSuccess(null), 3000);
+        },
+        onError: (err) => setError((err as Error).message),
+      }
+    );
   };
 
   return (
@@ -309,29 +331,16 @@ export function SecurityProfiles() {
       <Card title="Agent Assignment">
         <div className="space-y-4">
           <p className="text-sm text-dark-400">
-            Assign a profile to an agent. The agent will use the profile&apos;s egress policies, runtime settings, and resource limits.
+            Select agents and assign or unassign a profile in bulk. Each agent will use its assigned profile&apos;s egress policies, runtime settings, and resource limits.
           </p>
 
+          {/* Action bar */}
           <div className="flex items-end gap-4 flex-wrap">
-            <div>
-              <label className="block text-sm font-medium text-dark-300 mb-1">Agent</label>
-              <select
-                value={assignAgentId}
-                onChange={(e) => setAssignAgentId(e.target.value)}
-                className="bg-dark-900 border border-dark-600 rounded-lg px-3 py-2 text-sm text-dark-100 focus:border-blue-500 min-w-[200px]"
-              >
-                <option value="">Select agent...</option>
-                {agents?.map((a) => (
-                  <option key={a.agent_id} value={a.agent_id}>{a.agent_id}</option>
-                ))}
-              </select>
-            </div>
-
             <div>
               <label className="block text-sm font-medium text-dark-300 mb-1">Profile</label>
               <select
-                value={assignProfileId}
-                onChange={(e) => setAssignProfileId(e.target.value)}
+                value={bulkProfileId}
+                onChange={(e) => setBulkProfileId(e.target.value)}
                 className="bg-dark-900 border border-dark-600 rounded-lg px-3 py-2 text-sm text-dark-100 focus:border-blue-500 min-w-[200px]"
               >
                 <option value="">Select profile...</option>
@@ -342,30 +351,77 @@ export function SecurityProfiles() {
             </div>
 
             <button
-              onClick={handleAssign}
-              disabled={!assignAgentId || !assignProfileId || assignProfile.isPending}
+              onClick={handleBulkAssign}
+              disabled={selectedAgentIds.size === 0 || !bulkProfileId || bulkAssign.isPending}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               <Users size={16} />
-              Assign
+              Assign Selected ({selectedAgentIds.size})
             </button>
 
             <button
-              onClick={handleUnassign}
-              disabled={!assignAgentId || unassignProfile.isPending}
+              onClick={handleBulkUnassign}
+              disabled={selectedAgentIds.size === 0 || bulkAssign.isPending}
               className="px-4 py-2 text-sm text-dark-300 border border-dark-600 rounded-lg hover:text-dark-100 hover:border-dark-500 disabled:opacity-50 transition-colors"
             >
-              Unassign
+              Unassign Selected ({selectedAgentIds.size})
             </button>
           </div>
 
-          {assignAgentId && agentStatus && (
-            <div className="text-sm text-dark-400">
-              Current profile: {agentStatus.security_profile_name ? (
-                <span className="text-dark-200 font-medium">{agentStatus.security_profile_name}</span>
-              ) : (
-                <span className="text-dark-500">None (uses default)</span>
-              )}
+          {/* Agent table */}
+          {!agents?.length ? (
+            <p className="text-dark-400 text-sm">No agents connected.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-dark-400 border-b border-dark-700">
+                    <th className="pb-2 pr-3 font-medium w-8">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        className="rounded border-dark-600 bg-dark-900 text-blue-600 focus:ring-blue-500"
+                      />
+                    </th>
+                    <th className="pb-2 font-medium">Agent ID</th>
+                    <th className="pb-2 font-medium">Status</th>
+                    <th className="pb-2 font-medium">Current Profile</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-dark-700">
+                  {agents.map((agent) => (
+                    <tr key={agent.agent_id} className="text-dark-200">
+                      <td className="py-2 pr-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedAgentIds.has(agent.agent_id)}
+                          onChange={() => toggleAgent(agent.agent_id)}
+                          className="rounded border-dark-600 bg-dark-900 text-blue-600 focus:ring-blue-500"
+                        />
+                      </td>
+                      <td className="py-2 font-medium">{agent.agent_id}</td>
+                      <td className="py-2">
+                        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded ${
+                          agent.online
+                            ? 'bg-green-600/20 text-green-400'
+                            : 'bg-dark-600 text-dark-400'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${agent.online ? 'bg-green-400' : 'bg-dark-500'}`} />
+                          {agent.online ? 'Online' : 'Offline'}
+                        </span>
+                      </td>
+                      <td className="py-2">
+                        {agent.security_profile_name ? (
+                          <span className="text-dark-200">{agent.security_profile_name}</span>
+                        ) : (
+                          <span className="text-dark-500">None</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
