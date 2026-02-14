@@ -79,10 +79,10 @@ docker_client = docker.from_env()
 _command_results_lock = threading.Lock()
 _last_command_results: dict = {}
 
-# Track which resource fields were set per container by profile-based updates,
-# so we can clear exactly those fields when the profile is unassigned.
-# Maps container name → set of Docker API field names (e.g. {"NanoCPUs", "PidsLimit"}).
-_container_resource_fields: dict = {}
+# Snapshot of original resource limits before profile-based updates,
+# so we can restore them when the profile is unassigned.
+# Maps container name → dict of original Docker API field values.
+_container_original_resources: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -848,51 +848,43 @@ def _heartbeat_and_handle(container):
                 needs_update = True
 
             if needs_update:
+                # Snapshot original values before first profile update
+                if container.name not in _container_original_resources:
+                    container.reload()
+                    hc = container.attrs.get("HostConfig", {})
+                    _container_original_resources[container.name] = {
+                        "NanoCPUs": hc.get("NanoCpus", 0) or 0,
+                        "Memory": hc.get("Memory", 0) or 0,
+                        "MemorySwap": hc.get("MemorySwap", 0) or 0,
+                        "PidsLimit": hc.get("PidsLimit", 0) or 0,
+                    }
+
                 success, message = update_container_resources(
                     container,
                     cpu_limit=desired_cpu,
                     memory_limit_mb=desired_mem,
                     pids_limit=desired_pids,
                 )
-                if success:
-                    # Track which fields we set so we can clear exactly those
-                    fields = set()
-                    if desired_cpu is not None:
-                        fields.add("NanoCPUs")
-                    if desired_mem is not None:
-                        fields.update(["Memory", "MemorySwap"])
-                    if desired_pids is not None:
-                        fields.add("PidsLimit")
-                    _container_resource_fields[container.name] = fields
                 with _command_results_lock:
                     _last_command_results[container.name] = {
                         "command": "resource_update",
                         "result": "success" if success else "failed",
                         "message": message,
                     }
-        elif container.name in _container_resource_fields:
-            # Profile unassigned — clear only the fields we previously set
-            fields = _container_resource_fields[container.name]
-            clear_data = {}
-            for field in fields:
-                if field == "NanoCPUs":
-                    clear_data["NanoCPUs"] = 0
-                elif field == "Memory":
-                    clear_data["Memory"] = 0
-                elif field == "MemorySwap":
-                    clear_data["MemorySwap"] = 0  # 0 = same as Memory (unlimited)
-                elif field == "PidsLimit":
-                    clear_data["PidsLimit"] = 0
-            if clear_data:
-                try:
-                    logger.info(f"Clearing resource limits on {container.name}: {clear_data}")
-                    url = container.client.api._url('/containers/{0}/update', container.id)
-                    res = container.client.api._post_json(url, data=clear_data)
-                    container.client.api._result(res, True)
-                    logger.info(f"Resource limits cleared on {container.name}")
-                except Exception as e:
-                    logger.error(f"Failed to clear resource limits on {container.name}: {e}")
-            _container_resource_fields.pop(container.name, None)
+        elif container.name in _container_original_resources:
+            # Profile unassigned — restore original resource limits.
+            # Docker's update API ignores NanoCPUs=0, so we must restore
+            # the original value (e.g. the compose-defined CPU limit).
+            restore_data = _container_original_resources[container.name]
+            try:
+                logger.info(f"Restoring resource limits on {container.name}: {restore_data}")
+                url = container.client.api._url('/containers/{0}/update', container.id)
+                res = container.client.api._post_json(url, data=restore_data)
+                container.client.api._result(res, True)
+                logger.info(f"Resource limits restored on {container.name}")
+            except Exception as e:
+                logger.error(f"Failed to restore resource limits on {container.name}: {e}")
+            _container_original_resources.pop(container.name, None)
 
 
 def _check_standalone_seccomp(agents):
