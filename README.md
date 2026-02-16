@@ -309,11 +309,11 @@ docker compose --profile dev up -d
 
 | Method | Standalone | Control Plane Mode |
 |--------|------------|-------------------|
-| **Web Terminal** | http://<local-admin-ui>:8080 → Terminal | http://<admin-ui>:9080 → Dashboard → Terminal |
-| **Docker exec** | `docker exec -it agent bash` | Same (requires host access) |
+| **Web Terminal** | http://<local-admin-ui>:8080 → Terminal | N/A (use SSH) |
+| **Docker exec** | `docker exec -it agent bash` | N/A (use SSH) |
 | **SSH** | Configure via Local Admin UI | Configure via CP API |
 
-The web terminal is the easiest - just open the Admin UI and click Terminal.
+The web terminal is available in the local admin UI. For remote agents managed by the control plane, use SSH via STCP tunnel.
 
 For SSH access in Control Plane Mode (remote data planes):
 ```bash

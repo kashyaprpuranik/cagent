@@ -212,7 +212,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/domain-polic
 |------|------|-------------|--------|
 | `admin` | `admin` | Yes | **All access** - tenants, all endpoints, OpenObserve link |
 | `admin` | `admin` | No | **Tenant admin** - domain policies, agents, tokens, IP ACLs, audit trail (tenant-scoped) |
-| `admin` | `developer` | No | **Developer** - dashboard (read-only), agent logs, web terminal, settings |
+| `admin` | `developer` | No | **Developer** - dashboard (read-only), agent logs, settings |
 | `agent` | - | No | **Data plane** - heartbeat, domain-policies/for-domain (agent-scoped) |
 
 **UI Access by Role:**
@@ -227,7 +227,6 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8002/api/v1/domain-polic
 | Admin Logs | ✓ | ✓ | ✗ |
 | Agent Logs | ✓ | ✓ | ✓ |
 | Settings | ✓ | ✓ | ✓ |
-| Web Terminal | ✓ | ✓ | ✓ |
 | OpenObserve Link | ✓ | ✗ | ✗ |
 
 ## Environment Variables
@@ -271,7 +270,7 @@ All connections are outbound from data planes - no inbound ports needed on data 
 |------|-----|------|---------|
 | Data plane (Envoy) | Control plane | 8002 | Credential/rate-limit lookups |
 | Data plane (agent-manager) | Control plane | 8002 | Heartbeat polling + log ingestion |
-| Data plane (frpc) | Control plane | 7000 | STCP tunnel for terminal |
+| Data plane (frpc) | Control plane | 7000 | STCP tunnel for SSH access |
 
 Note: Logs are shipped via the Control Plane API (port 8002), not directly to OpenObserve. This ensures agent identity is verified and prevents credential exposure on data planes.
 
