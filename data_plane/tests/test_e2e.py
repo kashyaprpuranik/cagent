@@ -608,7 +608,7 @@ class TestLocalAdminAPI:
         )
         assert r.status_code == 400
 
-    def test_container_restart(self, admin_url, data_plane_running):
+    def test_container_restart(self, admin_url, data_plane_running, agent_container_name):
         """Restarting agent container via API should succeed; infra containers should be rejected."""
         # Infrastructure containers cannot be controlled via the API
         r = requests.post(
@@ -620,7 +620,7 @@ class TestLocalAdminAPI:
 
         # Agent container restart should succeed
         r = requests.post(
-            f"{admin_url}/api/containers/agent",
+            f"{admin_url}/api/containers/{agent_container_name}",
             json={"action": "restart"},
             timeout=30,
         )
@@ -628,8 +628,8 @@ class TestLocalAdminAPI:
         assert r.json()["action"] == "restart"
 
         # Verify container comes back
-        assert wait_for_container("agent", timeout=30), \
-            "agent did not recover after restart"
+        assert wait_for_container(agent_container_name, timeout=30), \
+            f"{agent_container_name} did not recover after restart"
 
     def test_ssh_tunnel_connect_info_unconfigured(self, admin_url):
         """Should return 400 when tunnel is not configured."""
