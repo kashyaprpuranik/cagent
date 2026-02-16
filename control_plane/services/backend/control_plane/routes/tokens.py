@@ -117,9 +117,11 @@ async def create_token(
     if not new_tenant_id:
         new_tenant_id = token_info.tenant_id
 
-    # Check for duplicate name
-    existing = db.query(ApiToken).filter(ApiToken.name == body.name).first()
-    if existing:
+    # Check for duplicate name within the same tenant
+    name_query = db.query(ApiToken).filter(ApiToken.name == body.name)
+    if new_tenant_id:
+        name_query = name_query.filter(ApiToken.tenant_id == new_tenant_id)
+    if name_query.first():
         raise HTTPException(status_code=400, detail="Token with this name already exists")
 
     # Generate token

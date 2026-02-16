@@ -189,7 +189,7 @@ async def ingest_logs(
                 logger.error(f"OpenObserve ingestion failed for {tenant_slug}: {response.status_code} {response.text}")
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Failed to store logs: {response.text}"
+                    detail="Failed to store logs"
                 )
         else:
             # Legacy single-org mode
@@ -204,7 +204,7 @@ async def ingest_logs(
                 logger.error(f"OpenObserve ingestion failed: {response.status_code} {response.text}")
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Failed to store logs: {response.text}"
+                    detail="Failed to store logs"
                 )
     except HTTPException:
         raise
@@ -368,9 +368,10 @@ async def query_agent_logs(
     if response.status_code != 200:
         # Return 502 Bad Gateway for upstream errors - don't pass through status
         # (passing through 401 would make frontend think user token is invalid)
+        logger.error(f"OpenObserve query failed: {response.status_code} {response.text}")
         raise HTTPException(
             status_code=502,
-            detail=f"OpenObserve query failed (status {response.status_code}): {response.text}"
+            detail="Log query failed"
         )
 
     result = response.json()

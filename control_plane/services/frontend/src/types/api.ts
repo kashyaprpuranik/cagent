@@ -272,7 +272,7 @@ export interface DomainPolicy {
   allowed_paths: string[];
   requests_per_minute?: number;
   burst_size?: number;
-  bytes_per_hour?: number;
+
   timeout?: string;
   read_only?: boolean;
   expires_at?: string;
@@ -298,7 +298,7 @@ export interface CreateDomainPolicyRequest {
   allowed_paths?: string[];
   requests_per_minute?: number;
   burst_size?: number;
-  bytes_per_hour?: number;
+
   timeout?: string;
   read_only?: boolean;
   expires_at?: string;
@@ -312,7 +312,7 @@ export interface UpdateDomainPolicyRequest {
   allowed_paths?: string[];
   requests_per_minute?: number;
   burst_size?: number;
-  bytes_per_hour?: number;
+
   timeout?: string;
   read_only?: boolean;
   credential?: DomainPolicyCredential;

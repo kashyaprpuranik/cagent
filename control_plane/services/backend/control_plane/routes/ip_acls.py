@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from control_plane.database import get_db
 from control_plane.models import Tenant, TenantIpAcl, AuditTrail
 from control_plane.schemas import TenantIpAclCreate, TenantIpAclUpdate, TenantIpAclResponse
-from control_plane.auth import TokenInfo, require_admin_role
+from control_plane.auth import TokenInfo, require_admin_role, invalidate_ip_acl_cache
 from control_plane.rate_limit import limiter
 
 router = APIRouter()
@@ -103,6 +103,7 @@ async def create_tenant_ip_acl(
     db.add(log)
     db.commit()
     db.refresh(db_acl)
+    invalidate_ip_acl_cache(tenant_id)
 
     return db_acl
 
@@ -146,6 +147,7 @@ async def update_tenant_ip_acl(
     db.add(log)
     db.commit()
     db.refresh(db_acl)
+    invalidate_ip_acl_cache(tenant_id)
 
     return db_acl
 
@@ -185,5 +187,6 @@ async def delete_tenant_ip_acl(
     )
     db.add(log)
     db.commit()
+    invalidate_ip_acl_cache(tenant_id)
 
     return {"status": "deleted"}

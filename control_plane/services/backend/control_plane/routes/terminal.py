@@ -274,7 +274,7 @@ async def terminal_websocket(
     except Exception as e:
         logger.error(f"Terminal error: {e}")
         if websocket.client_state == WebSocketState.CONNECTED:
-            await websocket.close(code=4005, reason=str(e))
+            await websocket.close(code=4005, reason="Internal server error")
 
     finally:
         # --- Cleanup phase: open new DB session to update records ---

@@ -137,7 +137,7 @@ The control plane API is built with FastAPI and auto-generates OpenAPI documenta
 
 ### Domain Policies (Unified)
 
-Domain policies combine allowlist, path filtering, rate limits, egress limits, and credentials in one resource.
+Domain policies combine allowlist, path filtering, rate limits, and credentials in one resource.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -320,7 +320,6 @@ Each tenant has a virtual `__default__` agent that holds tenant-wide defaults. C
   "allowed_paths": ["/v1/chat/*", "/v1/models", "/v1/embeddings"],
   "requests_per_minute": 60,
   "burst_size": 10,
-  "bytes_per_hour": 10485760,
   "credential_header": "Authorization",
   "credential_format": "Bearer {value}",
   "agent_id": null,

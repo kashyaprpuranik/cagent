@@ -174,12 +174,9 @@ class TestLuaFilterContent:
             "function get_credential(",
             "function get_rate_limit_config(",
             "function check_rate_limit(",
-            "function get_egress_limit(",
-            "function check_egress_limit(",
             "function check_path_allowed(",
             "function parse_credential_response(",
             "function parse_rate_limit_response(",
-            "function parse_egress_limit_response(",
         ]
         for func in deprecated:
             # check_rate_limit_with_config should be OK, only check_rate_limit( is deprecated

@@ -92,29 +92,6 @@ with engine.connect() as conn:
         conn.execute(text('CREATE UNIQUE INDEX ix_tenant_ip_acls_unique ON tenant_ip_acls(tenant_id, cidr)'))
         conn.commit()
 
-    # Create egress_limits table if missing
-    result = conn.execute(text(\"\"\"
-        SELECT table_name FROM information_schema.tables
-        WHERE table_name = 'egress_limits'
-    \"\"\"))
-    if not result.fetchone():
-        print('Creating egress_limits table...')
-        conn.execute(text('''
-            CREATE TABLE egress_limits (
-                id SERIAL PRIMARY KEY,
-                domain_pattern VARCHAR(200) NOT NULL,
-                bytes_per_hour INTEGER DEFAULT 104857600,
-                description VARCHAR(500),
-                enabled BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                agent_id VARCHAR(100)
-            )
-        '''))
-        conn.execute(text('CREATE INDEX ix_egress_limits_domain_pattern ON egress_limits(domain_pattern)'))
-        conn.execute(text('CREATE INDEX ix_egress_limits_agent_id ON egress_limits(agent_id)'))
-        conn.commit()
-
     # Create domain_policies table if missing (unified model)
     result = conn.execute(text(\"\"\"
         SELECT table_name FROM information_schema.tables
@@ -134,7 +111,6 @@ with engine.connect() as conn:
                 allowed_paths JSON DEFAULT '[]',
                 requests_per_minute INTEGER,
                 burst_size INTEGER,
-                bytes_per_hour INTEGER,
                 credential_header VARCHAR(100),
                 credential_format VARCHAR(100),
                 credential_value_encrypted TEXT,

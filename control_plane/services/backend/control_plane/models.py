@@ -65,7 +65,7 @@ class AuditTrail(Base):
 
 
 class DomainPolicy(Base):
-    """Unified domain policy: allowlist + paths + rate limits + egress limits + credentials."""
+    """Unified domain policy: allowlist + paths + rate limits + credentials."""
     __tablename__ = "domain_policies"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -85,9 +85,6 @@ class DomainPolicy(Base):
     # Rate limiting (NULL = use defaults)
     requests_per_minute = Column(Integer)
     burst_size = Column(Integer)
-
-    # Egress limiting (NULL = use defaults)
-    bytes_per_hour = Column(Integer)
 
     # Credential injection (all NULL = no credential)
     credential_header = Column(String(100))  # e.g., "Authorization", "x-api-key"
@@ -109,6 +106,7 @@ class DomainPolicy(Base):
         # Unique constraint: one policy per domain per profile per tenant
         UniqueConstraint('domain', 'profile_id', 'tenant_id', name='uq_domain_policy_tenant'),
         Index('ix_domain_policy_tenant_enabled', 'tenant_id', 'enabled'),
+        Index('ix_domain_policy_tenant_profile', 'tenant_id', 'profile_id'),
     )
 
 
@@ -149,7 +147,7 @@ class EmailPolicy(Base):
 
 
 class SecurityProfile(Base):
-    """Named, tenant-scoped bundle of egress policies and seccomp settings."""
+    """Named, tenant-scoped bundle of domain policies and seccomp settings."""
     __tablename__ = "security_profiles"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -286,6 +284,10 @@ class ApiToken(Base):
     expires_at = Column(DateTime, nullable=True)
     last_used_at = Column(DateTime, nullable=True)
     enabled = Column(Boolean, default=True)
+
+    __table_args__ = (
+        Index('ix_api_token_type_tenant', 'token_type', 'tenant_id'),
+    )
 
 
 # ---------------------------------------------------------------------------

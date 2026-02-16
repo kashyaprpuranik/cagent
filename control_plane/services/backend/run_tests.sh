@@ -5,6 +5,7 @@ set -e
 
 cd "$(dirname "$0")"
 
+
 # Install test dependencies if needed
 pip install -q -r requirements-test.txt
 

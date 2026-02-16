@@ -19,7 +19,6 @@ interface FormData {
   allowed_paths: string;
   requests_per_minute: string;
   burst_size: string;
-  bytes_per_hour: string;
   timeout: string;
   read_only: boolean;
   enable_credential: boolean;
@@ -35,7 +34,6 @@ const emptyFormData: FormData = {
   allowed_paths: '',
   requests_per_minute: '',
   burst_size: '',
-  bytes_per_hour: '',
   timeout: '',
   read_only: false,
   enable_credential: false,
@@ -107,7 +105,6 @@ export function DomainPolicies() {
       allowed_paths: (policy.allowed_paths || []).join('\n'),
       requests_per_minute: policy.requests_per_minute?.toString() || '',
       burst_size: policy.burst_size?.toString() || '',
-      bytes_per_hour: policy.bytes_per_hour?.toString() || '',
       timeout: policy.timeout || '',
       read_only: policy.read_only || false,
       enable_credential: policy.has_credential || false,
@@ -132,7 +129,6 @@ export function DomainPolicies() {
       allowed_paths: paths.length > 0 ? paths : undefined,
       requests_per_minute: formData.requests_per_minute ? parseInt(formData.requests_per_minute) : undefined,
       burst_size: formData.burst_size ? parseInt(formData.burst_size) : undefined,
-      bytes_per_hour: formData.bytes_per_hour ? parseInt(formData.bytes_per_hour) : undefined,
       timeout: formData.timeout || undefined,
       read_only: formData.read_only || undefined,
     };
@@ -171,7 +167,6 @@ export function DomainPolicies() {
       allowed_paths: paths,
       requests_per_minute: formData.requests_per_minute ? parseInt(formData.requests_per_minute) : undefined,
       burst_size: formData.burst_size ? parseInt(formData.burst_size) : undefined,
-      bytes_per_hour: formData.bytes_per_hour ? parseInt(formData.bytes_per_hour) : undefined,
       timeout: formData.timeout || undefined,
       read_only: formData.read_only,
     };
@@ -279,18 +274,6 @@ export function DomainPolicies() {
         policy.requests_per_minute ? (
           <span className="text-sm text-dark-300">
             {policy.requests_per_minute}/min (burst: {policy.burst_size || '-'})
-          </span>
-        ) : (
-          <span className="text-dark-500 text-sm">Default</span>
-        ),
-    },
-    {
-      key: 'egress',
-      header: 'Egress',
-      render: (policy: DomainPolicy) =>
-        policy.bytes_per_hour ? (
-          <span className="text-sm text-dark-300">
-            {(policy.bytes_per_hour / 1048576).toFixed(0)} MB/hr
           </span>
         ) : (
           <span className="text-dark-500 text-sm">Default</span>
@@ -441,21 +424,6 @@ export function DomainPolicies() {
         </div>
         <p className="text-xs text-dark-500 mt-2">
           Leave empty to use default rate limits.
-        </p>
-      </div>
-
-      {/* Egress Limiting */}
-      <div>
-        <h3 className="text-sm font-medium text-dark-200 mb-3">Egress Limiting (optional)</h3>
-        <Input
-          label="Bytes per Hour"
-          type="number"
-          placeholder="104857600"
-          value={formData.bytes_per_hour}
-          onChange={(e) => setFormData({ ...formData, bytes_per_hour: e.target.value })}
-        />
-        <p className="text-xs text-dark-500 mt-2">
-          Maximum bytes allowed per hour. 104857600 = 100MB. Leave empty for default.
         </p>
       </div>
 

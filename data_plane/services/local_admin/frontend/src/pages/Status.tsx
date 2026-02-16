@@ -131,8 +131,13 @@ function HealthPanel() {
   );
 }
 
-function ContainerCard({ container }: { container: ContainerInfo }) {
+const INFRA_CONTAINERS = new Set([
+  'dns-filter', 'http-proxy', 'email-proxy', 'tunnel-client', 'agent-manager',
+]);
+
+function ContainerCard({ container, readOnly }: { container: ContainerInfo; readOnly?: boolean }) {
   const queryClient = useQueryClient();
+  const isInfra = INFRA_CONTAINERS.has(container.name);
 
   const mutation = useMutation({
     mutationFn: ({ name, action }: { name: string; action: 'start' | 'stop' | 'restart' }) =>
@@ -214,38 +219,44 @@ function ContainerCard({ container }: { container: ContainerInfo }) {
         </div>
       )}
 
-      <div className="flex gap-2">
-        {!isRunning && (
-          <button
-            onClick={() => mutation.mutate({ name: container.name, action: 'start' })}
-            disabled={mutation.isPending}
-            className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded disabled:opacity-50"
-          >
-            <Play className="w-3 h-3" />
-            Start
-          </button>
-        )}
-        {isRunning && (
-          <>
+      {isInfra || readOnly ? (
+        <p className="text-xs text-gray-500 italic">
+          {readOnly ? 'Managed by control plane' : 'Infrastructure — managed by system'}
+        </p>
+      ) : (
+        <div className="flex gap-2">
+          {!isRunning && (
             <button
-              onClick={() => mutation.mutate({ name: container.name, action: 'stop' })}
+              onClick={() => mutation.mutate({ name: container.name, action: 'start' })}
               disabled={mutation.isPending}
-              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded disabled:opacity-50"
+              className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded disabled:opacity-50"
             >
-              <Square className="w-3 h-3" />
-              Stop
+              <Play className="w-3 h-3" />
+              Start
             </button>
-            <button
-              onClick={() => mutation.mutate({ name: container.name, action: 'restart' })}
-              disabled={mutation.isPending}
-              className="flex items-center gap-1 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded disabled:opacity-50"
-            >
-              <RotateCw className="w-3 h-3" />
-              Restart
-            </button>
-          </>
-        )}
-      </div>
+          )}
+          {isRunning && (
+            <>
+              <button
+                onClick={() => mutation.mutate({ name: container.name, action: 'stop' })}
+                disabled={mutation.isPending}
+                className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded disabled:opacity-50"
+              >
+                <Square className="w-3 h-3" />
+                Stop
+              </button>
+              <button
+                onClick={() => mutation.mutate({ name: container.name, action: 'restart' })}
+                disabled={mutation.isPending}
+                className="flex items-center gap-1 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded disabled:opacity-50"
+              >
+                <RotateCw className="w-3 h-3" />
+                Restart
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -370,7 +381,7 @@ export default function StatusPage() {
         {data && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {Object.values(data.containers).map((container) => (
-              <ContainerCard key={container.name} container={container} />
+              <ContainerCard key={container.name} container={container} readOnly={isConnected} />
             ))}
           </div>
         )}

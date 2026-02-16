@@ -18,8 +18,9 @@
 #   }
 # =============================================================================
 
-# Debug logging - captures syscall traces and sandbox events
-debug = true
+# Debug logging - disabled in production to avoid leaking file paths, env vars,
+# and network details. Enable temporarily for troubleshooting.
+debug = false
 debug-log = "/var/log/runsc/"
 
 # Strace logging - detailed syscall tracing (use for debugging, disable for perf)

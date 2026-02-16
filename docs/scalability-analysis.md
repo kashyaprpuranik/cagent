@@ -6,8 +6,8 @@ This analysis identifies critical scalability bottlenecks and reliability risks 
 
 **Findings by severity:**
 - **Critical**: 6 issues (service availability risk)
-- **High**: 10 issues (performance degradation at scale)
-- **Medium**: 12 issues (operational risk over time)
+- **High**: 8 open, 2 resolved (performance degradation at scale)
+- **Medium**: 11 open, 1 resolved (operational risk over time)
 
 ---
 
@@ -35,38 +35,7 @@ _token_cache_lock = threading.Lock()
 
 **Recommendation**: Move token cache to Redis (infrastructure already exists). Use read-write lock if keeping in-memory temporarily.
 
-### 1.2 Database Connection Pool Sizing (HIGH)
-
-**Location**: `control_plane/services/backend/control_plane/database.py:8-17`
-
-```python
-_pool_kwargs = {
-    "pool_size": 20,
-    "max_overflow": 40,
-    "pool_pre_ping": True,
-    "pool_recycle": 1800,
-}
-```
-
-Fixed pool of 20 connections with overflow to 40. At >500 concurrent requests, connection acquisition contention causes timeouts. These values are not configurable via environment variables.
-
-**Recommendation**: Make pool size configurable via env vars. Increase defaults to 50/100 for production deployments.
-
-### 1.3 N+1 Query Pattern in Security Profiles (HIGH)
-
-**Location**: `control_plane/services/backend/control_plane/routes/security_profiles.py:21-43`
-
-```python
-def _profile_to_response(profile: SecurityProfile, db: Session) -> dict:
-    agent_count = db.query(AgentState).filter(...).count()   # 1 query per profile
-    policy_count = db.query(DomainPolicy).filter(...).count() # 1 query per profile
-```
-
-This function is called once per profile in `list_security_profiles`. Listing 100 profiles triggers 200 additional database queries.
-
-**Recommendation**: Use `GROUP BY` subqueries to batch-load agent and policy counts in the list endpoint.
-
-### 1.4 IP ACL Verification on Every Request (HIGH)
+### 1.2 IP ACL Verification on Every Request (HIGH)
 
 **Location**: `control_plane/services/backend/control_plane/auth.py:328-331`
 
@@ -81,29 +50,7 @@ Fetches ALL ACLs for the tenant on every admin request, then loops through in Py
 
 **Recommendation**: Add composite index `(tenant_id, enabled)`. Cache ACLs per tenant in Redis with 5-minute TTL.
 
-### 1.5 Missing Database Indexes (MEDIUM)
-
-**Location**: `control_plane/services/backend/control_plane/models.py`
-
-| Missing Index | Queried In | Impact |
-|---------------|-----------|--------|
-| `(tenant_id, profile_id)` on DomainPolicy | `domain_policies.py:252` | Full table scan for policy filtering by profile |
-| `(security_profile_id)` on AgentState | `security_profiles.py:23` | Unindexed count query per profile |
-| `(token_type, tenant_id)` on ApiToken | `tokens.py:38-44` | List tokens filters by both fields |
-
-### 1.6 Domain Policy Full Table Load (HIGH)
-
-**Location**: `control_plane/services/backend/control_plane/routes/domain_policies.py:264`
-
-```python
-policies = query.all()
-```
-
-Loads ALL policies into memory, then loops in Python for matching. With 10,000 policies per tenant, this is 5–10MB per query. At 100 req/sec this creates 500–1000MB/sec of transient memory allocation.
-
-**Recommendation**: Implement cursor pagination or pre-compile a policy lookup structure in the cache layer.
-
-### 1.7 Synchronous Last-Used Token Updates (MEDIUM)
+### 1.3 Synchronous Last-Used Token Updates (MEDIUM)
 
 **Location**: `control_plane/services/backend/control_plane/auth.py:142-153`
 
@@ -111,7 +58,7 @@ Token `last_used_at` DB writes happen synchronously inline with request processi
 
 **Recommendation**: Move `last_used_at` updates to an async background batch job.
 
-### 1.8 In-Memory Rate Limiter (MEDIUM)
+### 1.4 In-Memory Rate Limiter (MEDIUM)
 
 **Location**: `control_plane/services/backend/control_plane/rate_limit.py:22`
 
@@ -123,7 +70,7 @@ Falls back to in-memory storage when Redis URL is not configured. In-memory rate
 
 **Recommendation**: Require Redis for rate limiting in production deployments.
 
-### 1.9 OpenObserve Integration Fragility (MEDIUM)
+### 1.5 OpenObserve Integration Fragility (MEDIUM)
 
 **Location**: `control_plane/services/backend/control_plane/routes/logs.py:71-96`
 
@@ -134,7 +81,7 @@ Falls back to in-memory storage when Redis URL is not configured. In-memory rate
 
 **Recommendation**: Add exponential backoff retry (3 attempts). Implement circuit breaker pattern. Increase connection pool to 200+.
 
-### 1.10 Heartbeat Flush Inefficiency (MEDIUM)
+### 1.6 Heartbeat Flush Inefficiency (MEDIUM)
 
 **Location**: `control_plane/services/backend/control_plane/lifespan.py:43-82`
 
@@ -142,7 +89,7 @@ Background task runs every 60s: scans ALL Redis heartbeat keys (O(N) SCAN), then
 
 **Recommendation**: Use batch UPDATE with VALUES clause. Implement incremental SCAN with cursor.
 
-### 1.11 Audit Trail Unbounded Growth (MEDIUM)
+### 1.7 Audit Trail Unbounded Growth (MEDIUM)
 
 **Location**: `control_plane/services/backend/control_plane/models.py:48`
 
@@ -150,7 +97,7 @@ The `AuditTrail` table has a TEXT `details` column with no retention policy. Sea
 
 **Recommendation**: Implement TTL-based cleanup (e.g., 90-day retention). Add GIN index on searchable fields for PostgreSQL.
 
-### 1.12 No Resource Limits on CP Services (HIGH)
+### 1.8 No Resource Limits on CP Services (HIGH)
 
 **Location**: `control_plane/docker-compose.yml`
 
@@ -216,12 +163,9 @@ The Envoy Lua filter maintains in-memory state with no eviction:
 ```lua
 -- Token buckets for rate limiting (never evicted)
 token_buckets[host_clean] = {tokens = burst, last_refill = now}
-
--- Egress byte tracking (never evicted)
-egress_bytes[host_clean] = {bytes = 0, window_start = now}
 ```
 
-Both tables grow indefinitely as new domains are accessed. No garbage collection until Envoy restart.
+This table grows indefinitely as new domains are accessed. No garbage collection until Envoy restart.
 
 **Impact**: Memory leak. Envoy OOM crash after sustained operation with diverse domain access patterns.
 
@@ -376,31 +320,28 @@ Services without health checks (orchestrator cannot detect failures):
 
 ### P1 — Performance Degradation at Scale
 
-| Issue | Location | Effort |
-|-------|----------|--------|
-| DB connection pool too small (20/40) | `database.py:8-17` | Low |
-| N+1 queries in security profiles | `security_profiles.py:21-43` | Medium |
-| IP ACL loaded on every request | `auth.py:328-331` | Medium |
-| Domain policy full table load | `domain_policies.py:264` | Medium |
-| Blocking Docker stats() calls | `main.py:432` | Medium |
-| Full config regeneration | `main.py:606-609` | High |
-| Container recreation for seccomp | `main.py:245-247` | High |
-| No per-agent rate limiting | `cagent.yaml:25-29` | High |
+| Issue | Location | Effort | Status |
+|-------|----------|--------|--------|
+| IP ACL loaded on every request | `auth.py:328-331` | Medium | Open |
+| Domain policy full table load | `domain_policies.py:264` | Medium | Open |
+| Blocking Docker stats() calls | `main.py:432` | Medium | Open |
+| Full config regeneration | `main.py:606-609` | High | Open |
+| Container recreation for seccomp | `main.py:245-247` | High | Open |
+| No per-agent rate limiting | `cagent.yaml:25-29` | High | Open |
 
 ### P2 — Operational Risk Over Time
 
-| Issue | Location | Effort |
-|-------|----------|--------|
-| Missing database indexes | `models.py` | Low |
-| In-memory rate limiter fallback | `rate_limit.py:22` | Low |
-| Vector log rate limiting | `vector.yaml:212` | Low |
-| Synchronous token last-used writes | `auth.py:142-153` | Medium |
-| OpenObserve no retry/circuit breaker | `logs.py:71-96` | Medium |
-| Heartbeat flush inefficiency | `lifespan.py:43-82` | Medium |
-| Audit trail unbounded growth | `models.py:48` | Medium |
-| Network subnet limits (/24) | `docker-compose.yml:517-533` | Medium |
-| Missing health checks (8 services) | Various | Medium |
-| Lua wildcard O(n) matching | `config_generator.py:689-700` | Medium |
+| Issue | Location | Effort | Status |
+|-------|----------|--------|--------|
+| In-memory rate limiter fallback | `rate_limit.py:22` | Low | Open |
+| Vector log rate limiting | `vector.yaml:212` | Low | Open |
+| Synchronous token last-used writes | `auth.py:142-153` | Medium | Open |
+| OpenObserve no retry/circuit breaker | `logs.py:71-96` | Medium | Open |
+| Heartbeat flush inefficiency | `lifespan.py:43-82` | Medium | Open |
+| Audit trail unbounded growth | `models.py:48` | Medium | Open |
+| Network subnet limits (/24) | `docker-compose.yml:517-533` | Medium | Open |
+| Missing health checks (8 services) | Various | Medium | Open |
+| Lua wildcard O(n) matching | `config_generator.py:689-700` | Medium | Open |
 
 ---
 
@@ -412,10 +353,9 @@ Based on the analysis, these are the approximate breaking points:
 |--------|--------------|------------|
 | Concurrent agents per DP | ~250 | /24 subnet exhaustion |
 | Agents in connected mode | ~100 | Heartbeat worker limit (20 threads) |
-| Requests/sec to CP | ~500 | DB connection pool (20+40) |
+| Requests/sec to CP | ~500 (configurable) | DB connection pool (tunable via `DB_POOL_SIZE`) |
 | Domain policies per tenant | ~1000 | Full table load into memory |
-| Security profiles listed | ~50 | N+1 query pattern (2N+1 queries) |
 | Concurrent Envoy connections | ~1000 | Global circuit breaker threshold |
 | Log events/sec shipped | ~1600 | Vector rate limit (500 req/min × 200 batch) |
 | Unique tokens in 60s window | ~10,000 | In-memory cache memory pressure |
-| Days of continuous operation | ~7-14 | Lua filter memory leak (token_buckets, egress_bytes) |
+| Days of continuous operation | ~7-14 | Lua filter memory leak (token_buckets) |

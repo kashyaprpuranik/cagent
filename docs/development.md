@@ -197,7 +197,6 @@ curl -X POST http://localhost:8002/api/v1/domain-policies \
     "allowed_paths": ["/v1/*"],
     "requests_per_minute": 60,
     "burst_size": 10,
-    "bytes_per_hour": 10485760,
     "credential": {
       "header": "Authorization",
       "format": "Bearer {value}",

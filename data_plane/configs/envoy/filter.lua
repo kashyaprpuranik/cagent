@@ -12,11 +12,6 @@ local CP_FAILURE_BACKOFF = 30  -- Seconds to wait before retrying CP after failu
 local domain_policy_cache = {}
 local token_buckets = {}     -- domain -> {tokens, last_refill}
 
--- Egress volume tracking (in-memory, resets on restart)
-local egress_bytes = {}      -- domain -> {bytes, window_start}
-local EGRESS_WINDOW_SECONDS = 3600  -- 1 hour window
-local DEFAULT_EGRESS_LIMIT = 100 * 1024 * 1024  -- 100MB per hour default
-
 -- Control plane health tracking
 local cp_available = true
 local cp_last_failure = 0
@@ -27,7 +22,6 @@ local cp_last_failure = 0
 local static_credentials = {}  -- domain -> {header_name, header_value, target_domain}
 local static_alias_map = {}    -- alias.devbox.local -> domain
 local static_rate_limits = {}
-local static_egress_limits = {} -- domain -> bytes_per_hour
 local static_config_loaded = false
 
 function load_static_config(request_handle)
@@ -79,16 +73,6 @@ function load_static_config(request_handle)
       requests_per_minute = 120,
       burst_size = 20
     }
-  end
-
-  -- Load static egress limits (domain:bytes_per_hour)
-  local egress_env = os.getenv("STATIC_EGRESS_LIMITS") or ""
-  for limit in string.gmatch(egress_env, "[^,]+") do
-    local domain, bytes = string.match(limit, "([^:]+):(%d+)")
-    if domain and bytes then
-      static_egress_limits[string.lower(domain)] = tonumber(bytes)
-      request_handle:logInfo("Static egress limit for " .. string.lower(domain) .. ": " .. bytes .. " bytes/hour")
-    end
   end
 end
 
@@ -275,7 +259,6 @@ function parse_domain_policy_response(body)
     allowed_paths = {},
     requests_per_minute = tonumber(string.match(body, '"requests_per_minute"%s*:%s*(%d+)')) or 120,
     burst_size = tonumber(string.match(body, '"burst_size"%s*:%s*(%d+)')) or 20,
-    bytes_per_hour = tonumber(string.match(body, '"bytes_per_hour"%s*:%s*(%d+)')) or DEFAULT_EGRESS_LIMIT,
     credential = nil,
     target_domain = nil
   }
@@ -316,7 +299,6 @@ function build_static_policy(domain)
     allowed_paths = {},
     requests_per_minute = 120,
     burst_size = 20,
-    bytes_per_hour = DEFAULT_EGRESS_LIMIT,
     credential = nil,
     target_domain = nil
   }
@@ -327,12 +309,6 @@ function build_static_policy(domain)
     policy.requests_per_minute = rl.requests_per_minute or 120
     policy.burst_size = rl.burst_size or 20
     policy.matched = true
-  end
-
-  -- Check static egress limits (with wildcard support)
-  local el = match_domain_wildcard(domain, static_egress_limits) or static_egress_limits["default"]
-  if el then
-    policy.bytes_per_hour = el
   end
 
   -- Check static credentials (with wildcard support)
@@ -420,57 +396,6 @@ function check_rate_limit_with_config(request_handle, domain, rpm, burst)
 end
 
 -- =======================================================================
--- Egress Volume Limiting
--- =======================================================================
-
--- Egress limit check with explicit config (for unified policy)
-function check_egress_limit_with_config(request_handle, domain, bytes_limit)
-  local host_clean = string.match(domain, "^([^:]+)") or domain
-  local now = os.time()
-
-  local tracker = egress_bytes[host_clean]
-  if not tracker then
-    tracker = { bytes = 0, window_start = now }
-    egress_bytes[host_clean] = tracker
-  end
-
-  -- Reset window if expired
-  if (now - tracker.window_start) >= EGRESS_WINDOW_SECONDS then
-    tracker.bytes = 0
-    tracker.window_start = now
-  end
-
-  return tracker.bytes < bytes_limit, tracker.bytes
-end
-
--- Record egress bytes (called from response handler)
-function record_egress_bytes(response_handle, domain, bytes)
-  local host_clean = string.match(domain, "^([^:]+)") or domain
-  local now = os.time()
-
-  local tracker = egress_bytes[host_clean]
-  if not tracker then
-    tracker = { bytes = 0, window_start = now }
-    egress_bytes[host_clean] = tracker
-  end
-
-  -- Reset window if expired
-  if (now - tracker.window_start) >= EGRESS_WINDOW_SECONDS then
-    tracker.bytes = 0
-    tracker.window_start = now
-  end
-
-  tracker.bytes = tracker.bytes + bytes
-
-  if tracker.bytes > (DEFAULT_EGRESS_LIMIT) then
-    response_handle:logWarn(string.format(
-      "Egress volume warning for %s: %d bytes in current window",
-      host_clean, tracker.bytes
-    ))
-  end
-end
-
--- =======================================================================
 -- Request / Response Handlers
 -- =======================================================================
 
@@ -530,21 +455,6 @@ function envoy_on_request(request_handle)
     return
   end
 
-  -- Egress volume limit check using policy
-  local bytes_limit = policy and policy.bytes_per_hour or DEFAULT_EGRESS_LIMIT
-  local egress_allowed, current_bytes = check_egress_limit_with_config(request_handle, real_domain, bytes_limit)
-  if not egress_allowed then
-    request_handle:logWarn(string.format(
-      "Egress limit exceeded for %s: %d / %d bytes",
-      real_domain, current_bytes, bytes_limit
-    ))
-    request_handle:respond(
-      {[":status"] = "429", ["retry-after"] = "3600"},
-      '{"error": "egress_limit_exceeded", "message": "Hourly egress limit exceeded for this domain"}'
-    )
-    return
-  end
-
   -- Store domain in per-stream metadata (concurrency-safe)
   request_handle:streamInfo():dynamicMetadata():set(
     "envoy.filters.http.lua", "request_domain", real_domain
@@ -572,17 +482,5 @@ function envoy_on_request(request_handle)
 end
 
 function envoy_on_response(response_handle)
-  local status = response_handle:headers():get(":status")
-  local content_length_str = response_handle:headers():get("content-length") or "0"
-  local content_length = tonumber(content_length_str) or 0
-
-  -- Get domain from per-stream metadata (concurrency-safe)
-  local metadata = response_handle:streamInfo():dynamicMetadata():get("envoy.filters.http.lua")
-  local domain = metadata and metadata["request_domain"] or nil
-
-  -- Track egress bytes for the domain from the request
-  if domain and content_length > 0 then
-    record_egress_bytes(response_handle, domain, content_length)
-  end
-
+  -- no-op: response handler reserved for future use
 end

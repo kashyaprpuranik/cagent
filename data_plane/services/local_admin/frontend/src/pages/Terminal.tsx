@@ -6,7 +6,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import { createTerminal, getContainers } from '../api/client';
 import '@xterm/xterm/css/xterm.css';
 
-const INFRA_CONTAINERS = new Set(['dns-filter', 'http-proxy', 'email-proxy', 'tunnel-client']);
+const INFRA_CONTAINERS = new Set([
+  'dns-filter', 'http-proxy', 'email-proxy', 'tunnel-client', 'agent-manager',
+]);
 
 export default function TerminalPage() {
   const terminalRef = useRef<HTMLDivElement>(null);

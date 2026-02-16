@@ -361,8 +361,7 @@ AGENT_VARIANT=lean  # or dev, ml
 - **DNS Filtering**: Only allowlisted domains resolve
 - **No Credential Exposure**: Agent never sees API keys
 - **Rate Limiting**: Prevents runaway API usage
-- **Egress Limits**: Per-domain byte budgets to prevent data exfiltration
-- **Audit Trail**: All egress requests logged
+- **Audit Trail**: All proxy requests logged
 - **Resource Limits**: CPU, memory, and PID limits on agent
 - **gVisor Isolation** (optional): Kernel-level syscall isolation
 

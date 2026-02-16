@@ -159,9 +159,6 @@ class DomainPolicyCreate(BaseModel):
     requests_per_minute: Optional[int] = None
     burst_size: Optional[int] = None
 
-    # Egress limiting
-    bytes_per_hour: Optional[int] = None
-
     # Envoy config options
     timeout: Optional[str] = None  # e.g., "30s", "120s", "5m"
     read_only: Optional[bool] = None  # Block POST/PUT/DELETE
@@ -181,7 +178,6 @@ class DomainPolicyUpdate(BaseModel):
     allowed_paths: Optional[List[str]] = None
     requests_per_minute: Optional[int] = None
     burst_size: Optional[int] = None
-    bytes_per_hour: Optional[int] = None
     timeout: Optional[str] = None
     read_only: Optional[bool] = None
     expires_at: Optional[datetime] = None
@@ -202,7 +198,6 @@ class DomainPolicyResponse(BaseModel):
     allowed_paths: List[str]
     requests_per_minute: Optional[int]
     burst_size: Optional[int]
-    bytes_per_hour: Optional[int]
     timeout: Optional[str]
     read_only: Optional[bool]
     expires_at: Optional[datetime]

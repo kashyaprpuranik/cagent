@@ -609,9 +609,18 @@ class TestLocalAdminAPI:
         assert r.status_code == 400
 
     def test_container_restart(self, admin_url, data_plane_running):
-        """Restarting http-proxy via API should succeed and container should recover."""
+        """Restarting agent container via API should succeed; infra containers should be rejected."""
+        # Infrastructure containers cannot be controlled via the API
         r = requests.post(
             f"{admin_url}/api/containers/http-proxy",
+            json={"action": "restart"},
+            timeout=30,
+        )
+        assert r.status_code == 403
+
+        # Agent container restart should succeed
+        r = requests.post(
+            f"{admin_url}/api/containers/agent",
             json={"action": "restart"},
             timeout=30,
         )
@@ -619,8 +628,8 @@ class TestLocalAdminAPI:
         assert r.json()["action"] == "restart"
 
         # Verify container comes back
-        assert wait_for_container("http-proxy", timeout=30), \
-            "http-proxy did not recover after restart"
+        assert wait_for_container("agent", timeout=30), \
+            "agent did not recover after restart"
 
     def test_ssh_tunnel_connect_info_unconfigured(self, admin_url):
         """Should return 400 when tunnel is not configured."""

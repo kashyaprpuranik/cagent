@@ -4,7 +4,7 @@ import socket
 import docker
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ..constants import docker_client
+from ..constants import docker_client, discover_agent_container_names
 
 router = APIRouter()
 
@@ -35,6 +35,15 @@ def _get_raw_socket(sock):
 async def web_terminal(websocket: WebSocket, name: str):
     """Interactive terminal session via WebSocket."""
     await websocket.accept()
+
+    # Only allow terminal access to agent containers, not infrastructure
+    allowed = set(discover_agent_container_names())
+    if name not in allowed:
+        await websocket.send_text(
+            f"\r\nTerminal access denied: '{name}' is not an agent container.\r\n"
+        )
+        await websocket.close()
+        return
 
     raw_sock = None
 

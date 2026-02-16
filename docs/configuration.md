@@ -53,7 +53,7 @@ The Local Admin UI at http://localhost:8080 provides a structured editor:
 
 ### Domain Policies (Unified)
 
-Domain policies combine all settings for a domain in one place: allowlist, path filtering, rate limits, egress limits, and credentials.
+Domain policies combine all settings for a domain in one place: allowlist, path filtering, rate limits, and credentials.
 
 ```bash
 # Create a domain policy with all settings
@@ -67,7 +67,6 @@ curl -X POST http://localhost:8002/api/v1/domain-policies \
     "allowed_paths": ["/v1/chat/*", "/v1/models", "/v1/embeddings"],
     "requests_per_minute": 60,
     "burst_size": 10,
-    "bytes_per_hour": 10485760,
     "credential": {
       "header": "Authorization",
       "format": "Bearer {value}",
@@ -108,7 +107,7 @@ curl http://localhost:8002/api/v1/domain-policies/export \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-The agent-manager syncs policies from the control plane to CoreDNS (for DNS filtering) and Envoy (for rate limits, path filtering, credentials, and egress limits).
+The agent-manager syncs policies from the control plane to CoreDNS (for DNS filtering) and Envoy (for rate limits, path filtering, and credentials).
 
 ### Domain Policy Fields
 
@@ -120,7 +119,6 @@ The agent-manager syncs policies from the control plane to CoreDNS (for DNS filt
 | `allowed_paths` | list | Path patterns to allow (default: all) |
 | `requests_per_minute` | int | Rate limit (requests per minute) |
 | `burst_size` | int | Rate limit burst allowance |
-| `bytes_per_hour` | int | Egress limit (bytes per hour) |
 | `credential` | object | Credential to inject (`header`, `format`, `value`) |
 | `agent_id` | string | Scope to specific agent (null = tenant-global) |
 
@@ -138,45 +136,9 @@ By default, all paths are allowed for a domain. You can restrict access to speci
 - Restrict to read-only API operations
 - Allow specific API versions only
 
-### Egress Limits
-
-Egress limits control the amount of data (bytes per hour) that can be sent to each domain. This helps prevent data exfiltration and runaway costs.
-
-Set `bytes_per_hour` on a domain policy:
-
-```bash
-curl -X POST http://localhost:8002/api/v1/domain-policies \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain": "api.openai.com",
-    "bytes_per_hour": 10485760,
-    "description": "OpenAI with 10MB/hour egress limit"
-  }'
-```
-
-**Common byte values:**
-
-| Size | Bytes |
-|------|-------|
-| 1 MB | 1048576 |
-| 10 MB | 10485760 |
-| 50 MB | 52428800 |
-| 100 MB | 104857600 |
-| 500 MB | 524288000 |
-| 1 GB | 1073741824 |
-
-**Standalone mode** — configure via environment variable:
-```bash
-# Format: domain:bytes_per_hour (comma-separated)
-STATIC_EGRESS_LIMITS="api.openai.com:10485760,default:104857600"
-```
-
-**Limitation**: Byte counts are tracked in-memory by Envoy and reset when Envoy restarts. See the roadmap for persistent state support.
-
 ### Credential Injection
 
-Credentials are stored on domain policies and injected by Envoy at egress. The agent never sees API keys.
+Credentials are stored on domain policies and injected by Envoy at the proxy layer. The agent never sees API keys.
 
 **Domain aliases**: Setting `alias: "openai"` creates an `openai.devbox.local` shortcut. The agent can use `http://openai.devbox.local/v1/models` and Envoy resolves it to `api.openai.com` with credentials injected.
 
@@ -262,7 +224,6 @@ curl -X POST http://localhost:8002/api/v1/domain-policies \
     "domain": "api.openai.com",
     "requests_per_minute": 120,
     "burst_size": 20,
-    "bytes_per_hour": 52428800,
     "description": "Higher limits for prod-agent",
     "agent_id": "prod-agent"
   }'

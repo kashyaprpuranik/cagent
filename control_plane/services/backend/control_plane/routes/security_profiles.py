@@ -1,8 +1,9 @@
 import json
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from control_plane.database import get_db
@@ -18,15 +19,12 @@ from control_plane.redis_client import invalidate_domain_policy_cache
 router = APIRouter()
 
 
-def _profile_to_response(profile: SecurityProfile, db: Session) -> dict:
-    """Convert SecurityProfile to response dict with computed counts."""
-    agent_count = db.query(AgentState).filter(
-        AgentState.security_profile_id == profile.id,
-        AgentState.deleted_at.is_(None),
-    ).count()
-    policy_count = db.query(DomainPolicy).filter(
-        DomainPolicy.profile_id == profile.id,
-    ).count()
+def _profile_to_response(
+    profile: SecurityProfile,
+    agent_counts: Dict[int, int],
+    policy_counts: Dict[int, int],
+) -> dict:
+    """Convert SecurityProfile to response dict with precomputed counts."""
     return {
         "id": profile.id,
         "tenant_id": profile.tenant_id,
@@ -36,11 +34,38 @@ def _profile_to_response(profile: SecurityProfile, db: Session) -> dict:
         "cpu_limit": profile.cpu_limit,
         "memory_limit_mb": profile.memory_limit_mb,
         "pids_limit": profile.pids_limit,
-        "agent_count": agent_count,
-        "policy_count": policy_count,
+        "agent_count": agent_counts.get(profile.id, 0),
+        "policy_count": policy_counts.get(profile.id, 0),
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
+
+
+def _batch_counts(db: Session, profile_ids: List[int]) -> tuple:
+    """Load agent and policy counts for a batch of profiles in 2 queries."""
+    if not profile_ids:
+        return {}, {}
+
+    agent_rows = (
+        db.query(AgentState.security_profile_id, func.count())
+        .filter(
+            AgentState.security_profile_id.in_(profile_ids),
+            AgentState.deleted_at.is_(None),
+        )
+        .group_by(AgentState.security_profile_id)
+        .all()
+    )
+    agent_counts = {pid: cnt for pid, cnt in agent_rows}
+
+    policy_rows = (
+        db.query(DomainPolicy.profile_id, func.count())
+        .filter(DomainPolicy.profile_id.in_(profile_ids))
+        .group_by(DomainPolicy.profile_id)
+        .all()
+    )
+    policy_counts = {pid: cnt for pid, cnt in policy_rows}
+
+    return agent_counts, policy_counts
 
 
 @router.get("/api/v1/security-profiles")
@@ -64,8 +89,9 @@ async def list_security_profiles(
 
     total = query.count()
     profiles = query.order_by(SecurityProfile.name).offset(offset).limit(limit).all()
+    agent_counts, policy_counts = _batch_counts(db, [p.id for p in profiles])
     return {
-        "items": [_profile_to_response(p, db) for p in profiles],
+        "items": [_profile_to_response(p, agent_counts, policy_counts) for p in profiles],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -120,7 +146,7 @@ async def create_security_profile(
     db.commit()
     db.refresh(db_profile)
 
-    return _profile_to_response(db_profile, db)
+    return _profile_to_response(db_profile, *_batch_counts(db, [db_profile.id]))
 
 
 @router.get("/api/v1/security-profiles/{profile_id}", response_model=SecurityProfileResponse)
@@ -137,7 +163,7 @@ async def get_security_profile(
         raise HTTPException(status_code=404, detail="Security profile not found")
     if not token_info.is_super_admin and profile.tenant_id != token_info.tenant_id:
         raise HTTPException(status_code=404, detail="Security profile not found")
-    return _profile_to_response(profile, db)
+    return _profile_to_response(profile, *_batch_counts(db, [profile.id]))
 
 
 @router.put("/api/v1/security-profiles/{profile_id}", response_model=SecurityProfileResponse)
@@ -193,7 +219,7 @@ async def update_security_profile(
     redis_client = getattr(request.app.state, "redis", None)
     await invalidate_domain_policy_cache(redis_client, profile.tenant_id)
 
-    return _profile_to_response(profile, db)
+    return _profile_to_response(profile, *_batch_counts(db, [profile.id]))
 
 
 @router.delete("/api/v1/security-profiles/{profile_id}")

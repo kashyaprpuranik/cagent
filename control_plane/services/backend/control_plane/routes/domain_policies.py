@@ -58,7 +58,6 @@ def domain_policy_to_response(policy: DomainPolicy) -> dict:
         "allowed_paths": policy.allowed_paths or [],
         "requests_per_minute": policy.requests_per_minute,
         "burst_size": policy.burst_size,
-        "bytes_per_hour": policy.bytes_per_hour,
         "timeout": policy.timeout,
         "read_only": policy.read_only,
         "expires_at": policy.expires_at,
@@ -80,7 +79,6 @@ def build_policy_response(policy: DomainPolicy) -> dict:
         "allowed_paths": policy.allowed_paths or [],
         "requests_per_minute": policy.requests_per_minute or int(os.environ.get('DEFAULT_RATE_LIMIT_RPM', '120')),
         "burst_size": policy.burst_size or int(os.environ.get('DEFAULT_RATE_LIMIT_BURST', '20')),
-        "bytes_per_hour": policy.bytes_per_hour or int(os.environ.get('DEFAULT_EGRESS_LIMIT_BYTES', '104857600')),
         "timeout": policy.timeout,
         "read_only": policy.read_only,
         "header_name": None,
@@ -188,7 +186,6 @@ async def create_domain_policy(
         allowed_paths=policy.allowed_paths or [],
         requests_per_minute=policy.requests_per_minute,
         burst_size=policy.burst_size,
-        bytes_per_hour=policy.bytes_per_hour,
         timeout=policy.timeout,
         read_only=policy.read_only or False,
         expires_at=policy.expires_at,
@@ -229,7 +226,7 @@ async def get_policy_for_domain(
 ):
     """Get complete policy for a domain (used by Envoy).
 
-    Returns all policy settings: paths, rate limits, egress limits, credentials.
+    Returns all policy settings: paths, rate limits, credentials.
     Agent tokens receive policies scoped to their agent + global policies.
     """
     query = db.query(DomainPolicy).filter(DomainPolicy.enabled == True)
@@ -286,14 +283,12 @@ async def get_policy_for_domain(
         # Return defaults
         default_rpm = int(os.environ.get('DEFAULT_RATE_LIMIT_RPM', '120'))
         default_burst = int(os.environ.get('DEFAULT_RATE_LIMIT_BURST', '20'))
-        default_bytes = int(os.environ.get('DEFAULT_EGRESS_LIMIT_BYTES', '104857600'))
         return {
             "matched": False,
             "domain": domain,
             "allowed_paths": [],
             "requests_per_minute": default_rpm,
             "burst_size": default_burst,
-            "bytes_per_hour": default_bytes,
             "header_name": None,
             "header_value": None,
         }
@@ -414,8 +409,6 @@ async def update_domain_policy(
         policy.requests_per_minute = update.requests_per_minute
     if update.burst_size is not None:
         policy.burst_size = update.burst_size
-    if update.bytes_per_hour is not None:
-        policy.bytes_per_hour = update.bytes_per_hour
     if update.timeout is not None:
         policy.timeout = update.timeout
     if update.read_only is not None:

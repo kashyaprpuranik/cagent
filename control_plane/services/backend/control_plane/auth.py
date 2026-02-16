@@ -1,4 +1,5 @@
 import ipaddress
+import logging
 import threading
 import time as _time
 from datetime import datetime, timezone
@@ -11,7 +12,9 @@ from sqlalchemy.orm import Session
 from control_plane.database import get_db
 from control_plane.models import ApiToken, AgentState, TenantIpAcl
 from control_plane.crypto import hash_token
-from slowapi.util import get_remote_address
+from control_plane.config import TRUSTED_PROXY_COUNT
+
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer(auto_error=False)
 
@@ -29,6 +32,15 @@ _LAST_USED_WRITE_INTERVAL = 600  # 10 minutes
 
 _token_cache: dict = {}        # token_hash -> (TokenInfo, float, float)
 _token_cache_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# IP ACL cache — avoids a DB query on every admin request.
+# Maps tenant_id -> (list[cidr_str], cached_at_monotonic)
+# ---------------------------------------------------------------------------
+_IP_ACL_CACHE_TTL = 60         # seconds
+
+_ip_acl_cache: dict = {}       # tenant_id -> ([cidr, ...], float)
+_ip_acl_cache_lock = threading.Lock()
 
 
 def invalidate_token_cache(token_hash: str) -> None:
@@ -52,6 +64,39 @@ def clear_token_cache() -> None:
     """Remove all entries — useful in tests."""
     with _token_cache_lock:
         _token_cache.clear()
+
+
+def invalidate_ip_acl_cache(tenant_id: int) -> None:
+    """Remove cached IP ACLs for a tenant. Call on ACL create/update/delete."""
+    with _ip_acl_cache_lock:
+        _ip_acl_cache.pop(tenant_id, None)
+
+
+def clear_ip_acl_cache() -> None:
+    """Remove all IP ACL cache entries — useful in tests."""
+    with _ip_acl_cache_lock:
+        _ip_acl_cache.clear()
+
+
+def _get_cached_ip_acls(tenant_id: int, db: Session) -> list:
+    """Return list of CIDR strings for a tenant, from cache or DB."""
+    now = _time.monotonic()
+    with _ip_acl_cache_lock:
+        entry = _ip_acl_cache.get(tenant_id)
+        if entry and (now - entry[1]) < _IP_ACL_CACHE_TTL:
+            return entry[0]
+
+    cidrs = [
+        acl.cidr for acl in db.query(TenantIpAcl).filter(
+            TenantIpAcl.tenant_id == tenant_id,
+            TenantIpAcl.enabled == True
+        ).all()
+    ]
+
+    with _ip_acl_cache_lock:
+        _ip_acl_cache[tenant_id] = (cidrs, now)
+
+    return cidrs
 
 
 class TokenInfo:
@@ -295,8 +340,23 @@ def validate_ip_in_cidr(ip_str: str, cidr_str: str) -> bool:
 
 
 def get_client_ip(request: Request) -> str:
-    """Get client IP, respecting X-Forwarded-For for proxied requests."""
-    return get_remote_address(request)
+    """Get client IP address.
+
+    When TRUSTED_PROXY_COUNT > 0, extracts the real client IP from the
+    X-Forwarded-For header (Nth-from-right entry, where N = proxy count).
+    When 0 (default), uses the TCP peer address — safe against header spoofing.
+    """
+    if TRUSTED_PROXY_COUNT > 0:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            parts = [p.strip() for p in xff.split(",") if p.strip()]
+            # Nth-from-right: with 1 proxy, take the last entry (added by the proxy)
+            idx = max(0, len(parts) - TRUSTED_PROXY_COUNT)
+            return parts[idx]
+    # Default: TCP peer address (no proxy trust)
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
 
 
 async def verify_ip_acl(
@@ -324,31 +384,29 @@ async def verify_ip_acl(
     if token_info.token_type != "admin" or not token_info.tenant_id:
         return token_info
 
-    # Get enabled IP ACLs for this tenant
-    ip_acls = db.query(TenantIpAcl).filter(
-        TenantIpAcl.tenant_id == token_info.tenant_id,
-        TenantIpAcl.enabled == True
-    ).all()
+    # Get enabled IP ACLs for this tenant (cached, 60s TTL)
+    cidrs = _get_cached_ip_acls(token_info.tenant_id, db)
 
     # No ACLs configured = allow all (backwards compatible)
-    if not ip_acls:
+    if not cidrs:
         return token_info
 
     # Get client IP
     client_ip = get_client_ip(request)
 
     # Check if IP matches any allowed CIDR
-    for acl in ip_acls:
-        if validate_ip_in_cidr(client_ip, acl.cidr):
+    for cidr in cidrs:
+        if validate_ip_in_cidr(client_ip, cidr):
             return token_info
 
     # IP not in any allowed range — deny.
     # TODO: Log IP ACL denials to a proper audit log (append-only / external),
     # not the transactional audit trail table.
 
+    logger.warning(f"IP ACL denied: {client_ip} not in allowed range for tenant {token_info.tenant_id}")
     raise HTTPException(
         status_code=403,
-        detail=f"Access denied: IP address {client_ip} is not in the allowed range for this tenant"
+        detail="Access denied: your IP address is not in the allowed range for this tenant"
     )
 
 

@@ -47,3 +47,9 @@ CORS_ORIGINS = [
 BETA_FEATURES = set(
     f.strip() for f in os.environ.get('BETA_FEATURES', '').split(',') if f.strip()
 )
+
+# Trusted proxy depth: number of reverse proxies in front of the backend.
+# 0 = no proxy, use TCP peer address (default, safe).
+# 1 = one proxy, use rightmost X-Forwarded-For entry.
+# N = N proxies, use Nth-from-right X-Forwarded-For entry.
+TRUSTED_PROXY_COUNT = int(os.environ.get('TRUSTED_PROXY_COUNT', '0'))

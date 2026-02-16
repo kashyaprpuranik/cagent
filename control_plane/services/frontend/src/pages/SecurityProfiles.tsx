@@ -203,7 +203,7 @@ export function SecurityProfiles() {
         <div>
           <h1 className="text-2xl font-bold text-dark-100">Profiles</h1>
           <p className="text-sm text-dark-400 mt-1">
-            Named policy bundles combining egress rules, runtime settings, and resource limits
+            Named policy bundles combining domain rules, runtime settings, and resource limits
           </p>
         </div>
         <button
@@ -315,7 +315,7 @@ export function SecurityProfiles() {
       <Card title="Agent Group Assignment">
         <div className="space-y-4">
           <p className="text-sm text-dark-400">
-            Select agent groups and assign a profile in bulk. Each agent group will use its assigned profile&apos;s egress policies, runtime settings, and resource limits.
+            Select agent groups and assign a profile in bulk. Each agent group will use its assigned profile&apos;s domain policies, runtime settings, and resource limits.
           </p>
 
           {/* Action bar */}

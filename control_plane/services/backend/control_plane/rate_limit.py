@@ -1,6 +1,5 @@
 from fastapi import Request
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from control_plane.config import REDIS_URL
 
@@ -12,7 +11,8 @@ def get_token_identifier(request: Request) -> str:
         # Use first 16 chars of token as identifier (enough to be unique)
         return f"token:{auth[7:23]}"
     # Fall back to IP for unauthenticated requests
-    return f"ip:{get_remote_address(request)}"
+    from control_plane.auth import get_client_ip
+    return f"ip:{get_client_ip(request)}"
 
 
 # Initialize limiter - use Redis if configured, otherwise in-memory
