@@ -35,21 +35,21 @@ This repo contains the **data plane** — the secure agent execution environment
 
 ```
 .
-├── data_plane/
-│   ├── docker-compose.yml          # DP services (agent, envoy, coredns, vector, agent-manager, email-proxy)
-│   ├── agent.Dockerfile            # Agent container image
-│   ├── configs/
-│   │   ├── cagent.yaml             # Unified config (source of truth for DNS + proxy)
-│   │   ├── coredns/Corefile        # DNS filter config (generated from cagent.yaml)
-│   │   ├── envoy/                  # HTTP proxy config (generated from cagent.yaml)
-│   │   ├── vector/                 # Log collection (sources/transforms + mode-specific sinks)
-│   │   ├── seccomp/                # Seccomp profile for agent container
-│   │   └── gvisor/runsc.toml       # gVisor runtime config
-│   ├── services/
-│   │   ├── agent_manager/          # Config sync, admin UI, domain policy API
-│   │   ├── local_admin/            # Admin UI frontend source (built into agent-manager)
-│   │   └── email_proxy/            # Email egress control (beta)
-│   └── tests/                      # Unit and E2E tests
+├── docker-compose.yml              # DP services (agent, envoy, coredns, vector, agent-manager, email-proxy)
+├── agent.Dockerfile                # Agent container image
+├── configs/
+│   ├── cagent.yaml                 # Unified config (source of truth for DNS + proxy)
+│   ├── coredns/Corefile            # DNS filter config (generated from cagent.yaml)
+│   ├── envoy/                      # HTTP proxy config (generated from cagent.yaml)
+│   ├── vector/                     # Log collection (sources/transforms + mode-specific sinks)
+│   ├── seccomp/                    # Seccomp profile for agent container
+│   └── gvisor/runsc.toml           # gVisor runtime config
+├── services/
+│   ├── agent_manager/              # Config sync, admin UI, domain policy API
+│   │   └── frontend/               # React admin UI (built into agent-manager image)
+│   └── email_proxy/                # Email egress control (beta)
+├── tests/                          # Unit and E2E tests
+├── scripts/                        # Utility scripts (seed_traffic.py)
 ├── docs/                           # Configuration guide
 ├── dev_up.sh                       # Dev environment orchestration
 └── run_tests.sh                    # Test runner
@@ -89,12 +89,6 @@ This repo contains the **data plane** — the secure agent execution environment
 # DP unit/config tests + frontend type-check (default)
 ./run_tests.sh
 
-# DP unit/config tests only
-./run_tests.sh --dp
-
-# Frontend type-check only (tsc --noEmit)
-./run_tests.sh --frontend
-
 # All tests including E2E (requires Docker)
 ./run_tests.sh --e2e
 ```
@@ -102,20 +96,19 @@ This repo contains the **data plane** — the secure agent execution environment
 #### DP Tests Directly
 
 ```bash
-cd data_plane
 pip install -r requirements-test.txt
-./run_tests.sh              # unit + config tests
-./run_tests.sh --e2e        # includes E2E (starts Docker containers)
+pytest tests/ -v --ignore=tests/test_e2e.py    # unit + config tests
+pytest tests/test_e2e.py -v                     # E2E (requires Docker)
 ```
 
 ### Docker Operations
 
 ```bash
 # Rebuild and restart a single service
-cd data_plane && docker compose build agent-manager && docker compose up -d agent-manager
+docker compose build agent-manager && docker compose up -d agent-manager
 
 # View logs
-cd data_plane && docker compose logs -f agent-manager
+docker compose logs -f agent-manager
 
 # Enter agent container shell
 docker exec -it agent bash
@@ -125,7 +118,7 @@ docker exec -it agent bash
 
 ```bash
 # Admin UI (built into agent-manager)
-cd data_plane/services/local_admin/frontend && npm install && npm run dev
+cd services/agent_manager/frontend && npm install && npm run dev
 
 # Lint (fails on any warning)
 npm run lint
@@ -178,11 +171,11 @@ npm run lint
 
 | File | Purpose |
 |------|---------|
-| `data_plane/configs/cagent.yaml` | Unified data plane config |
-| `data_plane/services/agent_manager/config_generator.py` | Generates CoreDNS + Envoy configs |
-| `data_plane/services/agent_manager/main.py` | Agent manager: FastAPI app, polling loop, admin UI |
-| `data_plane/services/agent_manager/routers/domain_policy.py` | Domain policy API for Envoy Lua filter |
-| `data_plane/docker-compose.yml` | Service definitions |
+| `configs/cagent.yaml` | Unified data plane config |
+| `services/agent_manager/config_generator.py` | Generates CoreDNS + Envoy configs |
+| `services/agent_manager/main.py` | Agent manager: FastAPI app, polling loop, admin UI |
+| `services/agent_manager/routers/domain_policy.py` | Domain policy API for Envoy Lua filter |
+| `docker-compose.yml` | Service definitions |
 | `dev_up.sh` | Dev environment orchestration |
 | `run_tests.sh` | Test runner |
 

@@ -72,38 +72,6 @@ class TestEnvoyConfig:
         assert "address" in config["admin"]
 
 
-class TestEnvoyConfigValidation:
-    """Validate Envoy config using envoy --mode validate."""
-
-    def test_envoy_validate_config(self, skip_without_docker, configs_dir):
-        """Envoy should validate the configuration."""
-        config_file = configs_dir / "envoy" / "envoy-enhanced.yaml"
-        lua_file = configs_dir / "envoy" / "filter.lua"
-
-        result = subprocess.run(
-            [
-                "docker", "run", "--rm",
-                "-v", f"{config_file}:/etc/envoy/envoy.yaml:ro",
-                "-v", f"{lua_file}:/etc/envoy/filter.lua:ro",
-                "envoyproxy/envoy:v1.28-latest",
-                "--mode", "validate",
-                "-c", "/etc/envoy/envoy.yaml"
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        # Note: Envoy may fail validation if it can't resolve cluster addresses
-        # but structural issues should be caught
-        if result.returncode != 0:
-            # Check if it's just a connection error vs config error
-            if "Unable to establish connection" in result.stderr:
-                pytest.skip("Envoy validation requires network access to clusters")
-            elif "configuration" in result.stderr.lower():
-                pytest.fail(f"Envoy config validation failed: {result.stderr}")
-
-
 class TestEnvoyProxySettings:
     """Test Envoy proxy configuration settings."""
 

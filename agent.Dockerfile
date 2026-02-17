@@ -184,7 +184,7 @@ RUN chmod +x /usr/local/bin/session
 # =============================================================================
 # Seed traffic script (for dev_up.sh log seeding)
 # =============================================================================
-COPY seed_traffic.py /seed_traffic.py
+COPY scripts/seed_traffic.py /seed_traffic.py
 
 # =============================================================================
 # Entrypoint

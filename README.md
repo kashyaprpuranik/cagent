@@ -1,6 +1,6 @@
 # Cagent
 
-Secure development and execution environment for AI agents with isolated networking and centralized control.
+Secure development and execution environment for AI agents with isolated networking.
 
 ## Problem
 
@@ -24,45 +24,15 @@ Cagent assumes the AI agent is **untrusted by default**. The agent may be:
 | **Overly capable** | Has access to credentials/APIs it shouldn't, even if behaving correctly |
 | **Unpredictable** | Makes unexpected network requests due to hallucination or bugs |
 
-### Trust Boundaries
-
-Cagent has layered trust boundaries with different levels of protection:
-
-| Boundary | Trusted | Defended Against | Current Controls |
-|----------|---------|------------------|------------------|
-| **Infrastructure operators** | Yes | - | None (full access assumed) |
-| **Super admins** | Yes | - | None (can access all tenants) |
-| **Tenant admins** | Partially | Other tenants, unauthorized access | Tenant isolation, API tokens, IP ACLs |
-| **Developers** | Partially | Privileged operations | Role-based access (read-only dashboard) |
-| **Agent tokens** | No | Cross-agent access, CP modification | Scoped to agent, read-only for config |
-| **AI agents** | No | All threats listed above | Network isolation, credential hiding, allowlists |
-
-**What current controls provide:**
-- **Multi-tenancy isolation**: Tenant A cannot access Tenant B's secrets, agents, or configuration
-- **Network-based restrictions**: IP ACLs limit where admin operations can originate
-- **Least-privilege agents**: Agent tokens can only read their own configuration, not modify it
-- **Rate limiting**: Incoming requests are rate limited per token.
-
-**What is NOT currently defended:**
-- Malicious or compromised super admins (full platform access)
-- Infrastructure-level attacks (host compromise, container escape, supply chain)
-- Physical access to control plane servers
-- Insider threats from infrastructure operators
-
-### Production Hardening
-
-For production deployments, consider adding: API gateway with WAF, mandatory MFA, SIEM integration for audit logs, mTLS between data plane and control plane, and network segmentation to isolate the control plane from public internet.
-
 ## Security Principles
 
 | Principle | Description |
 |-----------|-------------|
 | **Network Isolation** | Agent can only reach Envoy (proxy) and CoreDNS (DNS filter) - no direct internet access |
-| **No Inbound Ports** | Data plane initiates all connections; control plane cannot push to agents |
 | **Credential Hiding** | Agent never sees API keys; credentials injected by proxy at egress |
 | **Defense in Depth** | Multiple layers: network, container, optional kernel (gVisor) isolation |
 | **Least Privilege** | Minimal capabilities, read-only filesystem, resource limits |
-| **Audit Everything** | All HTTP requests, DNS queries, and syscalls logged (via CP for trusted identity) |
+| **Audit Everything** | All HTTP requests, DNS queries, and syscalls logged |
 
 ## Hardening Details
 
@@ -83,31 +53,17 @@ For production deployments, consider adding: API gateway with WAF, mandatory MFA
 | IPv6 disabled | Prevents bypass of IPv4 egress controls |
 | Allowlist enforcement | CoreDNS blocks resolution of non-allowed domains |
 | Egress proxy | All HTTP(S) routed through Envoy |
-| Egress volume limits | Per-domain byte budgets (in-memory, see note) |
-| iptables fallback | Explicit DROP rules if proxy crashes (see below) |
 | Raw socket blocked | Seccomp profile prevents packet crafting |
 
-**Protocol Smuggling Prevention**: Raw TCP/UDP to external hosts is impossible. The agent can only reach two IPs on the internal network: Envoy (port 8443, HTTP only) and CoreDNS (port 53, DNS only). The iptables script DROPs all other traffic. Seccomp blocks raw socket creation (AF_PACKET), preventing packet crafting.
+**Protocol Smuggling Prevention**: Raw TCP/UDP to external hosts is impossible. The agent can only reach two IPs on the internal network: Envoy (port 8443, HTTP only) and CoreDNS (port 53, DNS only). Seccomp blocks raw socket creation (AF_PACKET), preventing packet crafting.
 
-**Residual Exfiltration Channels**: Small amounts of data could theoretically be exfiltrated via DNS queries or HTTPS traffic to allowlisted domains. Mitigations: DNS tunneling detection (blocks long subdomains), egress volume limits, and audit logging.
+**Residual Exfiltration Channels**: Small amounts of data could theoretically be exfiltrated via DNS queries or HTTPS traffic to allowlisted domains. Mitigations: DNS tunneling detection (blocks long subdomains) and audit logging.
 
-**Defense in Depth**: Network isolation doesn't depend solely on Envoy/CoreDNS being healthy. The `internal: true` network flag removes the default gateway at the Docker level. For additional hardening, run the iptables script:
+**Defense in Depth**: Network isolation doesn't depend solely on Envoy/CoreDNS being healthy. The `internal: true` network flag removes the default gateway at the Docker level.
 
-**Egress Volume Limits**: Prevents large-scale data exfiltration by tracking bytes sent per domain per hour. Configure via `STATIC_EGRESS_LIMITS` environment variable:
+### Kernel Isolation (gVisor)
 
-**Limitation**: Byte counts are in-memory and reset when Envoy restarts. See roadmap for persistent state.
-
-### Kernel Isolation (Default)
-
-The `standard` profile uses [gVisor](https://gvisor.dev) to intercept syscalls in user-space. This is the recommended default for production:
-
-```bash
-# Requires gVisor installation: https://gvisor.dev/docs/user_guide/install/
-docker compose --profile standard --profile admin up -d
-
-# Use --profile dev if gVisor is not installed (development only)
-docker compose --profile dev --profile admin up -d
-```
+The `standard` profile uses [gVisor](https://gvisor.dev) to intercept syscalls in user-space. This is the recommended default for production.
 
 | Control | Implementation |
 |---------|----------------|
@@ -117,7 +73,6 @@ docker compose --profile dev --profile admin up -d
 ### Credential Security
 | Control | Implementation |
 |---------|----------------|
-| Encryption at rest | Fernet (AES) encryption in Postgres |
 | Injection at proxy | Envoy Lua filter adds headers at egress |
 | Short-lived cache | Credentials cached for 5 minutes |
 
@@ -125,7 +80,7 @@ docker compose --profile dev --profile admin up -d
 
 ### Standalone Mode
 
-Run the data plane without a control plane - ideal for local use of one agent.
+Run with local configuration - ideal for local use of one agent.
 
 #### Minimal (Static Config)
 
@@ -151,8 +106,6 @@ Lightweight setup with just 3 containers. Edit `cagent.yaml` and run the config 
 ```
 
 ```bash
-cd data_plane
-
 # Recommended: with gVisor (requires installation: https://gvisor.dev/docs/user_guide/install/)
 docker compose --profile standard up -d
 
@@ -189,8 +142,6 @@ Adds agent-manager (watches `cagent.yaml`) and local admin UI for browser-based 
 ```
 
 ```bash
-cd data_plane
-
 # Recommended: with gVisor (requires installation)
 docker compose --profile standard --profile admin up -d
 
@@ -237,18 +188,12 @@ Adds log collection for standalone deployments. Logs are written to local files 
 ```
 
 ```bash
-cd data_plane
-
 # With auditing (log collection to local files)
 docker compose --profile dev --profile admin --profile auditing up -d
 
 # With email proxy (beta)
 docker compose --profile dev --profile admin --profile auditing --profile email up -d
 ```
-
-### Control Plane Mode
-
-For centralized management of multiple data planes with multi-tenant policy enforcement, secrets storage, audit logging, and a web admin UI, see the [cagent-control](https://github.com/kashyaprpuranik/cagent-control) repo.
 
 **Accessing the Agent**
 
@@ -265,11 +210,8 @@ For centralized management of multiple data planes with multi-tenant policy enfo
 | **Domain Allowlist** | Only approved domains can be accessed (enforced by CoreDNS and Envoy) |
 | **Credential Injection** | API keys injected by proxy, never exposed to agent |
 | **Rate Limiting** | Per-domain rate limits to control API usage |
-| **Centralized Logging** | HTTP requests, DNS queries, and gVisor syscalls logged to OpenObserve |
 | **Traffic Analytics** | Requests/sec, top domains, error rates in log viewer |
 | **Web Terminal** | Browser-based shell access to agents (xterm.js) |
-| **Multi-Agent Management** | Manage multiple data planes with start/stop/restart/wipe from UI |
-| **IP ACLs** | Restrict control plane access by IP range per tenant |
 | **gVisor Isolation** | Optional kernel-level syscall isolation for defense in depth |
 | **Email Proxy** | Controlled IMAP/SMTP access with per-recipient policies - **beta** |
 
@@ -283,15 +225,12 @@ See [docs/configuration.md](docs/configuration.md) for detailed configuration in
 ## Documentation
 
 - [Configuration Guide](docs/configuration.md) - Domains, rate limits, credentials, path filtering
-- [Control Plane](https://github.com/kashyaprpuranik/cagent-control) - Centralized management (separate repo)
 
 ## Roadmap
 
 - [ ] Improved secret management in standalone mode (encrypted local storage)
-- [ ] mTLS for data plane ↔ control plane communication (step-ca)
 - [ ] Alert rules for security events (gVisor syscall denials, rate limit hits)
 - [ ] Per-path rate limits and credential injection (path-level policies within a domain)
-- [ ] Search and filtering on Tenants, Tokens, and IP ACLs pages
 
 ## License
 

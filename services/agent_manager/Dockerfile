@@ -11,20 +11,17 @@ WORKDIR /app
 # Copy workspace root package files
 COPY package.json package-lock.json* ./
 
-# Copy shared-ui package
-COPY packages/shared-ui/ packages/shared-ui/
-
 # Copy frontend package files
-COPY data_plane/services/local_admin/frontend/package.json data_plane/services/local_admin/frontend/
+COPY services/agent_manager/frontend/package.json services/agent_manager/frontend/
 
 # Install dependencies (workspace-aware)
-RUN npm ci --workspace=data_plane/services/local_admin/frontend --workspace=packages/shared-ui --include-workspace-root
+RUN npm ci --workspace=services/agent_manager/frontend --include-workspace-root
 
 # Copy frontend source
-COPY data_plane/services/local_admin/frontend/ data_plane/services/local_admin/frontend/
+COPY services/agent_manager/frontend/ services/agent_manager/frontend/
 
 # Build
-RUN cd data_plane/services/local_admin/frontend && npm run build
+RUN cd services/agent_manager/frontend && npm run build
 
 # Stage 2: Production image
 FROM python:3.11-slim
@@ -42,10 +39,10 @@ RUN pip install --no-cache-dir \
     pydantic>=2.0.0
 
 # Copy agent-manager code
-COPY data_plane/services/agent_manager/ /app/
+COPY services/agent_manager/ /app/
 
 # Copy built frontend (may not exist in managed-only builds)
-COPY --from=frontend-builder /app/data_plane/services/local_admin/frontend/dist ./frontend/dist
+COPY --from=frontend-builder /app/services/agent_manager/frontend/dist ./frontend/dist
 
 ENV PYTHONUNBUFFERED=1
 

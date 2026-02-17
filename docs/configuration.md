@@ -16,7 +16,7 @@ This guide covers configuring domain policies, agent management, and per-agent s
 In standalone mode, all configuration is in a single YAML file:
 
 ```yaml
-# data_plane/configs/cagent.yaml
+# configs/cagent.yaml
 mode: standalone
 
 dns:

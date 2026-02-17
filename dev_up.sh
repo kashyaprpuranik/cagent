@@ -22,7 +22,6 @@
 set -e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DP_DIR="$ROOT_DIR/data_plane"
 
 # Defaults
 DP_PROFILES="--profile admin"
@@ -93,9 +92,9 @@ done
 # =============================================================================
 
 echo "=== Cagent Data Plane Development Environment ==="
-echo "Directory: $DP_DIR"
+echo "Directory: $ROOT_DIR"
 
-cd "$DP_DIR"
+cd "$ROOT_DIR"
 
 # --- Handle 'down' action ---
 if [ "$ACTION" = "down" ]; then

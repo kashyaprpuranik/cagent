@@ -380,8 +380,8 @@ services:
   # ===========================================================================
   agent-manager:
     build:
-      context: ..
-      dockerfile: data_plane/services/agent_manager/Dockerfile
+      context: .
+      dockerfile: services/agent_manager/Dockerfile
     container_name: agent-manager
     labels:
       - "cagent.log-collect=true"
@@ -398,7 +398,7 @@ services:
       - HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30}
       - CONFIG_SYNC_INTERVAL=${CONFIG_SYNC_INTERVAL:-300}
       # Local admin settings
-      - DATA_PLANE_DIR=/app/data_plane
+      - DATA_PLANE_DIR=/app/cagent
 
     volumes:
       # Docker socket for container management
@@ -412,7 +412,7 @@ services:
       # Seccomp profiles for container recreation
       - ./configs/seccomp/profiles:/etc/seccomp/profiles:ro
       # Data plane directory (for .env and docker-compose access)
-      - .:/app/data_plane
+      - .:/app/cagent
 
     ports:
       - "${LOCAL_ADMIN_PORT:-8081}:8080"
@@ -528,6 +528,7 @@ services:
 networks:
   # Agent network - INTERNAL, no external access
   agent-net:
+    name: cagent-agent-net
     driver: bridge
     internal: true  # No external connectivity
     enable_ipv6: false  # Prevent IPv6 bypass of egress controls
@@ -537,6 +538,7 @@ networks:
 
   # Infrastructure network - can reach control plane
   infra-net:
+    name: cagent-infra-net
     driver: bridge
     enable_ipv6: false  # Prevent IPv6 bypass of egress controls
     ipam:

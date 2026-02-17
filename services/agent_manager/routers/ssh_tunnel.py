@@ -190,14 +190,14 @@ def create_tunnel_client_container(env_vars: dict):
     """Create the tunnel client container using Docker SDK."""
     # Get or create networks
     try:
-        agent_net = docker_client.networks.get("data_plane_agent-net")
+        agent_net = docker_client.networks.get("cagent-agent-net")
     except docker.errors.NotFound:
-        raise HTTPException(500, "Network data_plane_agent-net not found. Is the data plane running?")
+        raise HTTPException(500, "Network cagent-agent-net not found. Is the data plane running?")
 
     try:
-        infra_net = docker_client.networks.get("data_plane_infra-net")
+        infra_net = docker_client.networks.get("cagent-infra-net")
     except docker.errors.NotFound:
-        raise HTTPException(500, "Network data_plane_infra-net not found. Is the data plane running?")
+        raise HTTPException(500, "Network cagent-infra-net not found. Is the data plane running?")
 
     container_env = {
         "FRP_AUTH_TOKEN": env_vars.get("FRP_AUTH_TOKEN"),

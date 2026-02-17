@@ -3,7 +3,7 @@ End-to-end tests for the full data plane stack.
 
 These tests require the data plane to be running in standalone mode
 with the dev and admin profiles:
-    cd data_plane && docker compose --profile dev --profile admin up -d
+    docker compose --profile dev --profile admin up -d
 
 Config-write tests are automatically skipped in connected mode.
 
@@ -555,7 +555,7 @@ class TestLocalAdminAPI:
         data = r.json()
         assert data["status"] in ("healthy", "degraded")
         assert "checks" in data
-        # Agent containers have dynamic names (e.g. data_plane-agent-dev-1)
+        # Agent containers have dynamic names (e.g. cagent-agent-dev-1)
         agent_checks = [k for k in data["checks"] if "agent" in k and "manager" not in k]
         assert len(agent_checks) >= 1, f"No agent container in checks: {list(data['checks'])}"
         assert "dns-filter" in data["checks"]

@@ -17,33 +17,31 @@ This guide covers local development setup, testing, and Docker workflows for the
 
 ```
 .
-├── data_plane/
-│   ├── docker-compose.yml          # All DP services
-│   ├── agent.Dockerfile            # Agent container image
-│   ├── configs/
-│   │   ├── cagent.yaml             # Source of truth for domain policies
-│   │   ├── coredns/Corefile        # DNS filter (generated)
-│   │   ├── envoy/                  # HTTP proxy config (generated)
-│   │   │   ├── envoy-enhanced.yaml # Full config with Lua filter
-│   │   │   └── filter.lua          # Envoy Lua filter
-│   │   ├── vector/                 # Log collection
-│   │   │   ├── vector.yaml         # Sources and transforms
-│   │   │   └── sinks/             # Mode-specific sinks
-│   │   │       ├── standalone.yaml # File backup + optional S3/ES
-│   │   │       └── connected.yaml  # CP API + file backup
-│   │   ├── seccomp/                # Agent container seccomp profile
-│   │   └── gvisor/runsc.toml       # gVisor config
-│   ├── services/
-│   │   ├── agent_manager/          # FastAPI app + config generator
-│   │   │   ├── main.py             # App entry point
-│   │   │   ├── config_generator.py # Generates DNS + proxy configs
-│   │   │   ├── constants.py        # Shared constants
-│   │   │   ├── models.py           # Pydantic schemas
-│   │   │   └── routers/            # API endpoints
-│   │   ├── local_admin/            # Admin UI frontend
-│   │   │   └── frontend/           # React + TypeScript + Vite
-│   │   └── email_proxy/            # Email proxy (beta)
-│   └── tests/                      # pytest tests
+├── docker-compose.yml              # All DP services
+├── agent.Dockerfile                # Agent container image
+├── configs/
+│   ├── cagent.yaml                 # Source of truth for domain policies
+│   ├── coredns/Corefile            # DNS filter (generated)
+│   ├── envoy/                      # HTTP proxy config (generated)
+│   │   ├── envoy-enhanced.yaml     # Full config with Lua filter
+│   │   └── filter.lua              # Envoy Lua filter
+│   ├── vector/                     # Log collection
+│   │   ├── vector.yaml             # Sources and transforms
+│   │   └── sinks/                  # Mode-specific sinks
+│   │       ├── standalone.yaml     # File backup + optional S3/ES
+│   │       └── connected.yaml      # CP API + file backup
+│   ├── seccomp/                    # Agent container seccomp profile
+│   └── gvisor/runsc.toml           # gVisor config
+├── services/
+│   ├── agent_manager/              # FastAPI app + config generator
+│   │   ├── main.py                 # App entry point
+│   │   ├── config_generator.py     # Generates DNS + proxy configs
+│   │   ├── constants.py            # Shared constants
+│   │   ├── models.py               # Pydantic schemas
+│   │   └── routers/                # API endpoints
+│   │   └── frontend/               # React admin UI (TypeScript + Vite)
+│   └── email_proxy/                # Email proxy (beta)
+├── tests/                          # pytest tests
 ├── docs/
 │   └── configuration.md            # Config guide
 ├── dev_up.sh                       # Dev environment orchestration
@@ -57,12 +55,6 @@ This guide covers local development setup, testing, and Docker workflows for the
 # DP unit/config tests + frontend type-check (default)
 ./run_tests.sh
 
-# DP unit/config tests only
-./run_tests.sh --dp
-
-# Frontend type-check only
-./run_tests.sh --frontend
-
 # All tests including E2E (requires Docker)
 ./run_tests.sh --e2e
 ```
@@ -70,10 +62,8 @@ This guide covers local development setup, testing, and Docker workflows for the
 ### DP Tests Directly
 
 ```bash
-cd data_plane
 pip install -r requirements-test.txt
-./run_tests.sh              # unit + config tests
-./run_tests.sh --e2e        # includes E2E (starts Docker containers)
+pytest tests/ -v --ignore=tests/test_e2e.py    # unit + config tests
 ```
 
 ### E2E Tests
@@ -81,7 +71,6 @@ pip install -r requirements-test.txt
 E2E tests bring up the full data plane stack (agent, proxy, DNS, agent-manager), run tests against it, and tear everything down.
 
 ```bash
-cd data_plane
 ./run_tests.sh --e2e
 ```
 
@@ -106,8 +95,6 @@ Tests include:
 | `email` | Email proxy (beta) |
 
 ```bash
-cd data_plane
-
 # Minimal (just proxy + DNS + agent)
 docker compose --profile dev up -d
 
@@ -124,10 +111,10 @@ docker compose --profile dev --profile managed --profile auditing up -d
 
 ## Frontend Development
 
-The admin UI frontend lives at `data_plane/services/local_admin/frontend/`.
+The admin UI frontend lives at `services/agent_manager/frontend/`.
 
 ```bash
-cd data_plane/services/local_admin/frontend
+cd services/agent_manager/frontend
 npm install
 npm run dev          # Vite dev server on :3000, proxies /api to :8080
 npm run lint         # ESLint (--max-warnings 0)

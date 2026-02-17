@@ -5,13 +5,9 @@
 !package.json
 !package-lock.json
 
-# Allow data plane local admin frontend (built in agent-manager Dockerfile)
-!data_plane/services/local_admin/
-!data_plane/services/local_admin/**
-
-# Allow data plane agent manager
-!data_plane/services/agent_manager/
-!data_plane/services/agent_manager/**
+# Allow agent manager (includes frontend source)
+!services/agent_manager/
+!services/agent_manager/**
 
 # Re-exclude node_modules and build artifacts everywhere
 **/node_modules

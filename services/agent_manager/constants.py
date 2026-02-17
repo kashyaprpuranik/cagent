@@ -1,4 +1,4 @@
-"""Unified constants for agent-manager (merged from agent-manager + local-admin)."""
+"""Constants for agent-manager."""
 
 import os
 from typing import List
@@ -30,7 +30,7 @@ CAGENT_CONFIG_PATH = os.environ.get("CAGENT_CONFIG_PATH", "/etc/cagent/cagent.ya
 COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Corefile")
 ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
 ENVOY_LUA_PATH = os.environ.get("ENVOY_LUA_PATH", "/etc/envoy/filter.lua")
-DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/data_plane")
+DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/cagent")
 
 # ---------------------------------------------------------------------------
 # Seccomp profiles
