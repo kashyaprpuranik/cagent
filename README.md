@@ -237,11 +237,11 @@ Run with centralized management via the control plane. Ideal for multiple tenant
 │                │                                                            │
 │             (can run on client laptop or server or provider servers)        │
 │                │                                                            │
-│  ┌─────────────┴────────────┐                                              │
-│  │      Agent Manager       │                                              │
-│  │ polls CP, syncs configs  │                                              │
-│  │ ships logs to CP         │                                              │
-│  └──────────────────────────┘                                              │
+│  ┌─────────────┴──────────────────┐                                        │
+│  │  Agent Manager   Log Shipper  │                                        │
+│  │  polls CP,       ships logs   │                                        │
+│  │  syncs configs   to CP        │                                        │
+│  └────────────────────────────────┘                                        │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
 │  │                        agent-net (isolated)                             ││

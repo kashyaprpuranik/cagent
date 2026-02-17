@@ -286,11 +286,7 @@ services:
 
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
 
-    environment:
-      # Operation mode: "standalone" or "connected"
-      - DATAPLANE_MODE=${DATAPLANE_MODE:-standalone}
-      # Control plane authentication token (for connected mode Lua filter)
-      - CONTROL_PLANE_TOKEN=${CONTROL_PLANE_TOKEN:-}
+    # No env vars needed: Lua filter talks to agent-manager (local, no auth)
 
     # JSON logs to stdout (captured by Docker, read by log shipper)
     logging:
@@ -374,14 +370,15 @@ services:
       retries: 3
 
   # ===========================================================================
-  # Agent Manager - Watches cagent.yaml and regenerates configs
-  # Optional: Only needed if you want dynamic config updates
-  # For static configs, edit coredns/Corefile and envoy/envoy.yaml directly
+  # Agent Manager - Unified data plane service
+  # Handles config generation, container management, CP sync, and admin UI
+  # In admin profile: includes local admin UI (frontend + full API)
+  # In managed profile: API-only (no frontend)
   # ===========================================================================
   agent-manager:
     build:
-      context: ./services
-      dockerfile: agent_manager/Dockerfile
+      context: ..
+      dockerfile: data_plane/services/agent_manager/Dockerfile
     container_name: agent-manager
     labels:
       - "cagent.log-collect=true"
@@ -402,55 +399,21 @@ services:
       - ENVOY_CONFIG_PATH=/etc/envoy/envoy.yaml
       - CONFIG_SYNC_INTERVAL=${CONFIG_SYNC_INTERVAL:-300}
       - SECCOMP_PROFILES_DIR=/etc/seccomp/profiles
+      # Local admin settings
+      - DATA_PLANE_DIR=/app/data_plane
+      - BETA_FEATURES=${BETA_FEATURES:-}
 
     volumes:
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Main config file (source of truth)
-      - ./configs/cagent.yaml:/etc/cagent/cagent.yaml:ro
+      # Main config file (read-write for admin UI config editing)
+      - ./configs/cagent.yaml:/etc/cagent/cagent.yaml
       # CoreDNS config directory (agent-manager overwrites Corefile here)
       - ./configs/coredns:/etc/coredns
       # HTTP proxy config volume (agent-manager writes generated config here)
       - proxy-config:/etc/envoy
       # Seccomp profiles for container recreation
       - ./configs/seccomp/profiles:/etc/seccomp/profiles:ro
-
-    healthcheck:
-      test: ["CMD-SHELL", "kill -0 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-    # No ports exposed - polling-based, outbound only
-    networks:
-      - infra-net
-
-    restart: unless-stopped
-
-  # ===========================================================================
-  # Local Admin UI - Web interface for standalone mode
-  # Provides config editing, container management, and log viewing
-  # Optional: Only runs with --profile admin
-  # ===========================================================================
-  local-admin:
-    build:
-      context: ..
-      dockerfile: data_plane/services/local_admin/Dockerfile
-    container_name: local-admin
-    profiles:
-      - admin
-
-    environment:
-      - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml
-      - DATA_PLANE_DIR=/app/data_plane
-      - DATAPLANE_MODE=${DATAPLANE_MODE:-standalone}
-      - BETA_FEATURES=${BETA_FEATURES:-}
-
-    volumes:
-      # Docker socket for container management
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Config file (read/write in standalone, read-only in connected)
-      - ./configs/cagent.yaml:/etc/cagent/cagent.yaml
       # Data plane directory (for .env and docker-compose access)
       - .:/app/data_plane
 
@@ -458,7 +421,7 @@ services:
       - "${LOCAL_ADMIN_PORT:-8081}:8080"
 
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -532,13 +495,10 @@ services:
     entrypoint: ["/bin/sh", "/bootstrap/entrypoint.sh"]
 
     environment:
-      # Control plane connection (for self-bootstrapping)
-      - CONTROL_PLANE_URL=${CONTROL_PLANE_URL}
-      - CONTROL_PLANE_TOKEN=${CONTROL_PLANE_TOKEN}
       # FRP server auth (must match frps.toml on control plane)
       - FRP_AUTH_TOKEN=${FRP_AUTH_TOKEN}
-      # Optional: override FRP server address (default: derived from CONTROL_PLANE_URL)
-      - FRP_SERVER_ADDR=${FRP_SERVER_ADDR:-}
+      # FRP server address (required - e.g. 192.168.1.50)
+      - FRP_SERVER_ADDR=${FRP_SERVER_ADDR}
       - FRP_SERVER_PORT=${FRP_SERVER_PORT:-7000}
 
     volumes:
@@ -546,7 +506,7 @@ services:
 
     # On BOTH networks:
     # - agent-net: to reach agent SSH (uses Docker DNS: agent-dev or agent)
-    # - infra-net: to reach tunnel server (outbound) and control plane API
+    # - infra-net: to reach tunnel server (outbound) and agent-manager API
     networks:
       agent-net:
         ipv4_address: 10.200.1.30
@@ -561,6 +521,7 @@ services:
 
     depends_on:
       - agent
+      - agent-manager
 
     restart: unless-stopped
 

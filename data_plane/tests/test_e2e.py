@@ -458,7 +458,7 @@ def get_admin_url():
     """Get local admin base URL, detecting the mapped port."""
     try:
         result = subprocess.run(
-            ["docker", "port", "local-admin", "8080"],
+            ["docker", "port", "agent-manager", "8080"],
             capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0 and result.stdout.strip():

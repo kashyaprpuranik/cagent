@@ -1,93 +1,27 @@
 -- =======================================================================
 -- Envoy Lua Filter - Credential Injection, Rate Limiting, Security
 -- =======================================================================
+-- Talks to agent-manager (local, no auth) for domain policy lookups.
+-- Agent-manager handles both standalone and connected mode internally.
 
 -- Configuration
-local DATAPLANE_MODE = os.getenv("DATAPLANE_MODE") or "connected"
-local API_TOKEN = os.getenv("CONTROL_PLANE_TOKEN") or os.getenv("API_TOKEN") or ""
 local CACHE_TTL_SECONDS = 300  -- 5 minutes
-local CP_FAILURE_BACKOFF = 30  -- Seconds to wait before retrying CP after failure
+local CP_FAILURE_BACKOFF = 30  -- Seconds to wait before retrying after failure
 
 -- Unified domain policy cache: domain -> {policy, expires_at}
 local domain_policy_cache = {}
 local token_buckets = {}     -- domain -> {tokens, last_refill}
 
--- Control plane health tracking
+-- Agent-manager health tracking
 local cp_available = true
 local cp_last_failure = 0
-
--- =======================================================================
--- Static Configuration (loaded from environment, for standalone mode)
--- =======================================================================
-local static_credentials = {}  -- domain -> {header_name, header_value, target_domain}
-local static_alias_map = {}    -- alias.devbox.local -> domain
-local static_rate_limits = {}
-local static_config_loaded = false
-
-function load_static_config(request_handle)
-  if static_config_loaded then return end
-  static_config_loaded = true
-
-  -- Load static credentials (format: domain:header_name:header_value[:alias])
-  local creds_env = os.getenv("STATIC_CREDENTIALS") or ""
-  for cred in string.gmatch(creds_env, "[^|]+") do
-    -- Try to match with optional alias (4 parts)
-    local domain, header_name, header_value, alias = string.match(cred, "([^:]+):([^:]+):([^:]+):([^:]+)")
-    if not domain then
-      -- Fall back to 3-part format (no alias)
-      domain, header_name, header_value = string.match(cred, "([^:]+):([^:]+):(.+)")
-    end
-    if domain and header_name and header_value then
-      local domain_lower = string.lower(domain)
-      static_credentials[domain_lower] = {
-        header_name = header_name,
-        header_value = header_value,
-        target_domain = domain_lower
-      }
-      request_handle:logInfo("Static credential loaded for: " .. domain_lower)
-      -- If alias provided, map alias.devbox.local -> domain
-      if alias then
-        local alias_domain = string.lower(alias .. ".devbox.local")
-        static_alias_map[alias_domain] = domain_lower
-        request_handle:logInfo("Static alias: " .. alias_domain .. " -> " .. domain)
-      end
-    end
-  end
-
-  -- Load static rate limits (domain:rpm:burst)
-  local limits_env = os.getenv("STATIC_RATE_LIMITS") or ""
-  for limit in string.gmatch(limits_env, "[^,]+") do
-    local domain, rpm, burst = string.match(limit, "([^:]+):(%d+):(%d+)")
-    if domain and rpm then
-      static_rate_limits[string.lower(domain)] = {
-        requests_per_minute = tonumber(rpm),
-        burst_size = tonumber(burst) or 10
-      }
-      request_handle:logInfo("Static rate limit for " .. string.lower(domain) .. ": " .. rpm .. " rpm")
-    end
-  end
-
-  -- Default rate limit if not specified
-  if not static_rate_limits["default"] then
-    static_rate_limits["default"] = {
-      requests_per_minute = 120,
-      burst_size = 20
-    }
-  end
-end
 
 -- =======================================================================
 -- Utility Functions
 -- =======================================================================
 
--- Check if control plane should be contacted
+-- Check if agent-manager should be contacted
 function should_contact_cp()
-  if DATAPLANE_MODE == "standalone" then
-    return false
-  end
-  if API_TOKEN == "" then
-    return false
-  end
   -- Backoff after failure
   if not cp_available and (os.time() - cp_last_failure) < CP_FAILURE_BACKOFF then
     return false
@@ -95,13 +29,13 @@ function should_contact_cp()
   return true
 end
 
--- Mark CP as failed (for backoff)
+-- Mark agent-manager as failed (for backoff)
 function mark_cp_failure()
   cp_available = false
   cp_last_failure = os.time()
 end
 
--- Mark CP as available
+-- Mark agent-manager as available
 function mark_cp_success()
   cp_available = true
 end
@@ -189,11 +123,10 @@ function match_domain_wildcard(domain, tbl)
 end
 
 -- =======================================================================
--- Unified Domain Policy (single CP call for all policies)
+-- Unified Domain Policy (talks to local agent-manager)
 -- =======================================================================
 
 function get_domain_policy(request_handle, domain)
-  load_static_config(request_handle)
   local host_clean = string.match(domain, "^([^:]+)") or domain
 
   -- Check cache first
@@ -204,15 +137,14 @@ function get_domain_policy(request_handle, domain)
 
   local policy = nil
 
-  -- Try control plane first
+  -- Query agent-manager (local, no auth needed)
   if should_contact_cp() then
     local headers, body = request_handle:httpCall(
       "control_plane_api",
       {
         [":method"] = "GET",
         [":path"] = "/api/v1/domain-policies/for-domain?domain=" .. url_encode(host_clean),
-        [":authority"] = "backend",
-        ["authorization"] = "Bearer " .. API_TOKEN
+        [":authority"] = "agent-manager"
       },
       "",
       5000,
@@ -227,17 +159,16 @@ function get_domain_policy(request_handle, domain)
     end
   end
 
-  -- Fall back to static config if no CP response
+  -- If agent-manager is unreachable, create a minimal deny policy
   if not policy then
-    policy = build_static_policy(host_clean)
-  elseif not policy.credential then
-    -- Merge static credentials when CP has no credential for this domain
-    local static = build_static_policy(host_clean)
-    if static.credential then
-      policy.credential = static.credential
-      policy.target_domain = static.target_domain
-      policy.matched = true
-    end
+    policy = {
+      matched = false,
+      allowed_paths = {},
+      requests_per_minute = 120,
+      burst_size = 20,
+      credential = nil,
+      target_domain = nil
+    }
   end
 
   -- Cache the result
@@ -287,40 +218,6 @@ function parse_domain_policy_response(body)
   local alias = string.match(body, '"alias"%s*:%s*"([^"]*)"')
   if alias then
     policy.alias = alias
-  end
-
-  return policy
-end
-
-function build_static_policy(domain)
-  -- Build policy from static config using wildcard matching
-  local policy = {
-    matched = false,
-    allowed_paths = {},
-    requests_per_minute = 120,
-    burst_size = 20,
-    credential = nil,
-    target_domain = nil
-  }
-
-  -- Check static rate limits (with wildcard support)
-  local rl = match_domain_wildcard(domain, static_rate_limits) or static_rate_limits["default"]
-  if rl then
-    policy.requests_per_minute = rl.requests_per_minute or 120
-    policy.burst_size = rl.burst_size or 20
-    policy.matched = true
-  end
-
-  -- Check static credentials (with wildcard support)
-  local lookup_domain = static_alias_map[domain] or domain
-  local cred = match_domain_wildcard(lookup_domain, static_credentials)
-  if cred then
-    policy.credential = {
-      header_name = cred.header_name,
-      header_value = cred.header_value
-    }
-    policy.target_domain = cred.target_domain
-    policy.matched = true
   end
 
   return policy
@@ -419,7 +316,7 @@ function envoy_on_request(request_handle)
     end
   end
 
-  -- Get unified domain policy (single CP call for all policies)
+  -- Get unified domain policy (single call to agent-manager)
   local policy = get_domain_policy(request_handle, host_clean)
   local real_domain = host_clean
   if policy and policy.target_domain then

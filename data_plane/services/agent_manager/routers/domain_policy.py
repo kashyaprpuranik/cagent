@@ -1,0 +1,163 @@
+"""Domain policy endpoint for Lua filter.
+
+Serves GET /api/v1/domain-policies/for-domain?domain=X so the Envoy Lua
+filter can get credential injection, rate limits, and path filtering from
+a single local endpoint instead of reaching the control plane directly.
+
+- Connected mode: forwards to CP, caches 5 minutes.
+- Standalone mode: builds response from cagent.yaml config.
+"""
+
+import logging
+import os
+import time
+
+import requests
+import yaml
+from fastapi import APIRouter, Query
+from pathlib import Path
+
+from ..constants import (
+    DATAPLANE_MODE,
+    CONTROL_PLANE_URL,
+    CONTROL_PLANE_TOKEN,
+    CAGENT_CONFIG_PATH,
+)
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# In-memory cache: domain -> {response, expires_at}
+_policy_cache: dict = {}
+_CACHE_TTL = 300  # 5 minutes
+
+
+def _cache_get(domain: str):
+    """Return cached policy if still valid, else None."""
+    entry = _policy_cache.get(domain)
+    if entry and entry["expires_at"] > time.monotonic():
+        return entry["response"]
+    return None
+
+
+def _cache_set(domain: str, response: dict):
+    """Cache a policy response."""
+    _policy_cache[domain] = {
+        "response": response,
+        "expires_at": time.monotonic() + _CACHE_TTL,
+    }
+
+
+def invalidate_cache():
+    """Clear the policy cache (called when config is regenerated)."""
+    _policy_cache.clear()
+
+
+def _build_standalone_policy(domain: str) -> dict:
+    """Build a policy response from cagent.yaml for standalone mode."""
+    config_path = Path(CAGENT_CONFIG_PATH)
+    if not config_path.exists():
+        return {"matched": False, "domain": domain}
+
+    try:
+        config = yaml.safe_load(config_path.read_text()) or {}
+    except Exception:
+        return {"matched": False, "domain": domain}
+
+    domains = config.get("domains", [])
+    default_rl = config.get("rate_limits", {}).get("default", {})
+    default_rpm = default_rl.get("requests_per_minute", 120)
+    default_burst = default_rl.get("burst_size", 20)
+
+    domain_lower = domain.lower()
+
+    # Find matching domain entry (exact or wildcard)
+    matched_entry = None
+    for entry in domains:
+        entry_domain = entry.get("domain", "").lower()
+        if entry_domain == domain_lower:
+            matched_entry = entry
+            break
+        if entry_domain.startswith("*."):
+            suffix = entry_domain[1:]  # e.g. ".github.com"
+            bare = entry_domain[2:]    # e.g. "github.com"
+            if domain_lower == bare or (
+                len(domain_lower) > len(suffix)
+                and domain_lower.endswith(suffix)
+            ):
+                matched_entry = entry
+                break
+
+    if not matched_entry:
+        return {"matched": False, "domain": domain_lower}
+
+    # Build response
+    rl = matched_entry.get("rate_limit", {})
+    allowed_paths = matched_entry.get("allowed_paths", [])
+
+    response = {
+        "matched": True,
+        "domain": matched_entry.get("domain", domain_lower),
+        "allowed_paths": allowed_paths,
+        "requests_per_minute": rl.get("requests_per_minute", default_rpm),
+        "burst_size": rl.get("burst_size", default_burst),
+    }
+
+    # Resolve credential from env var
+    cred = matched_entry.get("credential")
+    if cred:
+        env_var = cred.get("env", "")
+        value = os.environ.get(env_var, "") if env_var else ""
+        if value:
+            header_format = cred.get("format", "{value}")
+            response["header_name"] = cred.get("header", "Authorization")
+            response["header_value"] = header_format.replace("{value}", value)
+            response["target_domain"] = matched_entry.get("domain", domain_lower)
+
+    # Include alias if present
+    alias = matched_entry.get("alias")
+    if alias:
+        response["alias"] = alias
+
+    return response
+
+
+@router.get("/api/v1/domain-policies/for-domain")
+async def get_domain_policy(domain: str = Query(..., min_length=1)):
+    """Get domain policy for Lua filter.
+
+    Connected mode: proxy to control plane (cached 5 min).
+    Standalone mode: build from cagent.yaml.
+    """
+    domain_lower = domain.lower()
+
+    # Check cache
+    cached = _cache_get(domain_lower)
+    if cached is not None:
+        return cached
+
+    if DATAPLANE_MODE == "connected" and CONTROL_PLANE_URL and CONTROL_PLANE_TOKEN:
+        # Forward to control plane
+        try:
+            resp = requests.get(
+                f"{CONTROL_PLANE_URL}/api/v1/domain-policies/for-domain",
+                params={"domain": domain_lower},
+                headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                policy = resp.json()
+                _cache_set(domain_lower, policy)
+                return policy
+            else:
+                logger.warning(
+                    f"CP domain-policy lookup failed: {resp.status_code}, "
+                    f"falling back to cagent.yaml"
+                )
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"CP unreachable for domain-policy: {e}, falling back to cagent.yaml")
+
+    # Standalone mode or CP fallback
+    policy = _build_standalone_policy(domain_lower)
+    _cache_set(domain_lower, policy)
+    return policy

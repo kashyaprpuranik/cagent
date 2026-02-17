@@ -4,16 +4,17 @@
 # =============================================================================
 #
 # Self-bootstrapping entrypoint for the FRP tunnel client.
-# Calls the control plane API to get-or-create STCP credentials,
+# Calls the local agent-manager API to get-or-create STCP credentials,
 # writes frpc.toml, and exec's frpc.
 #
+# Agent-manager proxies to the control plane in connected mode and
+# returns 404 in standalone mode (no tunneling without a CP).
+#
 # Required env vars:
-#   CONTROL_PLANE_URL   - e.g. http://192.168.1.50:8002
-#   CONTROL_PLANE_TOKEN - Agent token for CP API auth
-#   FRP_AUTH_TOKEN       - FRP server auth token (must match frps.toml)
+#   FRP_AUTH_TOKEN   - FRP server auth token (must match frps.toml)
+#   FRP_SERVER_ADDR  - FRP server address (e.g. 192.168.1.50)
 #
 # Optional env vars:
-#   FRP_SERVER_ADDR - FRP server address (default: derived from CONTROL_PLANE_URL)
 #   FRP_SERVER_PORT - FRP server port (default: 7000)
 #
 # =============================================================================
@@ -25,23 +26,14 @@ die() { echo "[tunnel-bootstrap] ERROR: $1" >&2; exit 1; }
 
 # ── Validate required env vars ──────────────────────────────────────────────
 
-[ -z "$CONTROL_PLANE_URL" ] && die "CONTROL_PLANE_URL is required"
-[ -z "$CONTROL_PLANE_TOKEN" ] && die "CONTROL_PLANE_TOKEN is required"
 [ -z "$FRP_AUTH_TOKEN" ] && die "FRP_AUTH_TOKEN is required"
-
-# ── Derive FRP_SERVER_ADDR from CONTROL_PLANE_URL if not set ────────────────
-
-if [ -z "$FRP_SERVER_ADDR" ]; then
-    # Strip protocol and port: http://host:8002 -> host
-    FRP_SERVER_ADDR=$(echo "$CONTROL_PLANE_URL" | sed 's|.*://||' | cut -d: -f1 | cut -d/ -f1)
-    log "Derived FRP_SERVER_ADDR=$FRP_SERVER_ADDR from CONTROL_PLANE_URL"
-fi
+[ -z "$FRP_SERVER_ADDR" ] && die "FRP_SERVER_ADDR is required"
 
 FRP_SERVER_PORT="${FRP_SERVER_PORT:-7000}"
 
-# ── Poll tunnel-config endpoint with retries ────────────────────────────────
+# ── Poll tunnel-config endpoint via agent-manager ───────────────────────────
 
-API_URL="${CONTROL_PLANE_URL}/api/v1/agent/tunnel-config"
+API_URL="http://agent-manager:8080/api/v1/agent/tunnel-config"
 MAX_RETRIES=30
 RETRY_INTERVAL=10
 attempt=0
@@ -53,7 +45,6 @@ while true; do
 
     # wget writes body to stdout (-O -), HTTP errors go to stderr
     RESPONSE=$(wget -q -O - \
-        --header="Authorization: Bearer ${CONTROL_PLANE_TOKEN}" \
         --header="Content-Type: application/json" \
         --post-data="" \
         "$API_URL" 2>/dev/null) && break

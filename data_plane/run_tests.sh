@@ -44,8 +44,8 @@ if [ "$E2E" = true ]; then
     echo ""
     echo "=== Running e2e tests ==="
 
-    # E2E tests require: agent-dev (profile dev), local-admin + agent-manager
-    # (profile admin), standalone mode. Bring up or restart as needed.
+    # E2E tests require: agent-dev (profile dev), agent-manager (profile admin),
+    # standalone mode. Bring up or restart as needed.
     NEED_RESTART=false
 
     # Check agent is running with the dev profile (runc), not standard (gVisor)
@@ -62,9 +62,9 @@ if [ "$E2E" = true ]; then
         NEED_RESTART=true
     fi
 
-    # Check local-admin and agent-manager are running (admin profile)
+    # Check agent-manager and log-shipper are running (admin profile)
     if [ "$NEED_RESTART" = false ]; then
-        for svc in local-admin agent-manager log-shipper; do
+        for svc in agent-manager log-shipper; do
             if ! docker ps --filter "name=^${svc}$" --format "{{.Names}}" 2>/dev/null | grep -q "$svc"; then
                 NEED_RESTART=true
                 break
@@ -72,7 +72,7 @@ if [ "$E2E" = true ]; then
         done
     fi
 
-    # Check local-admin is running in standalone mode
+    # Check agent-manager is running in standalone mode
     if [ "$NEED_RESTART" = false ]; then
         ADMIN_MODE=$(curl -sf http://localhost:8081/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
         if [ "$ADMIN_MODE" = "connected" ]; then

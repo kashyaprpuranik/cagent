@@ -1,21 +1,11 @@
 """
-Agent Manager - Polls control plane for commands, manages agent containers.
+Agent Manager - Unified data plane service.
 
-Runs as a background service that:
-1. Discovers agent containers by Docker label (cagent.role=agent)
-2. Sends heartbeat to control plane every 30s per agent with status
-3. Receives any pending commands (wipe, restart, stop, start)
-4. Executes commands and reports results on next heartbeat
-5. Syncs config from control plane OR generates from cagent.yaml
-6. Regenerates CoreDNS and Envoy configs when allowlist changes
+Combines the polling daemon (heartbeat, config sync, container management)
+with the local admin HTTP API (config CRUD, container control, WebSocket
+terminal, log streaming, analytics, domain policy for Lua).
 
-All agent containers share the same policy, DNS filter, and HTTP proxy.
-
-Modes:
-- standalone: Uses cagent.yaml as single source of truth
-- connected: Syncs from control plane, uses cagent.yaml as fallback
-
-No inbound ports required - only outbound to control plane.
+Runs as a FastAPI server with the polling loop in a background thread.
 """
 
 import os
@@ -26,6 +16,7 @@ import hashlib
 import signal
 import logging
 import threading
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Optional, List
@@ -35,7 +26,32 @@ import docker
 import requests
 import yaml
 
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 from config_generator import ConfigGenerator
+from constants import (
+    docker_client,
+    DATAPLANE_MODE,
+    CONTROL_PLANE_URL,
+    CONTROL_PLANE_TOKEN,
+    HEARTBEAT_INTERVAL,
+    AGENT_LABEL,
+    AGENT_CONTAINER_FALLBACK,
+    CAGENT_CONFIG_PATH,
+    COREDNS_COREFILE_PATH,
+    ENVOY_CONFIG_PATH,
+    ENVOY_LUA_PATH,
+    SECCOMP_PROFILES_DIR,
+    VALID_SECCOMP_PROFILES,
+    CONFIG_SYNC_INTERVAL,
+    MAX_HEARTBEAT_WORKERS,
+    COREDNS_CONTAINER_NAME,
+    ENVOY_CONTAINER_NAME,
+    BETA_FEATURES,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -44,35 +60,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
-DATAPLANE_MODE = os.environ.get("DATAPLANE_MODE", "standalone")  # 'standalone' or 'connected'
-CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://backend:8000")
-CONTROL_PLANE_TOKEN = os.environ.get("CONTROL_PLANE_TOKEN", "")
-HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "30"))
-
-# Agent discovery: label-based with fallback to fixed name
-AGENT_LABEL = "cagent.role=agent"
-AGENT_CONTAINER_FALLBACK = "agent"
-
-# Config paths
-CAGENT_CONFIG_PATH = os.environ.get("CAGENT_CONFIG_PATH", "/etc/cagent/cagent.yaml")
-COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Corefile")
-ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
-ENVOY_LUA_PATH = os.environ.get("ENVOY_LUA_PATH", "/etc/envoy/filter.lua")
-
-# Seccomp profiles
-SECCOMP_PROFILES_DIR = os.environ.get("SECCOMP_PROFILES_DIR", "/etc/seccomp/profiles")
-VALID_SECCOMP_PROFILES = {"standard", "hardened", "permissive"}
-
-# Sync configuration
-CONFIG_SYNC_INTERVAL = int(os.environ.get("CONFIG_SYNC_INTERVAL", "300"))  # 5 minutes
-MAX_HEARTBEAT_WORKERS = int(os.environ.get("HEARTBEAT_MAX_WORKERS", "20"))
-
 # Config generator instance
 config_generator = ConfigGenerator(CAGENT_CONFIG_PATH)
-
-# Docker client
-docker_client = docker.from_env()
 
 # Thread-safe command result tracking (written from ThreadPoolExecutor workers,
 # read from the heartbeat sender on the next cycle).
@@ -531,10 +520,6 @@ def execute_command(command: str, container, args: Optional[dict] = None) -> tup
 # Infrastructure restarts (shared across all agents)
 # ---------------------------------------------------------------------------
 
-COREDNS_CONTAINER_NAME = "dns-filter"
-ENVOY_CONTAINER_NAME = "http-proxy"
-
-
 def restart_coredns():
     """Restart CoreDNS container to pick up new config."""
     try:
@@ -638,6 +623,9 @@ def regenerate_configs(additional_domains: list = None) -> bool:
 
         if corefile_changed or envoy_changed or lua_changed:
             logger.info("Regenerated configs from cagent.yaml")
+            # Invalidate domain policy cache when config changes
+            from routers.domain_policy import invalidate_cache
+            invalidate_cache()
             return True
         else:
             logger.debug("Generated configs unchanged, skipping restart")
@@ -958,7 +946,7 @@ def _check_standalone_resources(agents):
 
 def main_loop():
     """Main loop: discover agents, send heartbeats, execute commands, sync config."""
-    logger.info("Agent manager starting")
+    logger.info("Agent manager polling loop starting")
     logger.info(f"  Mode: {DATAPLANE_MODE}")
     logger.info(f"  Config file: {CAGENT_CONFIG_PATH}")
     logger.info(f"  CoreDNS config: {COREDNS_COREFILE_PATH}")
@@ -1036,7 +1024,73 @@ def main_loop():
         time.sleep(HEARTBEAT_INTERVAL)
 
 
+# ---------------------------------------------------------------------------
+# FastAPI application
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the polling loop in a background thread."""
+    loop_thread = threading.Thread(target=main_loop, daemon=True)
+    loop_thread.start()
+    logger.info("Polling loop thread started")
+    yield
+
+app = FastAPI(
+    title="Cagent Agent Manager",
+    description="Unified data plane service: config management, container control, and CP sync",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS for local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Register routers
+from routers import health, config, containers, logs, terminal, analytics, domain_policy
+from routers import ssh_tunnel
+
+app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(config.router, prefix="/api", tags=["config"])
+app.include_router(containers.router, prefix="/api", tags=["containers"])
+app.include_router(logs.router, prefix="/api", tags=["logs"])
+app.include_router(terminal.router, prefix="/api", tags=["terminal"])
+app.include_router(analytics.router, prefix="/api", tags=["analytics"])
+app.include_router(domain_policy.router, tags=["domain-policy"])
+if "ssh-tunnel" in BETA_FEATURES:
+    app.include_router(ssh_tunnel.router, prefix="/api", tags=["ssh-tunnel"])
+# Always register the tunnel-config proxy (used by FRP entrypoint)
+app.include_router(ssh_tunnel.proxy_router, tags=["tunnel-proxy"])
+
+# =============================================================================
+# Static files (frontend)
+# =============================================================================
+
+FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
+if FRONTEND_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
+
+    @app.get("/{path:path}")
+    async def serve_frontend(path: str):
+        """Serve frontend for all non-API routes."""
+        if path.startswith("api/"):
+            raise HTTPException(404)
+
+        file_path = FRONTEND_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(FRONTEND_DIR / "index.html")
+
+
 if __name__ == "__main__":
+    import uvicorn
+
     try:
         # Verify Docker connection
         docker_client.ping()
@@ -1045,4 +1099,4 @@ if __name__ == "__main__":
         logger.error(f"Cannot connect to Docker: {e}")
         sys.exit(1)
 
-    main_loop()
+    uvicorn.run(app, host="0.0.0.0", port=8080)

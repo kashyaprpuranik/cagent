@@ -418,22 +418,15 @@ class ConfigGenerator:
         }
 
     def _build_control_plane_cluster(self) -> dict:
-        """Build cluster for control plane API.
+        """Build cluster for the domain policy API.
 
-        Derives address and port from CONTROL_PLANE_URL (same env var used
-        by the agent-manager) so Envoy's Lua httpCall reaches the backend
-        via container-to-container networking.
+        Points to agent-manager on infra-net (Docker DNS) so the Envoy Lua
+        filter can reach the domain-policy endpoint locally without needing
+        direct access to the control plane.
+
+        The cluster name is kept as ``control_plane_api`` for Lua compatibility
+        (Lua's httpCall references this cluster name).
         """
-        cp_url = os.environ.get("CONTROL_PLANE_URL", "") or "http://backend:8000"
-        # Strip scheme
-        host_port = cp_url.split("://", 1)[-1]
-        if ":" in host_port:
-            address, port_str = host_port.rsplit(":", 1)
-            port = int(port_str)
-        else:
-            address = host_port
-            port = 8000
-
         return {
             'name': 'control_plane_api',
             'type': 'STRICT_DNS',
@@ -446,8 +439,8 @@ class ConfigGenerator:
                         'endpoint': {
                             'address': {
                                 'socket_address': {
-                                    'address': address,
-                                    'port_value': port
+                                    'address': 'agent-manager',
+                                    'port_value': 8080
                                 }
                             }
                         }
@@ -538,58 +531,21 @@ class ConfigGenerator:
         return s
 
     def generate_lua_filter(self) -> str:
-        """Generate Lua filter code from cagent.yaml config.
+        """Generate Lua filter code.
 
-        Builds a standalone Lua file with static config tables baked in
-        and the full filter logic (matching, rate limiting, credential
-        injection, DNS tunneling detection, egress tracking).
+        Produces a simplified filter that talks to agent-manager (local,
+        no auth) for domain policy lookups.  Agent-manager handles both
+        standalone and connected mode internally.
         """
-        default_rate_limit = self.get_default_rate_limit()
-
-        # Build credential map from config
-        credentials = {}
-        rate_limits = {}
-        alias_map = {}
-
-        for entry in self.get_domains():
-            domain = entry.get('domain', '')
-            alias = entry.get('alias')
-            cred = entry.get('credential')
-            rl = entry.get('rate_limit')
-
-            if cred:
-                env_var = cred.get('env', '')
-                value = os.environ.get(env_var, '') if env_var else ''
-                if value:
-                    header_format = cred.get('format', '{value}')
-                    credentials[domain] = {
-                        'header_name': cred.get('header', 'Authorization'),
-                        'header_value': header_format.replace('{value}', value)
-                    }
-
-            if rl:
-                rate_limits[domain] = rl
-
-            if alias:
-                alias_map[f"{alias}.devbox.local"] = domain
-
-        # Build Lua table literals with proper escaping
-        creds_lua = self._lua_table(credentials)
-        rate_limits_lua = self._lua_table(rate_limits)
-        alias_map_lua = self._lua_table(alias_map)
-        default_rpm = int(default_rate_limit.get('requests_per_minute', 120))
-        default_burst = int(default_rate_limit.get('burst_size', 20))
-
         lines = [
             '-- =======================================================================',
             '-- Auto-generated Lua filter from cagent.yaml',
             f'-- Generated: {datetime.utcnow().isoformat()}Z',
             '-- DO NOT EDIT - changes will be overwritten by agent-manager',
             '-- =======================================================================',
+            '-- Talks to agent-manager (local, no auth) for domain policy lookups.',
             '',
             '-- Configuration',
-            'local DATAPLANE_MODE = os.getenv("DATAPLANE_MODE") or "standalone"',
-            'local API_TOKEN = os.getenv("CONTROL_PLANE_TOKEN") or ""',
             'local CACHE_TTL_SECONDS = 300',
             'local CP_FAILURE_BACKOFF = 30',
             '',
@@ -598,13 +554,6 @@ class ConfigGenerator:
             'local token_buckets = {}',
             'local cp_available = true',
             'local cp_last_failure = 0',
-            '',
-            '-- Static config from cagent.yaml',
-            f'local static_credentials = {creds_lua}',
-            f'local static_rate_limits = {rate_limits_lua}',
-            f'local alias_map = {alias_map_lua}',
-            '',
-            f'local default_rate_limit = {{requests_per_minute = {default_rpm}, burst_size = {default_burst}}}',
             '',
             '-- =======================================================================',
             '-- Utility Functions',
@@ -617,11 +566,6 @@ class ConfigGenerator:
             'function is_devbox_local(host)',
             '  local host_clean = clean_host(host)',
             '  return string.match(host_clean, "%.devbox%.local$") ~= nil',
-            'end',
-            '',
-            'function get_real_domain(host)',
-            '  local host_clean = clean_host(host)',
-            '  return alias_map[host_clean] or host_clean',
             'end',
             '',
             'function url_encode(str)',
@@ -662,8 +606,6 @@ class ConfigGenerator:
             'end',
             '',
             'function should_contact_cp()',
-            '  if DATAPLANE_MODE == "standalone" then return false end',
-            '  if API_TOKEN == "" then return false end',
             '  if not cp_available and (os.time() - cp_last_failure) < CP_FAILURE_BACKOFF then',
             '    return false',
             '  end',
@@ -680,25 +622,7 @@ class ConfigGenerator:
             'end',
             '',
             '-- =======================================================================',
-            '-- Wildcard Domain Matching',
-            '-- =======================================================================',
-            '',
-            'function match_domain_wildcard(domain, tbl)',
-            '  local exact = tbl[domain]',
-            '  if exact ~= nil then return exact end',
-            '  for pattern, value in pairs(tbl) do',
-            '    if string.sub(pattern, 1, 2) == "*." then',
-            '      local suffix = string.sub(pattern, 2)',
-            '      if string.sub(domain, -string.len(suffix)) == suffix then',
-            '        return value',
-            '      end',
-            '    end',
-            '  end',
-            '  return nil',
-            'end',
-            '',
-            '-- =======================================================================',
-            '-- Domain Policy',
+            '-- Domain Policy (talks to local agent-manager)',
             '-- =======================================================================',
             '',
             'function get_domain_policy(request_handle, domain)',
@@ -713,8 +637,7 @@ class ConfigGenerator:
             '      "control_plane_api",',
             '      {[":method"] = "GET",',
             '       [":path"] = "/api/v1/domain-policies/for-domain?domain=" .. url_encode(host_clean),',
-            '       [":authority"] = "backend",',
-            '       ["authorization"] = "Bearer " .. API_TOKEN},',
+            '       [":authority"] = "agent-manager"},',
             '      "", 5000, false)',
             '    if body and string.len(body) > 0 then',
             '      mark_cp_success()',
@@ -724,14 +647,9 @@ class ConfigGenerator:
             '    end',
             '  end',
             '  if not policy then',
-            '    policy = build_static_policy(host_clean)',
-            '  elseif not policy.credential then',
-            '    local static = build_static_policy(host_clean)',
-            '    if static.credential then',
-            '      policy.credential = static.credential',
-            '      policy.target_domain = static.target_domain',
-            '      policy.matched = true',
-            '    end',
+            '    policy = {matched = false, allowed_paths = {},',
+            '      requests_per_minute = 120, burst_size = 20,',
+            '      credential = nil, target_domain = nil}',
             '  end',
             '  domain_policy_cache[host_clean] = {policy = policy, expires_at = os.time() + CACHE_TTL_SECONDS}',
             '  return policy',
@@ -764,28 +682,6 @@ class ConfigGenerator:
             '  return policy',
             'end',
             '',
-            'function build_static_policy(domain)',
-            '  local policy = {',
-            '    matched = false, allowed_paths = {},',
-            '    requests_per_minute = 120, burst_size = 20,',
-            '    credential = nil, target_domain = nil',
-            '  }',
-            '  local rl = match_domain_wildcard(domain, static_rate_limits) or default_rate_limit',
-            '  if rl then',
-            '    policy.requests_per_minute = rl.requests_per_minute or 120',
-            '    policy.burst_size = rl.burst_size or 20',
-            '    policy.matched = true',
-            '  end',
-            '  local lookup_domain = alias_map[domain] or domain',
-            '  local cred = match_domain_wildcard(lookup_domain, static_credentials)',
-            '  if cred then',
-            '    policy.credential = {header_name = cred.header_name, header_value = cred.header_value}',
-            '    policy.target_domain = lookup_domain',
-            '    policy.matched = true',
-            '  end',
-            '  return policy',
-            'end',
-            '',
             '-- =======================================================================',
             '-- Path Filtering',
             '-- =======================================================================',
@@ -815,7 +711,7 @@ class ConfigGenerator:
             'end',
             '',
             '-- =======================================================================',
-            '-- Rate Limiting & Egress',
+            '-- Rate Limiting',
             '-- =======================================================================',
             '',
             'function check_rate_limit_with_config(request_handle, domain, rpm, burst)',
