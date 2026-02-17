@@ -7,7 +7,7 @@ from urllib.error import URLError
 import docker
 from fastapi import APIRouter, HTTPException
 
-from ..constants import (
+from constants import (
     FRPC_CONTAINER_NAME,
     DATA_PLANE_DIR,
     DATAPLANE_MODE,
@@ -15,7 +15,7 @@ from ..constants import (
     CONTROL_PLANE_TOKEN,
     docker_client,
 )
-from ..models import SshTunnelConfig
+from models import SshTunnelConfig
 
 router = APIRouter()
 # Separate router for the tunnel-config proxy (registered without /api prefix)

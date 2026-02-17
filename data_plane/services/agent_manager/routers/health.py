@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 import docker
 
-from ..constants import (
+from constants import (
     AGENT_CONTAINER_NAME,
     COREDNS_CONTAINER_NAME,
     ENVOY_CONTAINER_NAME,

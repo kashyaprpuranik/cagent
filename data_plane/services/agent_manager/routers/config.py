@@ -4,8 +4,8 @@ from pathlib import Path
 import yaml
 from fastapi import APIRouter, HTTPException
 
-from ..constants import COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, CAGENT_CONFIG_PATH, READ_ONLY, docker_client
-from ..models import ConfigUpdate
+from constants import COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, CAGENT_CONFIG_PATH, READ_ONLY, docker_client
+from models import ConfigUpdate
 
 router = APIRouter()
 

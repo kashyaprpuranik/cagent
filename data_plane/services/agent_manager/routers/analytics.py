@@ -10,7 +10,7 @@ import docker
 import yaml
 from fastapi import APIRouter, Query, HTTPException
 
-from ..constants import ENVOY_CONTAINER_NAME, COREDNS_CONTAINER_NAME, CAGENT_CONFIG_PATH, docker_client
+from constants import ENVOY_CONTAINER_NAME, COREDNS_CONTAINER_NAME, CAGENT_CONFIG_PATH, docker_client
 
 router = APIRouter()
 

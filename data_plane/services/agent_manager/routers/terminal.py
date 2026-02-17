@@ -4,7 +4,7 @@ import socket
 import docker
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ..constants import docker_client, discover_agent_container_names
+from constants import docker_client, discover_agent_container_names
 
 router = APIRouter()
 

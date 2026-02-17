@@ -17,7 +17,7 @@ import yaml
 from fastapi import APIRouter, Query
 from pathlib import Path
 
-from ..constants import (
+from constants import (
     DATAPLANE_MODE,
     CONTROL_PLANE_URL,
     CONTROL_PLANE_TOKEN,

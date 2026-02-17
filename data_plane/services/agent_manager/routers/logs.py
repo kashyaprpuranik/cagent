@@ -3,7 +3,7 @@ from typing import Optional
 import docker
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from ..constants import docker_client
+from constants import docker_client
 
 router = APIRouter()
 

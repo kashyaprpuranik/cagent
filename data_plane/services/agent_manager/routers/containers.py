@@ -1,8 +1,8 @@
 import docker
 from fastapi import APIRouter, HTTPException
 
-from ..constants import MANAGED_CONTAINERS, READ_ONLY, docker_client, discover_agent_container_names
-from ..models import ContainerAction
+from constants import MANAGED_CONTAINERS, READ_ONLY, docker_client, discover_agent_container_names
+from models import ContainerAction
 
 router = APIRouter()
 
