@@ -44,72 +44,16 @@ domains:
     read_only: true            # Block POST/PUT/DELETE
 ```
 
-The Local Admin UI at http://localhost:8080 provides a structured editor:
+The Admin UI at http://localhost:8081 provides a structured editor:
 - **Domains tab**: Add/edit/delete with validation
 - **Settings tab**: DNS, rate limits, mode
 - **Raw YAML tab**: Direct editing
 
-## Connected Mode: Control Plane
+## Connected Mode
 
-### Domain Policies (Unified)
+For connected mode (centralized management via control plane), see the [cagent-control](https://github.com/kashyaprpuranik/cagent-control) repo.
 
-Domain policies combine all settings for a domain in one place: allowlist, path filtering, rate limits, and credentials.
-
-```bash
-# Create a domain policy with all settings
-curl -X POST http://localhost:8002/api/v1/domain-policies \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain": "api.openai.com",
-    "alias": "openai",
-    "description": "OpenAI API",
-    "allowed_paths": ["/v1/chat/*", "/v1/models", "/v1/embeddings"],
-    "requests_per_minute": 60,
-    "burst_size": 10,
-    "credential": {
-      "header": "Authorization",
-      "format": "Bearer {value}",
-      "value": "sk-..."
-    }
-  }'
-
-# List all domain policies
-curl http://localhost:8002/api/v1/domain-policies \
-  -H "Authorization: Bearer $TOKEN"
-
-# Get a single policy
-curl http://localhost:8002/api/v1/domain-policies/1 \
-  -H "Authorization: Bearer $TOKEN"
-
-# Update a policy
-curl -X PUT http://localhost:8002/api/v1/domain-policies/1 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"requests_per_minute": 120}'
-
-# Delete a policy
-curl -X DELETE http://localhost:8002/api/v1/domain-policies/1 \
-  -H "Authorization: Bearer $TOKEN"
-
-# Rotate a credential
-curl -X POST http://localhost:8002/api/v1/domain-policies/1/rotate-credential \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"value": "sk-new-..."}'
-
-# Lookup policy for a domain (used by Envoy/agent-manager)
-curl "http://localhost:8002/api/v1/domain-policies/for-domain?domain=api.openai.com" \
-  -H "Authorization: Bearer $TOKEN"
-
-# Export policies (CoreDNS format for DNS filtering)
-curl http://localhost:8002/api/v1/domain-policies/export \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-The agent-manager syncs policies from the control plane to CoreDNS (for DNS filtering) and Envoy (for rate limits, path filtering, and credentials).
-
-### Domain Policy Fields
+## Domain Policy Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -143,108 +87,15 @@ Credentials are stored on domain policies and injected by Envoy at the proxy lay
 **Domain aliases**: Setting `alias: "openai"` creates an `openai.devbox.local` shortcut. The agent can use `http://openai.devbox.local/v1/models` and Envoy resolves it to `api.openai.com` with credentials injected.
 
 ```bash
-# Domain policy with credential
-curl -X POST http://localhost:8002/api/v1/domain-policies \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain": "api.openai.com",
-    "alias": "openai",
-    "credential": {
-      "header": "Authorization",
-      "format": "Bearer {value}",
-      "value": "sk-..."
-    }
-  }'
-# Agent can now use: curl http://openai.devbox.local/v1/models
-```
-
-## Agent Management
-
-Via Admin UI dashboard or API. Agent identity is derived from the agent token — each token maps to a unique agent_id on the control plane.
-
-```bash
-# List all connected agents
-curl http://localhost:8002/api/v1/agents \
-  -H "Authorization: Bearer $TOKEN"
-
-# Get agent status
-curl http://localhost:8002/api/v1/agents/my-agent/status \
-  -H "Authorization: Bearer $TOKEN"
-
-# Wipe agent (admin only)
-curl -X POST http://localhost:8002/api/v1/agents/my-agent/wipe \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"wipe_workspace": false}'
-
-# Stop/Start/Restart agent (admin only)
-curl -X POST http://localhost:8002/api/v1/agents/my-agent/stop \
-  -H "Authorization: Bearer $TOKEN"
-curl -X POST http://localhost:8002/api/v1/agents/my-agent/start \
-  -H "Authorization: Bearer $TOKEN"
-curl -X POST http://localhost:8002/api/v1/agents/my-agent/restart \
-  -H "Authorization: Bearer $TOKEN"
-
-```
-
-## Per-Agent Configuration
-
-Domain policies can be scoped to specific agents. Global policies (without `agent_id`) apply to all agents in the tenant.
-
-### How it works
-
-- **Global policies** (`agent_id` = null): Apply to all agents in the tenant
-- **Agent-specific policies** (`agent_id` = "my-agent"): Only apply to that agent
-- **Precedence**: Agent-specific policies take precedence over global policies for the same domain
-
-### Creating agent-specific configuration
-
-```bash
-# Agent-specific domain policy
-curl -X POST http://localhost:8002/api/v1/domain-policies \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain": "internal-api.example.com",
-    "description": "Internal API for prod-agent only",
-    "agent_id": "prod-agent",
-    "credential": {
-      "header": "Authorization",
-      "format": "Bearer {value}",
-      "value": "sk-prod-..."
-    }
-  }'
-
-# Agent-specific rate limit override
-curl -X POST http://localhost:8002/api/v1/domain-policies \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain": "api.openai.com",
-    "requests_per_minute": 120,
-    "burst_size": 20,
-    "description": "Higher limits for prod-agent",
-    "agent_id": "prod-agent"
-  }'
-```
-
-### Agent token scoping
-
-Agent tokens only see domain policies for their assigned agent plus global policies:
-
-```bash
-# Create agent token
-curl -X POST http://localhost:8002/api/v1/tokens \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "prod-token", "token_type": "agent", "agent_id": "prod-agent"}'
-
-# Using the agent token to fetch policies
-# - Returns prod-agent's policies + global policies
-# - Does NOT return other agents' policies
-curl "http://localhost:8002/api/v1/domain-policies/for-domain?domain=api.example.com" \
-  -H "Authorization: Bearer <prod-agent-token>"
+# In cagent.yaml:
+# - domain: api.openai.com
+#   alias: openai
+#   credential:
+#     header: Authorization
+#     format: "Bearer {value}"
+#     env: OPENAI_API_KEY
+#
+# Agent can use: curl http://openai.devbox.local/v1/models
 ```
 
 ## SSH Access
@@ -305,59 +156,8 @@ docker compose port --index 2 agent-dev 22
 
 For remote SSH access via STCP tunnel, enable with `BETA_FEATURES=ssh-tunnel` and `--profile ssh`. The tunnel-client self-bootstraps its credentials from the control plane API.
 
-## Log Querying
+## Log Collection
 
-Agent logs (Envoy, CoreDNS, gVisor, container stdout/stderr) are queryable via the Control Plane API.
+In standalone mode with auditing (`--profile auditing`), Vector collects logs from Docker, Envoy, and CoreDNS. Logs are written to local files by default. Configure S3 or Elasticsearch sinks in `configs/vector/sinks/standalone.yaml`.
 
-### Tenant Filtering
-
-Logs are automatically filtered by tenant:
-- **Super admins**: Can query all logs, optionally filter by `tenant_id`
-- **Tenant admins/developers**: Only see logs from their tenant's agents
-- **Agent-specific queries**: Verified against user's tenant access
-
-```bash
-# Query logs (filtered to your tenant automatically)
-curl "http://localhost:8002/api/v1/logs/query?source=envoy&limit=100" \
-  -H "Authorization: Bearer $TOKEN"
-
-# Super admin: query specific tenant
-curl "http://localhost:8002/api/v1/logs/query?tenant_id=1&source=gvisor" \
-  -H "Authorization: Bearer $TOKEN"
-
-# Query specific agent (must have access)
-curl "http://localhost:8002/api/v1/logs/query?agent_id=prod-agent&source=agent" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Log Sources
-
-| Source | Description |
-|--------|-------------|
-| `envoy` | HTTP proxy access logs (method, path, response code) |
-| `coredns` | DNS query logs |
-| `gvisor` | Syscall audit logs (if using gVisor runtime) |
-| `agent` | Container stdout/stderr |
-| `agent-manager` | Agent manager service logs |
-
-### Log Ingestion (Agent Tokens)
-
-Data planes send logs to the Control Plane, which injects trusted identity before forwarding to OpenObserve:
-
-```bash
-# Agent token sends logs to CP (not directly to OpenObserve)
-curl -X POST http://localhost:8002/api/v1/logs/ingest \
-  -H "Authorization: Bearer $AGENT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "logs": [
-      {"message": "Request completed", "source": "envoy", "level": "info"},
-      {"message": "DNS query: api.openai.com", "source": "coredns"}
-    ]
-  }'
-```
-
-This architecture ensures:
-- Data planes never have OpenObserve credentials
-- `agent_id` and `tenant_id` are injected from verified token
-- Agents cannot spoof their identity in logs
+In connected mode, logs are shipped to the control plane API. See [cagent-control](https://github.com/kashyaprpuranik/cagent-control) for log querying.

@@ -248,109 +248,15 @@ docker compose --profile dev --profile admin --profile auditing --profile email 
 
 ### Control Plane Mode
 
-Run with centralized management via the control plane. Ideal for multiple tenants and agents.
+For centralized management of multiple data planes with multi-tenant policy enforcement, secrets storage, audit logging, and a web admin UI, see the [cagent-control](https://github.com/kashyaprpuranik/cagent-control) repo.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       CONTROL PLANE (control-net)                           │
-│                       (can run on provider/cloud)                           │
-│                                                                             │
-│   ┌───────────┐  ┌───────────┐  ┌───────────┐                              │
-│   │    DB     │  │ Frontend  │  │ Log Store │                              │
-│   │ (secrets) │  │  (:9080)  │  │  (:5080)  │                              │
-│   └────┬──────┘  └────┬──────┘  └────┬──────┘                              │
-│        │              │              │                                      │
-│        ▼              ▼              │                                      │
-│  ┌────────────────────────────────┐  │                                      │
-│  │     Control Plane API (:8002)  ├──┘                                      │
-│  │                                │                                         │
-│  │  /api/v1/secrets    Secrets    │                                         │
-│  │  /api/v1/allowlist  Allowlist  │                                         │
-│  │  /api/v1/agents     Agent Mgmt │                                         │
-│  └────────────────────────────────┘                                         │
-│                ▲                                                            │
-└────────────────┼────────────────────────────────────────────────────────────┘
-                 │ Heartbeat, Commands, Logs
-                 │
-┌────────────────┼────────────────────────────────────────────────────────────┐
-│                │                     DATA PLANE                             │
-│                │                                                            │
-│             (can run on client laptop or server or provider servers)        │
-│                │                                                            │
-│  ┌─────────────┴──────┐  ┌──────────────┐  ┌───────────────────────┐      │
-│  │  Agent Manager     │  │ Log Shipper  │  │ Email Proxy  (beta)  │      │
-│  │  polls CP,         │  │ ships logs   │  │ IMAP/SMTP proxy      │      │
-│  │  syncs configs,    │  │ to CP        │  └───────────────────────┘      │
-│  │  serves admin UI   │  └──────────────┘                                 │
-│  └────────────────────┘                                                    │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                        agent-net (isolated)                             ││
-│  │  ┌───────────────────────────────────────────────────────────────────┐  ││
-│  │  │                     Agent Container                               │  ││
-│  │  │  • Isolated network (no direct internet access)                   │  ││
-│  │  │  • All HTTP(S) via HTTP proxy (allowlist enforced)                │  ││
-│  │  │  • DNS via DNS filter (allowlist enforced)                        │  ││
-│  │  └───────────────────────────────────────────────────────────────────┘  ││
-│  │              │                           │                              ││
-│  │              ▼                           ▼                              ││
-│  │       ┌─────────────┐             ┌─────────────┐                      ││
-│  │       │ HTTP Proxy  │             │ DNS Filter  │                      ││
-│  │       │  (+ creds)  │             │ (allowlist) │                      ││
-│  │       └─────────────┘             └─────────────┘                      ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+**Accessing the Agent**
 
-**1. Start Control Plane**
-
-```bash
-cd control_plane
-
-# Create .env with encryption key
-cp .env.example .env
-export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-# Add ENCRYPTION_KEY to .env
-
-docker compose up -d
-
-# Access points:
-# - Admin UI:     http://localhost:9080
-# - API docs:     http://localhost:8002/docs
-# - Log Store:    http://localhost:5080 (admin@cagent.local/admin)
-```
-
-**2. Create an API Token**
-
-Use the Admin UI or API to create an agent token for the data plane. See [control_plane/README.md](control_plane/README.md#api-token-management).
-
-**3. Start Data Plane**
-
-```bash
-cd data_plane
-
-export CONTROL_PLANE_URL=http://<control-plane-ip>:8002
-export CONTROL_PLANE_TOKEN=<agent-token>  # Token created in step 2
-
-# Recommended: with gVisor
-docker compose --profile standard up -d
-
-# Development: without gVisor
-docker compose --profile dev up -d
-
-# Log shipping is automatic - logs are sent to CP which forwards to OpenObserve
-# No OPENOBSERVE credentials needed on data plane (CP-mediated for security)
-```
-
-**3. Accessing the Agent**
-
-| Method | Standalone | Control Plane Mode |
-|--------|------------|-------------------|
-| **Web Terminal** | http://localhost:8081 → Terminal | N/A (use SSH) |
-| **Docker exec** | `docker exec -it agent bash` | N/A (use SSH) |
-| **SSH** | Configure via Local Admin UI | Direct SSH (port 2222) |
-
-The web terminal is available in the local admin UI. See [data_plane/README.md](data_plane/README.md#ssh-access) for SSH access options.
+| Method | How |
+|--------|-----|
+| **Web Terminal** | http://localhost:8081 (admin UI) |
+| **Docker exec** | `docker exec -it agent bash` |
+| **SSH** | Direct SSH to port 2222 (configure via admin UI) |
 
 ## Features
 
@@ -374,23 +280,10 @@ See [docs/configuration.md](docs/configuration.md) for detailed configuration in
 - Agent management commands
 - Per-agent configuration (agent-specific domain policies)
 
-## Authentication & API Tokens
-
-### Token Types
-
-| Type | Description | Access |
-|------|-------------|--------|
-| `admin` (super) | Platform operator | All tenants, all endpoints, OpenObserve link |
-| `admin` | Tenant administrator | Domain policies, agents, tokens, IP ACLs, audit-logs (tenant-scoped) |
-| `developer` | Developer | Dashboard (read-only), agent logs, web terminal, settings |
-| `agent` | Data plane token | Heartbeat, domain-policies/for-domain (agent-scoped) |
-
-Tokens are managed via the Admin UI (`/tokens`) or API. See [docs/development.md](docs/development.md) for dev environment setup.
-
 ## Documentation
 
-- [Configuration Guide](docs/configuration.md) - Domains, secrets, rate limits, per-agent config
-- [Development Guide](docs/development.md) - Database seeding, testing, API token creation
+- [Configuration Guide](docs/configuration.md) - Domains, rate limits, credentials, path filtering
+- [Control Plane](https://github.com/kashyaprpuranik/cagent-control) - Centralized management (separate repo)
 
 ## Roadmap
 

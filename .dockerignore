@@ -5,15 +5,6 @@
 !package.json
 !package-lock.json
 
-# Allow shared-ui package
-!packages/
-!packages/shared-ui/
-!packages/shared-ui/**
-
-# Allow control plane frontend
-!control_plane/services/frontend/
-!control_plane/services/frontend/**
-
 # Allow data plane local admin frontend (built in agent-manager Dockerfile)
 !data_plane/services/local_admin/
 !data_plane/services/local_admin/**

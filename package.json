@@ -1,7 +1,10 @@
 {
   "private": true,
   "workspaces": [
-    "control_plane/services/frontend",
     "data_plane/services/local_admin/frontend"
-  ]
+  ],
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17"
+  }
 }
