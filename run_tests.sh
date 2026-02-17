@@ -83,7 +83,7 @@ if [ "$RUN_FRONTEND" = true ]; then
 
     # CP admin UI
     echo "--- CP admin UI (tsc) ---"
-    if (cd "$REPO_ROOT/control_plane/services/frontend" && ./node_modules/.bin/tsc --noEmit 2>&1); then
+    if (cd "$REPO_ROOT/control_plane/services/frontend" && npx tsc --noEmit 2>&1); then
         echo "  CP frontend: OK"
     else
         echo "  CP frontend: FAILED"
@@ -92,7 +92,7 @@ if [ "$RUN_FRONTEND" = true ]; then
 
     # DP local admin UI
     echo "--- DP local admin UI (tsc) ---"
-    if (cd "$REPO_ROOT/data_plane/services/local_admin/frontend" && ./node_modules/.bin/tsc --noEmit 2>&1); then
+    if (cd "$REPO_ROOT/data_plane/services/local_admin/frontend" && npx tsc --noEmit 2>&1); then
         echo "  DP local admin frontend: OK"
     else
         echo "  DP local admin frontend: FAILED"
