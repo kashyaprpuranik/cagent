@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, ShieldCheck, AlertTriangle, CheckCircle, X, Users } from 'lucide-react';
-import { Card } from '@cagent/shared-ui';
+import { Card } from '@cagent/ui';
 import { useTenant } from '../contexts/TenantContext';
 import {
   useSecurityProfiles,

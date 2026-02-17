@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, Edit2, Trash2, RefreshCw, RotateCcw, Globe, Search, Shield, Clock, ChevronDown } from 'lucide-react';
-import { Card, Table, Button, Modal, Input, Badge } from '@cagent/shared-ui';
+import { Card, Table, Button, Modal, Input, Badge } from '@cagent/ui';
 import {
   useDomainPolicies,
   useCreateDomainPolicy,

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ChevronDown, AlertTriangle, CheckCircle } from 'lucide-react';
-import { Card } from '@cagent/shared-ui';
+import { Card } from '@cagent/ui';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
 import { useSecurityProfiles, useUpdateSecurityProfile } from '../hooks/useApi';

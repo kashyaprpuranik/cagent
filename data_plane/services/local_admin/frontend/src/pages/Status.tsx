@@ -17,8 +17,8 @@ import {
   Shield,
   Mail,
 } from 'lucide-react';
-import { BlockedDomainsWidget, BlockedTimeseriesChart, BandwidthWidget, DiagnoseModal } from '@cagent/shared-ui';
-import type { DiagnoseResult } from '@cagent/shared-ui';
+import { BlockedDomainsWidget, BlockedTimeseriesChart, BandwidthWidget, DiagnoseModal } from '@cagent/ui';
+import type { DiagnoseResult } from '@cagent/ui';
 import {
   getContainers,
   controlContainer,

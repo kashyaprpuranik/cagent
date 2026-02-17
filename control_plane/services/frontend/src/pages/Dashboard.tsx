@@ -12,8 +12,8 @@ import {
   CheckCircle,
   X,
 } from 'lucide-react';
-import { Card, Badge, Button, Modal, BlockedDomainsWidget, BlockedTimeseriesChart, BandwidthWidget, DiagnoseModal } from '@cagent/shared-ui';
-import type { DiagnoseResult } from '@cagent/shared-ui';
+import { Card, Badge, Button, Modal, BlockedDomainsWidget, BlockedTimeseriesChart, BandwidthWidget, DiagnoseModal } from '@cagent/ui';
+import type { DiagnoseResult } from '@cagent/ui';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
 import {

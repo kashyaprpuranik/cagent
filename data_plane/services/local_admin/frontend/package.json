@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@cagent/shared-ui": "*",
+    "@cagent/ui": "github:kashyaprpuranik/cagent-ui",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.0",

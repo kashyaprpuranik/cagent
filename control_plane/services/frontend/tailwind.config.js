@@ -1,4 +1,4 @@
-import sharedPreset from '@cagent/shared-ui/tailwind.preset.js';
+import sharedPreset from '@cagent/ui/tailwind.preset.js';
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -6,7 +6,7 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
-    "../../../packages/shared-ui/src/**/*.{js,ts,jsx,tsx}",
+    "./node_modules/@cagent/ui/src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {

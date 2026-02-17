@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Card, Table, Input, Select, Badge } from '@cagent/shared-ui';
+import { Card, Table, Input, Select, Badge } from '@cagent/ui';
 import { useAuditTrail } from '../hooks/useApi';
 import { useTenant } from '../contexts/TenantContext';
 import { useAuth } from '../contexts/AuthContext';

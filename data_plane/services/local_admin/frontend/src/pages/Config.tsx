@@ -19,7 +19,7 @@ import {
   Mail,
   Lock,
 } from 'lucide-react';
-import { Modal, Input, Select, Button, Badge } from '@cagent/shared-ui';
+import { Modal, Input, Select, Button, Badge } from '@cagent/ui';
 import { getConfig, getInfo, updateConfigRaw, reloadConfig, Config, DomainEntry, EmailAccount } from '../api/client';
 
 type Tab = 'domains' | 'email' | 'settings' | 'raw';

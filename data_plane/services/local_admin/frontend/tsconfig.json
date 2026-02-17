@@ -15,10 +15,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
-    "paths": {
-      "@cagent/shared-ui": ["../../../../packages/shared-ui/src/index.ts"]
-    }
+    "baseUrl": "."
   },
   "include": ["src"],
   "references": [

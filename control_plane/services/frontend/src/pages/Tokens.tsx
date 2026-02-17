@@ -12,7 +12,7 @@ import {
   Crown,
   Building2,
 } from 'lucide-react';
-import { Card, Badge, Button, Modal } from '@cagent/shared-ui';
+import { Card, Badge, Button, Modal } from '@cagent/ui';
 import {
   useTokens,
   useCreateToken,

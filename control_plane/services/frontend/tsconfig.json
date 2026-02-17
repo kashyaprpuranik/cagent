@@ -17,8 +17,7 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@cagent/shared-ui": ["../../../packages/shared-ui/src/index.ts"]
+      "@/*": ["src/*"]
     }
   },
   "include": ["src"],
