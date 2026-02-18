@@ -1,8 +1,8 @@
 -- =======================================================================
 -- Envoy Lua Filter - Credential Injection, Rate Limiting, Security
 -- =======================================================================
--- Talks to agent-manager (local, no auth) for domain policy lookups.
--- Agent-manager handles both standalone and connected mode internally.
+-- Talks to warden (local, no auth) for domain policy lookups.
+-- Warden handles both standalone and connected mode internally.
 
 -- Configuration
 local CACHE_TTL_SECONDS = 300  -- 5 minutes
@@ -12,7 +12,7 @@ local CP_FAILURE_BACKOFF = 30  -- Seconds to wait before retrying after failure
 local domain_policy_cache = {}
 local token_buckets = {}     -- domain -> {tokens, last_refill}
 
--- Agent-manager health tracking
+-- Warden health tracking
 local cp_available = true
 local cp_last_failure = 0
 
@@ -20,7 +20,7 @@ local cp_last_failure = 0
 -- Utility Functions
 -- =======================================================================
 
--- Check if agent-manager should be contacted
+-- Check if warden should be contacted
 function should_contact_cp()
   -- Backoff after failure
   if not cp_available and (os.time() - cp_last_failure) < CP_FAILURE_BACKOFF then
@@ -29,13 +29,13 @@ function should_contact_cp()
   return true
 end
 
--- Mark agent-manager as failed (for backoff)
+-- Mark warden as failed (for backoff)
 function mark_cp_failure()
   cp_available = false
   cp_last_failure = os.time()
 end
 
--- Mark agent-manager as available
+-- Mark warden as available
 function mark_cp_success()
   cp_available = true
 end
@@ -123,7 +123,7 @@ function match_domain_wildcard(domain, tbl)
 end
 
 -- =======================================================================
--- Unified Domain Policy (talks to local agent-manager)
+-- Unified Domain Policy (talks to local warden)
 -- =======================================================================
 
 function get_domain_policy(request_handle, domain)
@@ -137,14 +137,14 @@ function get_domain_policy(request_handle, domain)
 
   local policy = nil
 
-  -- Query agent-manager (local, no auth needed)
+  -- Query warden (local, no auth needed)
   if should_contact_cp() then
     local headers, body = request_handle:httpCall(
       "control_plane_api",
       {
         [":method"] = "GET",
         [":path"] = "/api/v1/domain-policies/for-domain?domain=" .. url_encode(host_clean),
-        [":authority"] = "agent-manager"
+        [":authority"] = "warden"
       },
       "",
       5000,
@@ -159,7 +159,7 @@ function get_domain_policy(request_handle, domain)
     end
   end
 
-  -- If agent-manager is unreachable, create a minimal deny policy
+  -- If warden is unreachable, create a minimal deny policy
   if not policy then
     policy = {
       matched = false,
@@ -316,7 +316,7 @@ function envoy_on_request(request_handle)
     end
   end
 
-  -- Get unified domain policy (single call to agent-manager)
+  -- Get unified domain policy (single call to warden)
   local policy = get_domain_policy(request_handle, host_clean)
   local real_domain = host_clean
   if policy and policy.target_domain then

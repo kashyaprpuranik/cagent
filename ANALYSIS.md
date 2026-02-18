@@ -33,11 +33,11 @@ The agent user has unrestricted passwordless sudo. While the container is networ
 
 **Recommendation:** Remove sudo entirely or restrict it to specific commands needed for the agent's operation (e.g., `apt-get install`). At minimum, disable `sudo` in the `standard` (production) profile.
 
-### 1.2 CRITICAL: No Authentication on Agent Manager API
+### 1.2 CRITICAL: No Authentication on Warden API
 
-**File:** `services/agent_manager/main.py:1047-1053`
+**File:** `services/warden/main.py:1047-1053`
 
-The agent-manager API has no authentication. Any service on `infra-net` can:
+The warden API has no authentication. Any service on `infra-net` can:
 - Modify `cagent.yaml` via `PUT /api/config`
 - Restart/stop agent containers via `POST /api/containers/{name}`
 - Access the WebSocket terminal via `/api/terminal/{name}`
@@ -46,7 +46,7 @@ The agent-manager API has no authentication. Any service on `infra-net` can:
 
 The CORS middleware only limits browser-based access from specific origins, but API calls from within the Docker network are unrestricted.
 
-**Recommendation:** Add API key or mTLS authentication for the agent-manager API. At minimum, separate internal-only endpoints (domain policy for Lua filter) from admin endpoints.
+**Recommendation:** Add API key or mTLS authentication for the warden API. At minimum, separate internal-only endpoints (domain policy for Lua filter) from admin endpoints.
 
 ### 1.3 HIGH: Credential Leakage via Access Logs
 
@@ -64,13 +64,13 @@ After credential injection, the injected credential header (e.g., `Authorization
 - /var/run/docker.sock:/var/run/docker.sock:ro
 ```
 
-The Docker socket is mounted into `agent-manager` and `log-shipper`. Even read-only, the Docker socket provides broad access to inspect containers, read environment variables (which may contain secrets), and view logs. With the lack of API auth on agent-manager, this becomes an amplified risk.
+The Docker socket is mounted into `warden` and `log-shipper`. Even read-only, the Docker socket provides broad access to inspect containers, read environment variables (which may contain secrets), and view logs. With the lack of API auth on warden, this becomes an amplified risk.
 
-**Recommendation:** Consider using a Docker socket proxy (like [Tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)) that limits allowed API calls to only what agent-manager needs.
+**Recommendation:** Consider using a Docker socket proxy (like [Tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)) that limits allowed API calls to only what warden needs.
 
 ### 1.5 HIGH: Config Update Endpoint Lacks Input Validation
 
-**File:** `services/agent_manager/routers/config.py:67-84`
+**File:** `services/warden/routers/config.py:67-84`
 
 The `PUT /api/config/raw` endpoint accepts arbitrary YAML content and writes it directly to `cagent.yaml`. While it validates YAML syntax, it does not validate the schema or content. An attacker could:
 - Inject malicious domain entries
@@ -117,7 +117,7 @@ Using `v1.28-latest` means any patch update within v1.28 is automatically pulled
 
 ### 1.9 MEDIUM: WebSocket Terminal Has No Rate Limiting or Session Limits
 
-**File:** `services/agent_manager/routers/terminal.py`
+**File:** `services/warden/routers/terminal.py`
 
 The WebSocket terminal endpoint has no:
 - Rate limiting on connection attempts
@@ -141,7 +141,7 @@ The `read_only` enforcement blocks `POST`, `PUT`, and `DELETE` but not `PATCH`. 
 
 ### 2.1 HIGH: Config Regeneration Can Leave Envoy in Inconsistent State
 
-**File:** `services/agent_manager/main.py:610-622`
+**File:** `services/warden/main.py:610-622`
 
 ```python
 if envoy_changed or lua_changed:
@@ -158,7 +158,7 @@ If the Envoy config write succeeds but the Lua filter write fails, Envoy restart
 
 ### 2.2 HIGH: Container Recreation Has No Rollback
 
-**File:** `services/agent_manager/main.py:154-299`
+**File:** `services/warden/main.py:154-299`
 
 `recreate_container_with_seccomp()` stops and removes the old container before creating the new one. If the new container creation fails (e.g., image not found, network error), the agent is permanently destroyed with no recovery path.
 
@@ -166,19 +166,19 @@ If the Envoy config write succeeds but the Lua filter write fails, Envoy restart
 
 ### 2.3 HIGH: `docker_client` is a Module-Level Singleton Without Reconnection
 
-**File:** `services/agent_manager/constants.py:9`
+**File:** `services/warden/constants.py:9`
 
 ```python
 docker_client = docker.from_env()
 ```
 
-The Docker client is created once at module import time. If the Docker daemon restarts or the socket becomes unavailable, all subsequent Docker operations will fail permanently until the agent-manager is restarted.
+The Docker client is created once at module import time. If the Docker daemon restarts or the socket becomes unavailable, all subsequent Docker operations will fail permanently until the warden is restarted.
 
 **Recommendation:** Implement a lazy Docker client with automatic reconnection, or wrap Docker operations in a retry decorator that recreates the client on connection failure.
 
 ### 2.4 MEDIUM: `MANAGED_CONTAINERS` is Computed Once at Import Time
 
-**File:** `services/agent_manager/constants.py:114`
+**File:** `services/warden/constants.py:114`
 
 ```python
 MANAGED_CONTAINERS = get_managed_containers()
@@ -190,7 +190,7 @@ This is evaluated at import time and never refreshed. If containers are added/re
 
 ### 2.5 MEDIUM: Main Loop Catches All Exceptions Silently
 
-**File:** `services/agent_manager/main.py:1020-1021`
+**File:** `services/warden/main.py:1020-1021`
 
 ```python
 except Exception as e:
@@ -203,7 +203,7 @@ The main loop catches all exceptions and continues. While this prevents the loop
 
 ### 2.6 MEDIUM: No Graceful Shutdown for Background Thread
 
-**File:** `services/agent_manager/main.py:1034`
+**File:** `services/warden/main.py:1034`
 
 ```python
 loop_thread = threading.Thread(target=main_loop, daemon=True)
@@ -257,7 +257,7 @@ local now = os.time()
 
 ### 3.3 MEDIUM: Wildcard Domain Matching Inconsistency Between CoreDNS and Envoy
 
-**File:** `services/agent_manager/config_generator.py:116-120`
+**File:** `services/warden/config_generator.py:116-120`
 
 For wildcard domains like `*.github.com`, CoreDNS only gets the base domain `github.com` added. This means `sub.github.com` won't resolve via DNS but would be allowed by the Envoy Lua filter's wildcard matching logic. The DNS layer and proxy layer are inconsistent.
 
@@ -265,7 +265,7 @@ For wildcard domains like `*.github.com`, CoreDNS only gets the base domain `git
 
 ### 3.4 MEDIUM: `_stable_hash` Can Produce False Negatives
 
-**File:** `services/agent_manager/main.py:557-563`
+**File:** `services/warden/main.py:557-563`
 
 ```python
 def _stable_hash(content: str) -> str:
@@ -282,7 +282,7 @@ This strips any line containing "Generated:" anywhere, not just the header comme
 
 ### 3.5 MEDIUM: `config/reload` Endpoint Doesn't Regenerate Configs
 
-**File:** `services/agent_manager/routers/config.py:87-106`
+**File:** `services/warden/routers/config.py:87-106`
 
 The `/api/config/reload` endpoint restarts CoreDNS and Envoy but does not actually regenerate configs from `cagent.yaml`. If a user modifies the config via the API and then triggers a reload, the containers restart with potentially stale generated configs.
 
@@ -321,7 +321,7 @@ As noted in 2.4, but this also means the `GET /api/containers` endpoint returns 
 
 ### 4.1 HIGH: `container.stats(stream=False)` Blocks Per Container
 
-**Files:** `services/agent_manager/main.py:427`, `services/agent_manager/routers/containers.py:29`
+**Files:** `services/warden/main.py:427`, `services/warden/routers/containers.py:29`
 
 `container.stats(stream=False)` is a blocking Docker API call that waits for a full stats cycle (~1-2 seconds per container). With multiple agent containers:
 - The heartbeat loop with 20+ containers will take 20-40+ seconds per cycle
@@ -331,12 +331,12 @@ As noted in 2.4, but this also means the `GET /api/containers` endpoint returns 
 
 ### 4.2 MEDIUM: Single-Instance Architecture with No HA Support
 
-The agent-manager, dns-filter, and http-proxy are all single-instance with `container_name` set (preventing scaling). For production deployments with multiple agents, these become single points of failure.
+The warden, dns-filter, and http-proxy are all single-instance with `container_name` set (preventing scaling). For production deployments with multiple agents, these become single points of failure.
 
 **Recommendation:** Document (or implement) HA patterns:
 - DNS: Run multiple CoreDNS replicas behind a virtual IP
 - Proxy: Run multiple Envoy instances with shared config
-- Agent-manager: Support leader election or stateless API mode
+- Warden: Support leader election or stateless API mode
 
 ### 4.3 MEDIUM: Domain Policy Cache Has No Size Limit
 
@@ -352,7 +352,7 @@ The Lua domain policy cache grows unboundedly. A malicious agent could request t
 
 ### 4.4 LOW: Log Parsing in Analytics Is O(N) Over All Logs
 
-**File:** `services/agent_manager/routers/analytics.py:21-32`
+**File:** `services/warden/routers/analytics.py:21-32`
 
 Every analytics API call reads the full Docker log output for the time window and parses it line by line in Python. For high-traffic deployments, this will be slow and memory-intensive.
 
@@ -364,7 +364,7 @@ Every analytics API call reads the full Docker log output for the time window an
 
 ### 5.1 HIGH: No Structured Metrics Endpoint
 
-The agent-manager has no Prometheus/metrics endpoint. Key metrics that should be exposed:
+The warden has no Prometheus/metrics endpoint. Key metrics that should be exposed:
 - Heartbeat success/failure rate
 - Config sync latency and status
 - Container discovery count
@@ -412,8 +412,8 @@ In standalone mode, there's no aggregated health view. The admin UI provides ind
 ### 6.1 MEDIUM: Duplicated Container Stats Logic
 
 Container stats collection is duplicated between:
-- `services/agent_manager/main.py:425-445` (`get_container_status`)
-- `services/agent_manager/routers/containers.py:28-44` (`get_container_info`)
+- `services/warden/main.py:425-445` (`get_container_status`)
+- `services/warden/routers/containers.py:28-44` (`get_container_info`)
 
 Both implement the same CPU/memory calculation independently.
 
@@ -423,8 +423,8 @@ Both implement the same CPU/memory calculation independently.
 
 Wildcard domain matching is implemented independently in three places:
 - `configs/envoy/filter.lua:104-123` (Lua)
-- `services/agent_manager/routers/domain_policy.py:87-96` (Python)
-- `services/agent_manager/config_generator.py:116-120` (Python, for CoreDNS)
+- `services/warden/routers/domain_policy.py:87-96` (Python)
+- `services/warden/config_generator.py:116-120` (Python, for CoreDNS)
 
 Each has slightly different semantics, leading to inconsistencies (see issue 3.3).
 
@@ -441,7 +441,7 @@ The API returns raw dicts without Pydantic response models. This means:
 
 ### 6.4 LOW: `MD5` Used for Config Hashing
 
-**File:** `services/agent_manager/config_generator.py:36`, `main.py:563`
+**File:** `services/warden/config_generator.py:36`, `main.py:563`
 
 MD5 is used for config change detection. While this isn't a security context, using a deprecated hash algorithm is a code smell and may trigger security scanners.
 
@@ -449,7 +449,7 @@ MD5 is used for config change detection. While this isn't a security context, us
 
 ### 6.5 LOW: Sync HTTP Calls (`requests`) in Async FastAPI Endpoints
 
-**File:** `services/agent_manager/routers/domain_policy.py:171`
+**File:** `services/warden/routers/domain_policy.py:171`
 
 The domain policy endpoint uses synchronous `requests.get()` inside an async endpoint. This blocks the event loop and can cause request queuing under load.
 
@@ -467,7 +467,7 @@ If any React component throws during rendering, the entire app crashes. There ar
 
 ### 7.2 MEDIUM: No CSRF Protection
 
-The frontend makes API calls to the agent-manager without CSRF tokens. Combined with the permissive CORS policy (which allows credentials from localhost origins), this enables CSRF attacks if a user visits a malicious page while the admin UI is running.
+The frontend makes API calls to the warden without CSRF tokens. Combined with the permissive CORS policy (which allows credentials from localhost origins), this enables CSRF attacks if a user visits a malicious page while the admin UI is running.
 
 **Recommendation:** Add CSRF token middleware to FastAPI, or switch to cookie-less auth (API key in header).
 
@@ -543,7 +543,7 @@ The React frontend has no unit or integration tests. Only TypeScript compilation
 
 ### 9.2 MEDIUM: No Backup Before Config Modification
 
-**File:** `services/agent_manager/routers/config.py:59-61`
+**File:** `services/warden/routers/config.py:59-61`
 
 Config updates via the API overwrite `cagent.yaml` directly with no backup. If a bad config is written, the only recovery is to manually restore from git.
 
@@ -571,7 +571,7 @@ The Vector API is bound to all interfaces. While it's only accessible from infra
 
 ### 9.5 LOW: No TLS Between Internal Services
 
-All internal communication (agent-manager <-> Envoy, agent-manager <-> control plane within Docker network) is unencrypted HTTP. While Docker networks provide some isolation, a compromised container on infra-net could sniff traffic.
+All internal communication (warden <-> Envoy, warden <-> control plane within Docker network) is unencrypted HTTP. While Docker networks provide some isolation, a compromised container on infra-net could sniff traffic.
 
 **Recommendation:** Enable mTLS between internal services for defense in depth, especially for credential-bearing traffic.
 
@@ -638,7 +638,7 @@ Add structured audit logs for all administrative actions:
 
 ### 10.12 Envoy Hot Restart Instead of Full Restart
 
-**File:** `services/agent_manager/main.py:538-550`
+**File:** `services/warden/main.py:538-550`
 
 Currently, config changes trigger a full Envoy container restart. Envoy supports hot restart which can apply config changes without dropping connections.
 
