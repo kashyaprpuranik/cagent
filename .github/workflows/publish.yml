@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        variant: [lean, dev, ml]
+        variant: [lean, dev, ml, ai]
     steps:
       - uses: actions/checkout@v4
 

@@ -6,11 +6,13 @@
 #   lean - Essentials only (~1.5GB)
 #   dev  - Essentials + Go + Rust + Cloud CLIs (~3GB)
 #   ml   - Dev + PyTorch + ML libs (~6GB)
+#   ai   - Essentials + AI coding CLIs (~2.5GB)
 #
 # Usage:
 #   docker build -f cell.Dockerfile --build-arg VARIANT=lean -t cell:lean .
 #   docker build -f cell.Dockerfile --build-arg VARIANT=dev -t cell:dev .
 #   docker build -f cell.Dockerfile --build-arg VARIANT=ml -t cell:ml .
+#   docker build -f cell.Dockerfile --build-arg VARIANT=ai -t cell:ai .
 #
 # =============================================================================
 
@@ -78,7 +80,7 @@ ENV LC_ALL=en_US.UTF-8
 # =============================================================================
 # Node.js (all variants)
 # =============================================================================
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && npm install -g yarn \
     && rm -rf /var/lib/apt/lists/*
@@ -135,6 +137,25 @@ RUN if [ "$VARIANT" = "ml" ]; then \
         transformers \
         datasets \
         accelerate \
+    ; fi
+
+# =============================================================================
+# AI variant: AI coding CLIs (Claude Code, Gemini, Codex, OpenClaw, Aider, Copilot)
+# =============================================================================
+RUN if [ "$VARIANT" = "ai" ]; then \
+    # Claude Code (native binary)
+    curl -fsSL https://claude.ai/install.sh | bash \
+    && mv /root/.local/bin/claude /usr/local/bin/claude \
+    # Gemini CLI
+    && npm install -g @google/gemini-cli \
+    # OpenAI Codex CLI
+    && npm install -g @openai/codex \
+    # OpenClaw
+    && npm install -g openclaw@latest \
+    # GitHub Copilot CLI
+    && npm install -g @github/copilot \
+    # Aider (AI pair programming)
+    && pip3 install --no-cache-dir aider-chat \
     ; fi
 
 # =============================================================================
