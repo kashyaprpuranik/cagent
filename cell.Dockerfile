@@ -6,7 +6,7 @@
 #   lean - Essentials only (~1.5GB)
 #   dev  - Essentials + Go + Rust + Cloud CLIs (~3GB)
 #   ml   - Dev + PyTorch + ML libs (~6GB)
-#   ai   - Essentials + AI coding CLIs (~2.5GB)
+#   ai   - Essentials + AI coding CLIs (~2GB)
 #
 # Usage:
 #   docker build -f cell.Dockerfile --build-arg VARIANT=lean -t cell:lean .
@@ -20,6 +20,7 @@ FROM ubuntu:22.04
 
 ARG VARIANT=lean
 ARG DEBIAN_FRONTEND=noninteractive
+ENV VARIANT=${VARIANT}
 
 # Labels
 LABEL maintainer="AI Devbox"
@@ -140,13 +141,11 @@ RUN if [ "$VARIANT" = "ml" ]; then \
     ; fi
 
 # =============================================================================
-# AI variant: AI coding CLIs (Claude Code, Gemini, Codex, OpenClaw, Aider, Copilot)
+# AI variant: AI coding CLIs (Claude Code, Codex, OpenClaw, Aider, Copilot)
 # =============================================================================
 RUN if [ "$VARIANT" = "ai" ]; then \
     # Claude Code
     npm install -g @anthropic-ai/claude-code \
-    # Gemini CLI
-    && npm install -g @google/gemini-cli \
     # OpenAI Codex CLI
     && npm install -g @openai/codex \
     # OpenClaw
