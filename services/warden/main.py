@@ -3,7 +3,8 @@ Warden - Unified data plane service.
 
 Combines the polling daemon (heartbeat, config sync, container management)
 with the local admin HTTP API (config CRUD, container control, WebSocket
-terminal, log streaming, analytics, domain policy for Lua).
+terminal, log streaming, analytics, domain policy, ext_authz credential
+injection).
 
 Runs as a FastAPI server with the polling loop in a background thread.
 """
@@ -43,7 +44,6 @@ from constants import (
     CAGENT_CONFIG_PATH,
     COREDNS_COREFILE_PATH,
     ENVOY_CONFIG_PATH,
-    ENVOY_LUA_PATH,
     SECCOMP_PROFILES_DIR,
     VALID_SECCOMP_PROFILES,
     CONFIG_SYNC_INTERVAL,
@@ -51,7 +51,11 @@ from constants import (
     COREDNS_CONTAINER_NAME,
     ENVOY_CONTAINER_NAME,
     BETA_FEATURES,
+    DATA_PLANE_DIR,
 )
+
+# Path to .env file for docker-compose resource overrides
+ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
 
 # Configure logging
 logging.basicConfig(
@@ -572,60 +576,56 @@ class _ConfigState:
     def __init__(self):
         self.envoy_hash: Optional[str] = None
         self.corefile_hash: Optional[str] = None
-        self.lua_hash: Optional[str] = None
 
 _config_state = _ConfigState()
 
 
 def regenerate_configs(additional_domains: list = None) -> bool:
-    """Regenerate CoreDNS, Envoy, and Lua filter configs from cagent.yaml.
+    """Regenerate CoreDNS and Envoy configs from cagent.yaml.
 
     Args:
-        additional_domains: Extra domains to merge (e.g., from control plane sync)
+        additional_domains: Extra domain entries to merge (e.g., from control plane sync).
+            Each entry is a dict with at least 'domain' key, matching cagent.yaml format.
 
     Returns:
         True if configs were regenerated, False otherwise.
     """
     try:
         config_changed = config_generator.load_config()
-
-        if not config_changed and not additional_domains:
-            logger.debug("Config unchanged, skipping regeneration")
-            return False
+        config_generator.set_additional_domains(additional_domains or [])
 
         # Generate configs and compute stable hashes (ignoring timestamps)
         corefile_content = config_generator.generate_corefile()
         envoy_config = config_generator.generate_envoy_config()
         envoy_yaml = yaml.dump(envoy_config, default_flow_style=False, sort_keys=False)
-        lua_content = config_generator.generate_lua_filter()
 
         corefile_hash = _stable_hash(corefile_content)
         envoy_hash = _stable_hash(envoy_yaml)
-        lua_hash = _stable_hash(lua_content)
 
         corefile_changed = corefile_hash != _config_state.corefile_hash
         envoy_changed = envoy_hash != _config_state.envoy_hash
-        lua_changed = lua_hash != _config_state.lua_hash
 
         if corefile_changed:
             config_generator.write_corefile(COREDNS_COREFILE_PATH)
             restart_coredns()
             _config_state.corefile_hash = corefile_hash
 
-        if envoy_changed or lua_changed:
-            if envoy_changed:
-                config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
-            if lua_changed:
-                config_generator.write_lua_filter(ENVOY_LUA_PATH)
+        if envoy_changed:
+            config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
             reload_envoy()
             _config_state.envoy_hash = envoy_hash
-            _config_state.lua_hash = lua_hash
 
-        if corefile_changed or envoy_changed or lua_changed:
+        # Always update resource env vars when config changes
+        if config_changed:
+            config_generator.write_resource_env(ENV_FILE_PATH)
+
+        if corefile_changed or envoy_changed:
             logger.info("Regenerated configs from cagent.yaml")
-            # Invalidate domain policy cache when config changes
+            # Invalidate caches when config changes
             from routers.domain_policy import invalidate_cache
+            from routers.ext_authz import invalidate_cache as invalidate_ext_authz_cache
             invalidate_cache()
+            invalidate_ext_authz_cache()
             return True
         else:
             logger.debug("Generated configs unchanged, skipping restart")
@@ -634,6 +634,23 @@ def regenerate_configs(additional_domains: list = None) -> bool:
     except Exception as e:
         logger.error(f"Error regenerating configs: {e}")
         return False
+
+
+def _cp_policy_to_domain_entry(policy: dict) -> dict:
+    """Convert a CP domain policy response to a cagent.yaml domain entry."""
+    entry = {"domain": policy["domain"]}
+    if policy.get("allowed_paths"):
+        entry["allowed_paths"] = policy["allowed_paths"]
+    if policy.get("requests_per_minute") is not None:
+        entry.setdefault("rate_limit", {})["requests_per_minute"] = policy["requests_per_minute"]
+    if policy.get("burst_size") is not None:
+        entry.setdefault("rate_limit", {})["burst_size"] = policy["burst_size"]
+    if policy.get("timeout"):
+        entry["timeout"] = policy["timeout"]
+    if policy.get("read_only"):
+        entry["read_only"] = True
+    # Note: credentials are NOT included — ext_authz handles them dynamically
+    return entry
 
 
 def sync_config() -> bool:
@@ -654,11 +671,11 @@ def sync_config() -> bool:
         return regenerate_configs()
 
     try:
-        # Fetch domain policies from control plane
+        # Fetch domain policies from control plane (agent tokens are profile-scoped)
         response = requests.get(
             f"{CONTROL_PLANE_URL}/api/v1/domain-policies",
             headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
-            timeout=10
+            timeout=10,
         )
 
         if response.status_code != 200:
@@ -668,12 +685,12 @@ def sync_config() -> bool:
         # Parse domain policies (paginated response: {items: [...], total: N})
         data = response.json()
         policies = data.get("items", data) if isinstance(data, dict) else data
-        cp_domains = [p["domain"] for p in policies if p.get("enabled", True)]
+        cp_entries = [_cp_policy_to_domain_entry(p) for p in policies if p.get("enabled", True)]
 
-        logger.info(f"Fetched {len(cp_domains)} domain policies from control plane")
+        logger.info(f"Fetched {len(cp_entries)} domain policies from control plane")
 
         # Regenerate configs (cagent.yaml is still the primary source)
-        return regenerate_configs(additional_domains=cp_domains)
+        return regenerate_configs(additional_domains=cp_entries)
 
     except requests.exceptions.RequestException as e:
         logger.warning(f"Could not reach control plane: {e}, using cagent.yaml")
@@ -951,7 +968,6 @@ def main_loop():
     logger.info(f"  Config file: {CAGENT_CONFIG_PATH}")
     logger.info(f"  CoreDNS config: {COREDNS_COREFILE_PATH}")
     logger.info(f"  Envoy config: {ENVOY_CONFIG_PATH}")
-    logger.info(f"  Envoy Lua filter: {ENVOY_LUA_PATH}")
     logger.info(f"  Cell discovery label: {CELL_LABEL}")
     logger.info(f"  Config sync interval: {CONFIG_SYNC_INTERVAL}s")
 
@@ -972,7 +988,7 @@ def main_loop():
     config_generator.load_config()
     config_generator.write_corefile(COREDNS_COREFILE_PATH)
     config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
-    config_generator.write_lua_filter(ENVOY_LUA_PATH)
+    config_generator.write_resource_env(ENV_FILE_PATH)
     restart_coredns()
     reload_envoy()
     # Snapshot current state so regenerate_configs() can detect changes
@@ -980,7 +996,6 @@ def main_loop():
     _config_state.envoy_hash = _stable_hash(
         yaml.dump(config_generator.generate_envoy_config(), default_flow_style=False, sort_keys=False)
     )
-    _config_state.lua_hash = _stable_hash(config_generator.generate_lua_filter())
     logger.info("Initial config generation complete")
 
     # Use wall-clock monotonic time for config sync scheduling so that
@@ -1055,6 +1070,7 @@ app.add_middleware(
 # Register routers
 from routers import health, config, containers, logs, terminal, analytics, domain_policy
 from routers import ssh_tunnel
+from routers import ext_authz
 
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(config.router, prefix="/api", tags=["config"])
@@ -1063,6 +1079,7 @@ app.include_router(logs.router, prefix="/api", tags=["logs"])
 app.include_router(terminal.router, prefix="/api", tags=["terminal"])
 app.include_router(analytics.router, prefix="/api", tags=["analytics"])
 app.include_router(domain_policy.router, tags=["domain-policy"])
+app.include_router(ext_authz.router, tags=["ext-authz"])
 app.include_router(ssh_tunnel.router, prefix="/api", tags=["ssh-tunnel"])
 # Always register the tunnel-config proxy (used by FRP entrypoint)
 app.include_router(ssh_tunnel.proxy_router, tags=["tunnel-proxy"])

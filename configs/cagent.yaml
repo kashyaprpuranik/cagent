@@ -33,11 +33,12 @@ security:
   seccomp_profile: standard  # standard (dev), hardened (prod). permissive exists but disables sandboxing — debug only
 
 # Container resource limits (standalone mode)
+# Warden writes these to .env → docker-compose reads them via ${VAR:-default}
 # Omit or set to null to use docker-compose defaults
-# resources:
-#   cpu_limit: 2.0            # Number of CPUs (e.g., 0.5, 1.0, 2.0)
-#   memory_limit_mb: 4096     # Memory limit in MB
-#   pids_limit: 256           # Max number of processes
+resources:
+  cpu_limit: 2.0            # Number of CPUs (e.g., 0.5, 1.0, 2.0)
+  memory_limit_mb: 4096     # Memory limit in MB
+  pids_limit: 256           # Max number of processes
 
 # =============================================================================
 # Domain Allowlist
@@ -118,6 +119,173 @@ domains:
     read_only: true
   - domain: registry.yarnpkg.com
     read_only: true
+
+  # -------------------------------------------------------------------------
+  # Additional LLM Providers
+  # -------------------------------------------------------------------------
+  - domain: openrouter.ai
+    timeout: 120s
+    rate_limit:
+      requests_per_minute: 60
+      burst_size: 10
+    # credential:
+    #   header: Authorization
+    #   format: "Bearer {value}"
+    #   env: OPENROUTER_API_KEY
+
+  - domain: api.perplexity.ai
+    timeout: 120s
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 5
+    # credential:
+    #   header: Authorization
+    #   format: "Bearer {value}"
+    #   env: PERPLEXITY_API_KEY
+
+  - domain: api.x.ai
+    timeout: 120s
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 5
+
+  - domain: api.minimax.io
+    timeout: 120s
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 5
+
+  - domain: chatgpt.com
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 5
+
+  - domain: claude.ai
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 5
+
+  # -------------------------------------------------------------------------
+  # Messaging Channels
+  # -------------------------------------------------------------------------
+  - domain: api.telegram.org
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  - domain: discord.com
+    rate_limit:
+      requests_per_minute: 60
+      burst_size: 15
+
+  - domain: gateway.discord.gg
+
+  - domain: cdn.discordapp.com
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  - domain: api.slack.com
+    rate_limit:
+      requests_per_minute: 60
+      burst_size: 15
+
+  - domain: wss-primary.whatsapp.net
+
+  - domain: mmg.whatsapp.net
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  - domain: web.whatsapp.com
+
+  - domain: chat.googleapis.com
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  - domain: graph.microsoft.com
+    rate_limit:
+      requests_per_minute: 60
+      burst_size: 15
+
+  - domain: api.botframework.com
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  - domain: open.feishu.cn
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  - domain: bot-api.zaloplatforms.com
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  # -------------------------------------------------------------------------
+  # Tools & Media
+  # -------------------------------------------------------------------------
+  - domain: api.search.brave.com
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 5
+    # credential:
+    #   header: X-Subscription-Token
+    #   format: "{value}"
+    #   env: BRAVE_API_KEY
+
+  - domain: api.firecrawl.dev
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 3
+    # credential:
+    #   header: Authorization
+    #   format: "Bearer {value}"
+    #   env: FIRECRAWL_API_KEY
+
+  - domain: api.elevenlabs.io
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 3
+    # credential:
+    #   header: xi-api-key
+    #   format: "{value}"
+    #   env: ELEVENLABS_API_KEY
+
+  - domain: api.deepgram.com
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 3
+    # credential:
+    #   header: Authorization
+    #   format: "Token {value}"
+    #   env: DEEPGRAM_API_KEY
+
+  - domain: www.youtube.com
+    read_only: true
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 3
+
+  # -------------------------------------------------------------------------
+  # OAuth & Auth
+  # -------------------------------------------------------------------------
+  - domain: oauth2.googleapis.com
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 5
+
+  - domain: www.googleapis.com
+    rate_limit:
+      requests_per_minute: 30
+      burst_size: 10
+
+  - domain: login.microsoftonline.com
+    rate_limit:
+      requests_per_minute: 10
+      burst_size: 5
 
 # =============================================================================
 # Email Accounts (opt-in with --profile email)

@@ -46,15 +46,15 @@ The warden API has no authentication. Any service on `infra-net` can:
 
 The CORS middleware only limits browser-based access from specific origins, but API calls from within the Docker network are unrestricted.
 
-**Recommendation:** Add API key or mTLS authentication for the warden API. At minimum, separate internal-only endpoints (domain policy for Lua filter) from admin endpoints.
+**Recommendation:** Add API key or mTLS authentication for the warden API. At minimum, separate internal-only endpoints (ext_authz, domain policy) from admin endpoints.
 
 ### 1.3 HIGH: Credential Leakage via Access Logs
 
-**File:** `configs/envoy/filter.lua:362-364`
+**File:** `services/warden/routers/ext_authz.py`
 
-After credential injection, the injected credential header (e.g., `Authorization: Bearer sk-...`) flows through Envoy and is potentially captured in access logs. While the access log config doesn't explicitly log request headers, Vector's `parse_docker` transform (`configs/vector/vector.yaml:54`) captures the raw message which includes the JSON access log. If a debug-level log config is enabled, credentials could leak to log files, S3, or Elasticsearch.
+After credential injection via the ext_authz endpoint, the injected credential header (e.g., `Authorization: Bearer sk-...`) flows through Envoy and is potentially captured in access logs. While the access log config doesn't explicitly log request headers, Vector's `parse_docker` transform (`configs/vector/vector.yaml:54`) captures the raw message which includes the JSON access log. If a debug-level log config is enabled, credentials could leak to log files, S3, or Elasticsearch.
 
-**Recommendation:** Add a response filter that strips credential-related headers before logging. Alternatively, redact the credential value in the Lua filter after injection by setting a flag rather than the full header value in tracking headers.
+**Recommendation:** Add an Envoy response filter that strips credential-related headers before logging. Alternatively, configure the access log format to exclude sensitive headers, or add a Vector transform to redact credential values.
 
 ### 1.4 HIGH: Docker Socket Mounted Read-Only but Still Powerful
 
@@ -79,23 +79,7 @@ The `PUT /api/config/raw` endpoint accepts arbitrary YAML content and writes it 
 
 **Recommendation:** Add schema validation for the config content. Validate domain entries, credential references, and security settings against expected schemas.
 
-### 1.6 MEDIUM: Lua Filter JSON Parsing via Regex is Fragile
-
-**File:** `configs/envoy/filter.lua:183-224`
-
-The `parse_domain_policy_response` function uses regex-based JSON parsing:
-```lua
-local policy = {
-    matched = string.match(body, '"matched"%s*:%s*true') ~= nil,
-    ...
-}
-```
-
-This is fragile and potentially exploitable. A crafted JSON response could include `"matched": true` in a string value, causing the parser to incorrectly match. Envoy's Lua runtime doesn't include a JSON parser by default, but this approach is error-prone.
-
-**Recommendation:** Use a proper JSON parser (e.g., embed `cjson` or `dkjson` in the Envoy container) or restructure the protocol to use simpler, unambiguous response formats (e.g., header-based responses).
-
-### 1.7 MEDIUM: Tunnel Client Secret Key Written to `/tmp`
+### 1.6 MEDIUM: Tunnel Client Secret Key Written to `/tmp`
 
 **File:** `configs/frpc/entrypoint.sh:75-97`
 
@@ -103,7 +87,7 @@ The FRP configuration including `secretKey` and `auth.token` is written to `/tmp
 
 **Recommendation:** Write the config to a tmpfs mount or use environment variables directly. Set restrictive file permissions (600) on the config file.
 
-### 1.8 MEDIUM: Envoy Image Uses `latest` Tag
+### 1.7 MEDIUM: Envoy Image Uses `latest` Tag
 
 **File:** `docker-compose.yml:271`
 
@@ -115,7 +99,7 @@ Using `v1.28-latest` means any patch update within v1.28 is automatically pulled
 
 **Recommendation:** Pin all images to specific versions (e.g., `envoyproxy/envoy:v1.28.2`, `coredns/coredns:1.11.1`).
 
-### 1.9 MEDIUM: WebSocket Terminal Has No Rate Limiting or Session Limits
+### 1.8 MEDIUM: WebSocket Terminal Has No Rate Limiting or Session Limits
 
 **File:** `services/warden/routers/terminal.py`
 
@@ -127,7 +111,7 @@ The WebSocket terminal endpoint has no:
 
 **Recommendation:** Add connection rate limiting, max concurrent sessions, and audit logging of terminal access.
 
-### 1.10 LOW: Read-Only Bypass on DELETE Methods for PyPI/npm
+### 1.9 LOW: Read-Only Bypass on DELETE Methods for PyPI/npm
 
 **File:** `configs/envoy/envoy-enhanced.yaml:109-128` and `config_generator.py:214-225`
 
@@ -139,20 +123,11 @@ The `read_only` enforcement blocks `POST`, `PUT`, and `DELETE` but not `PATCH`. 
 
 ## 2. Reliability & Resilience Issues
 
-### 2.1 HIGH: Config Regeneration Can Leave Envoy in Inconsistent State
+### 2.1 MEDIUM: Config Regeneration Can Leave Envoy in Inconsistent State
 
-**File:** `services/warden/main.py:610-622`
+**File:** `services/warden/main.py`
 
-```python
-if envoy_changed or lua_changed:
-    if envoy_changed:
-        config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
-    if lua_changed:
-        config_generator.write_lua_filter(ENVOY_LUA_PATH)
-    reload_envoy()
-```
-
-If the Envoy config write succeeds but the Lua filter write fails, Envoy restarts with a new config but old Lua filter, potentially causing a mismatch. Similarly, if the Envoy restart itself fails, the new config is on disk but Envoy is running with the old config.
+Config regeneration writes the Envoy config and restarts Envoy. If the Envoy restart fails, the new config is on disk but Envoy is running with the old config.
 
 **Recommendation:** Write configs atomically (write to temp file, then rename). Validate the new config before restarting Envoy (e.g., `envoy --mode validate`). Implement rollback on failure.
 
@@ -227,43 +202,23 @@ If the SSH daemon crashes, the container remains running (due to `tail -f /dev/n
 
 ### 2.8 LOW: DNS Cache TTL Mismatch
 
-The CoreDNS cache TTL is set to 300s (from `cagent.yaml`), but the Lua filter domain policy cache is also 300s. If a domain is removed from the allowlist, it could remain resolvable in DNS for up to 300s and have valid policy cache for another 300s — a total of up to 10 minutes of stale access.
+The CoreDNS cache TTL is set to 300s (from `cagent.yaml`), and the ext_authz credential cache in warden (`services/warden/routers/ext_authz.py`) also uses a 300s TTL. If a domain is removed from the allowlist, it could remain resolvable in DNS for up to 300s and have valid credential cache for another 300s — a total of up to 10 minutes of stale access. (Note: warden invalidates the ext_authz cache on config regeneration, reducing the practical window.)
 
-**Recommendation:** Make the Lua filter cache TTL shorter (e.g., 60s) or implement a cache invalidation push mechanism.
+**Recommendation:** Make the ext_authz credential cache TTL shorter (e.g., 60s) or implement a cache invalidation push mechanism.
 
 ---
 
 ## 3. Logical / Correctness Issues
 
-### 3.1 HIGH: Rate Limiting is Per-Worker, Not Per-Proxy
+### 3.1 MEDIUM: Wildcard Domain Matching Inconsistency Between CoreDNS and Envoy
 
-**File:** `configs/envoy/filter.lua:262-293`
+**File:** `services/warden/config_generator.py`
 
-The token bucket rate limiter uses Lua script-level variables (`token_buckets`). In Envoy, Lua scripts run per worker thread, so each worker has its own independent rate limit state. With the default 2 worker threads, actual throughput is 2x the configured limit.
-
-**Recommendation:** Use Envoy's built-in rate limiting (via `envoy.filters.http.local_ratelimit` or an external rate limit service) instead of Lua-based rate limiting. Alternatively, divide the configured rate by the number of workers.
-
-### 3.2 HIGH: Rate Limiter Uses `os.time()` Which Has 1-Second Granularity
-
-**File:** `configs/envoy/filter.lua:265`
-
-```lua
-local now = os.time()
-```
-
-`os.time()` returns integer seconds. For a rate limit of 60 RPM (1 request/second), burst requests within the same second all see the same `elapsed` value of 0, meaning no token refill occurs. This makes the rate limiter overly aggressive for short bursts and under-protective for second-boundary bursts.
-
-**Recommendation:** Use `os.clock()` or Envoy's built-in timing facilities for sub-second precision.
-
-### 3.3 MEDIUM: Wildcard Domain Matching Inconsistency Between CoreDNS and Envoy
-
-**File:** `services/warden/config_generator.py:116-120`
-
-For wildcard domains like `*.github.com`, CoreDNS only gets the base domain `github.com` added. This means `sub.github.com` won't resolve via DNS but would be allowed by the Envoy Lua filter's wildcard matching logic. The DNS layer and proxy layer are inconsistent.
+For wildcard domains like `*.github.com`, CoreDNS only gets the base domain `github.com` added. This means `sub.github.com` won't resolve via DNS but would be allowed by Envoy's routing (virtual host domain matching supports wildcards like `*.github.com`). The DNS layer and proxy layer are inconsistent.
 
 **Recommendation:** For wildcard entries, add both the base domain and a catch-all `template` block in CoreDNS that matches subdomains.
 
-### 3.4 MEDIUM: `_stable_hash` Can Produce False Negatives
+### 3.2 MEDIUM: `_stable_hash` Can Produce False Negatives
 
 **File:** `services/warden/main.py:557-563`
 
@@ -280,7 +235,7 @@ This strips any line containing "Generated:" anywhere, not just the header comme
 
 **Recommendation:** Only strip the specific auto-generated header lines (e.g., lines starting with `# Generated:`).
 
-### 3.5 MEDIUM: `config/reload` Endpoint Doesn't Regenerate Configs
+### 3.3 MEDIUM: `config/reload` Endpoint Doesn't Regenerate Configs
 
 **File:** `services/warden/routers/config.py:87-106`
 
@@ -288,7 +243,7 @@ The `/api/config/reload` endpoint restarts CoreDNS and Envoy but does not actual
 
 **Recommendation:** Call `regenerate_configs()` from `main.py` before restarting the containers, or make `reload_config` trigger a full regeneration cycle.
 
-### 3.6 MEDIUM: E2E Echo Server Domain Leaked into Production Config
+### 3.4 MEDIUM: E2E Echo Server Domain Leaked into Production Config
 
 **File:** `configs/cagent.yaml:166-171`
 
@@ -305,13 +260,13 @@ The E2E test echo-server domain with credential configuration is present in the 
 
 **Recommendation:** Move the echo-server entry to a test-specific config overlay rather than the main config file.
 
-### 3.7 LOW: `cagent.yaml` Has Structural Issue
+### 3.5 LOW: `cagent.yaml` Has Structural Issue
 
 **File:** `configs/cagent.yaml:165-166`
 
 The echo-server entry appears after the email section comments but is still under the `domains` key. The indentation makes it unclear whether it's intended to be part of the domains list. If the YAML is re-parsed after programmatic modifications, this could break.
 
-### 3.8 LOW: Containers Router Uses Stale `MANAGED_CONTAINERS`
+### 3.6 LOW: Containers Router Uses Stale `MANAGED_CONTAINERS`
 
 As noted in 2.4, but this also means the `GET /api/containers` endpoint returns a fixed set of containers that doesn't reflect runtime changes.
 
@@ -338,17 +293,13 @@ The warden, dns-filter, and http-proxy are all single-instance with `container_n
 - Proxy: Run multiple Envoy instances with shared config
 - Warden: Support leader election or stateless API mode
 
-### 4.3 MEDIUM: Domain Policy Cache Has No Size Limit
+### 4.3 LOW: ext_authz Credential Cache Has No Size Limit
 
-**File:** `configs/envoy/filter.lua:12`
+**File:** `services/warden/routers/ext_authz.py`
 
-```lua
-local domain_policy_cache = {}
-```
+The ext_authz credential cache (`_credential_cache`) uses a Python dict with TTL-based expiry but no size limit. A malicious agent could trigger lookups for many unique domains, growing the cache unboundedly in warden's memory.
 
-The Lua domain policy cache grows unboundedly. A malicious agent could request thousands of unique domains, each cached for 5 minutes, consuming Envoy worker memory.
-
-**Recommendation:** Add an LRU eviction policy or a maximum cache size to the domain policy cache.
+**Recommendation:** Add an LRU eviction policy or a maximum cache size to the ext_authz credential cache.
 
 ### 4.4 LOW: Log Parsing in Analytics Is O(N) Over All Logs
 
@@ -389,7 +340,7 @@ There's no mechanism to alert on:
 
 Requests flowing through agent -> DNS -> Envoy -> upstream have no correlation ID. When diagnosing issues, there's no way to trace a single request across all layers.
 
-**Recommendation:** Generate a unique request ID in the Lua filter and propagate it through all log entries. Vector can then correlate logs across sources.
+**Recommendation:** Generate a unique request ID using Envoy's built-in `x-request-id` header generation (via `HttpConnectionManager` config) and propagate it through all log entries. The ext_authz endpoint can include it in its logs. Vector can then correlate logs across sources.
 
 ### 5.4 MEDIUM: gVisor Logs Only Collected When Auditing Profile Is Active
 
@@ -421,14 +372,14 @@ Both implement the same CPU/memory calculation independently.
 
 ### 6.2 MEDIUM: Duplicated Wildcard Domain Matching
 
-Wildcard domain matching is implemented independently in three places:
-- `configs/envoy/filter.lua:104-123` (Lua)
-- `services/warden/routers/domain_policy.py:87-96` (Python)
-- `services/warden/config_generator.py:116-120` (Python, for CoreDNS)
+Wildcard domain matching is implemented independently in multiple places:
+- `services/warden/routers/domain_policy.py` (Python)
+- `services/warden/routers/ext_authz.py` (Python)
+- `services/warden/config_generator.py` (Python, for CoreDNS)
 
-Each has slightly different semantics, leading to inconsistencies (see issue 3.3).
+Each has slightly different semantics, leading to inconsistencies (see issue 3.1).
 
-**Recommendation:** Centralize domain matching logic in a single Python function and use it consistently. The Lua implementation should mirror the authoritative Python logic.
+**Recommendation:** Centralize domain matching logic in a single shared Python function and use it consistently across all warden routers and the config generator.
 
 ### 6.3 MEDIUM: No Data Validation Models for API Responses
 
@@ -483,18 +434,7 @@ Domain names entered in the admin UI are sent directly to the API without client
 
 ## 8. Testing Gaps
 
-### 8.1 HIGH: No Tests for Lua Filter Logic
-
-The Lua filter is the most security-critical component (credential injection, rate limiting, DNS tunneling detection, path filtering) but has zero unit tests. All testing relies on E2E tests which are slow and don't cover edge cases.
-
-**Recommendation:** Add Lua unit tests (using `busted` or similar) for:
-- `detect_dns_tunneling` with boundary cases
-- `match_domain_wildcard` with edge cases
-- `parse_domain_policy_response` with malformed inputs
-- Rate limiter token bucket math
-- Path matching with edge cases
-
-### 8.2 HIGH: No Tests for Container Recreation / Seccomp Update
+### 8.1 HIGH: No Tests for Container Recreation / Seccomp Update
 
 The `recreate_container_with_seccomp` function is complex (299 lines of container management) with many failure modes but has no unit tests. Container recreation bugs could destroy running agents.
 
@@ -504,10 +444,9 @@ The `recreate_container_with_seccomp` function is complex (299 lines of containe
 - Failure during create (old container gone, new one fails)
 - Network reconnection failures
 
-### 8.3 MEDIUM: No Negative Security Tests
+### 8.2 MEDIUM: No Negative Security Tests
 
 There are no tests verifying that security controls actually block attacks:
-- DNS tunneling is blocked
 - Non-allowlisted domains are rejected
 - Rate limits are enforced
 - Credential injection doesn't leak to logs
@@ -516,13 +455,13 @@ There are no tests verifying that security controls actually block attacks:
 
 **Recommendation:** Add security-focused test suite covering bypass attempts.
 
-### 8.4 MEDIUM: E2E Tests Require Full Docker Environment
+### 8.3 MEDIUM: E2E Tests Require Full Docker Environment
 
 E2E tests cannot run in CI environments without Docker-in-Docker or a pre-provisioned Docker host. This limits test coverage in automated pipelines.
 
 **Recommendation:** Add a lightweight integration test tier using `testcontainers` that can run in standard CI. Mock the Docker socket for unit tests.
 
-### 8.5 LOW: No Frontend Tests
+### 8.4 LOW: No Frontend Tests
 
 The React frontend has no unit or integration tests. Only TypeScript compilation is checked.
 
@@ -651,10 +590,10 @@ Currently, config changes trigger a full Envoy container restart. Envoy supports
 | Priority | Count | Key Items |
 |----------|-------|-----------|
 | **CRITICAL** | 2 | Passwordless sudo in agent container, No API authentication |
-| **HIGH** | 10 | Credential leakage, inconsistent config state, rate limit bypass, no Lua tests, no container recreation tests |
-| **MEDIUM** | 18 | Stale container lists, sync HTTP in async endpoints, no metrics, no schema validation |
-| **LOW** | 10 | MD5 usage, frontend gaps, Vector API binding, missing multi-arch |
+| **HIGH** | 8 | Credential leakage, container recreation rollback, Docker client singleton, blocking stats, no metrics, no security alerting, no container recreation tests |
+| **MEDIUM** | 16 | Inconsistent config state, stale container lists, sync HTTP in async endpoints, wildcard domain mismatch, no schema validation |
+| **LOW** | 11 | MD5 usage, frontend gaps, Vector API binding, ext_authz cache unbounded, missing multi-arch |
 
 ---
 
-*Analysis performed on 2026-02-17 against the current state of the `main` branch.*
+*Analysis performed on 2026-02-17. Updated 2026-02-19 to reflect Lua filter removal (replaced with native Envoy ext_authz + local_ratelimit).*

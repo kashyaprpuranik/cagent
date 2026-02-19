@@ -1,6 +1,7 @@
 # =============================================================================
-# Envoy Proxy Configuration - Enhanced
-# Features: DNS filtering, request/response logging, credential injection
+# Envoy Proxy Configuration - Enhanced (Static Fallback)
+# Used when warden is not running (minimal mode).
+# No ext_authz (warden unavailable), only local_ratelimit + router.
 # =============================================================================
 
 admin:
@@ -12,31 +13,7 @@ admin:
 static_resources:
   listeners:
     # =========================================================================
-    # DNS Proxy Listener (UDP 53)
-    # Filters DNS queries to only allow approved domains
-    # =========================================================================
-    - name: dns_listener
-      address:
-        socket_address:
-          address: 0.0.0.0
-          port_value: 53
-          protocol: UDP
-      listener_filters:
-        - name: envoy.filters.udp_listener.udp_proxy
-          typed_config:
-            "@type": type.googleapis.com/envoy.extensions.filters.udp.udp_proxy.v3.UdpProxyConfig
-            stat_prefix: dns
-            matcher:
-              on_no_match:
-                action:
-                  name: route
-                  typed_config:
-                    "@type": type.googleapis.com/envoy.extensions.filters.udp.udp_proxy.v3.Route
-                    cluster: dns_upstream
-            # DNS filtering is handled by external filter or upstream
-
-    # =========================================================================
-    # HTTPS Egress Listener with Full Logging
+    # HTTPS Egress Listener with Rate Limiting
     # =========================================================================
     - name: egress_https
       address:
@@ -92,8 +69,9 @@ static_resources:
                             timeout: 30s
                           request_headers_to_add:
                             - header:
-                                key: "X-Source"
-                                value: "ai-devbox"
+                                key: "X-Real-Domain"
+                                value: "api.github.com"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
 
                     # ---------------------------------------------------------
                     # PyPI - Read only
@@ -147,7 +125,7 @@ static_resources:
                             prefix: "/"
                           route:
                             cluster: huggingface
-                            timeout: 300s  # Large model downloads
+                            timeout: 300s
                             max_stream_duration:
                               max_stream_duration: 600s
 
@@ -180,14 +158,10 @@ static_resources:
                             timeout: 120s
 
                     # ---------------------------------------------------------
-                    # Devbox Local - HTTP to HTTPS upgrade with credentials
-                    # Agent uses: curl http://api-openai-com.devbox.local/...
-                    # Envoy upgrades to HTTPS and injects credentials
+                    # Devbox Local aliases
                     # ---------------------------------------------------------
                     - name: devbox_openai
                       domains:
-                        - "api-openai-com.devbox.local"
-                        - "api-openai-com.devbox.local:*"
                         - "openai.devbox.local"
                         - "openai.devbox.local:*"
                       routes:
@@ -200,8 +174,6 @@ static_resources:
 
                     - name: devbox_anthropic
                       domains:
-                        - "api-anthropic-com.devbox.local"
-                        - "api-anthropic-com.devbox.local:*"
                         - "anthropic.devbox.local"
                         - "anthropic.devbox.local:*"
                       routes:
@@ -214,8 +186,6 @@ static_resources:
 
                     - name: devbox_github
                       domains:
-                        - "api-github-com.devbox.local"
-                        - "api-github-com.devbox.local:*"
                         - "github.devbox.local"
                         - "github.devbox.local:*"
                       routes:
@@ -228,8 +198,6 @@ static_resources:
 
                     - name: devbox_huggingface
                       domains:
-                        - "huggingface-co.devbox.local"
-                        - "huggingface-co.devbox.local:*"
                         - "huggingface.devbox.local"
                         - "huggingface.devbox.local:*"
                       routes:
@@ -256,53 +224,37 @@ static_resources:
 
                 http_filters:
                   # ---------------------------------------------------------
-                  # Lua Filter - Credential Injection + Rate Limiting + Security
+                  # Local Rate Limiting (default: 120 rpm, burst 20)
                   # ---------------------------------------------------------
-                  - name: envoy.filters.http.lua
+                  - name: envoy.filters.http.local_ratelimit
                     typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                      default_source_code:
-                        filename: /etc/envoy/filter.lua
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: local_rate_limiter
+                      token_bucket:
+                        max_tokens: 20
+                        tokens_per_fill: 2
+                        fill_interval: 1s
+                      filter_enabled:
+                        default_value:
+                          numerator: 100
+                          denominator: HUNDRED
+                      filter_enforced:
+                        default_value:
+                          numerator: 100
+                          denominator: HUNDRED
+                      status:
+                        code: TooManyRequests
+                      response_headers_to_add:
+                        - header:
+                            key: x-rate-limited
+                            value: "true"
+                          append_action: OVERWRITE_IF_EXISTS_OR_ADD
 
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
-    # =========================================================================
-    # Control Plane API (for credential lookup)
-    # =========================================================================
-    - name: control_plane_api
-      type: STRICT_DNS
-      connect_timeout: 5s
-      lb_policy: ROUND_ROBIN
-      load_assignment:
-        cluster_name: control_plane_api
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: backend
-                      port_value: 8000
-
-    # =========================================================================
-    # DNS Upstream (Filtered)
-    # =========================================================================
-    - name: dns_upstream
-      type: STRICT_DNS
-      connect_timeout: 2s
-      lb_policy: ROUND_ROBIN
-      load_assignment:
-        cluster_name: dns_upstream
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: 8.8.8.8
-                      port_value: 53
-
     # =========================================================================
     # External Service Clusters
     # =========================================================================

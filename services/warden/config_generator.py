@@ -1,10 +1,34 @@
 """
 Config Generator - Generates CoreDNS and Envoy configs from cagent.yaml
 
-Single source of truth: configs/cagent.yaml
 Outputs:
   - configs/coredns/Corefile.generated
   - configs/envoy/envoy.generated.yaml
+
+Config Sources (standalone vs connected mode):
+  In standalone mode, cagent.yaml is the sole source of truth.
+  In connected mode, warden syncs additional data from the control plane
+  and merges it with cagent.yaml (yaml entries take precedence).
+
+  Yaml-only (no CP equivalent):
+    - dns (upstream servers, cache_ttl)
+    - internal_services[] (devbox.local, etc.)
+    - circuit_breakers (max_connections, max_requests, etc.)
+    - rate_limits.default (global fallback rate limit)
+
+  CP-synced (connected mode merges with yaml):
+    - domains[] — synced via GET /api/v1/domain-policies, merged here
+      via set_additional_domains(). Includes allowed_paths, rate_limit,
+      timeout, read_only. Credentials are NOT included — ext_authz
+      resolves them dynamically per-request.
+
+  CP-synced via heartbeat (not config generation):
+    - security.seccomp_profile — pushed via heartbeat response
+    - resources (cpu/memory limits) — pushed via heartbeat response
+
+  Gap (CP endpoint exists but warden doesn't sync):
+    - email.accounts[] — CP has /api/v1/email-policies but warden
+      does not yet sync them (same pattern as domains before this fix)
 """
 
 import os
@@ -25,6 +49,11 @@ class ConfigGenerator:
         self.config_path = Path(config_path)
         self.config = {}
         self.last_hash = None
+        self._additional_domains = []  # CP-provided domain entries
+
+    def set_additional_domains(self, domains: list):
+        """Set additional domain entries (e.g., from control plane policies)."""
+        self._additional_domains = domains
 
     def load_config(self) -> bool:
         """Load cagent.yaml config. Returns True if config changed."""
@@ -44,8 +73,17 @@ class ConfigGenerator:
         return True
 
     def get_domains(self) -> list:
-        """Get list of domain configs."""
-        return self.config.get('domains', [])
+        """Get list of domain configs, merged with any additional domains."""
+        yaml_domains = self.config.get('domains', [])
+        if not self._additional_domains:
+            return yaml_domains
+        # Merge: cagent.yaml takes precedence, additional fills in new domains
+        yaml_names = {d.get('domain', '').lower() for d in yaml_domains}
+        merged = list(yaml_domains)
+        for entry in self._additional_domains:
+            if entry.get('domain', '').lower() not in yaml_names:
+                merged.append(entry)
+        return merged
 
     def get_internal_services(self) -> list:
         """Get list of internal service names."""
@@ -68,6 +106,10 @@ class ConfigGenerator:
             'requests_per_minute': 120,
             'burst_size': 20
         })
+
+    def get_resources(self) -> Optional[dict]:
+        """Get resource limits config, or None if not configured."""
+        return self.config.get('resources')
 
     def get_circuit_breaker_defaults(self) -> dict:
         """Get default circuit breaker config."""
@@ -184,10 +226,20 @@ class ConfigGenerator:
         domains = self.get_domains()
         default_rate_limit = self.get_default_rate_limit()
 
+        # Collect credential headers from all domains for ext_authz config
+        credential_headers = {'authorization'}  # always include
+        for entry in domains:
+            cred = entry.get('credential', {})
+            if cred and cred.get('header'):
+                credential_headers.add(cred['header'].lower())
+
         # Build virtual hosts and clusters
         virtual_hosts = []
         clusters = []
         cluster_names = set()
+
+        default_rpm = default_rate_limit.get('requests_per_minute', 120)
+        default_burst = default_rate_limit.get('burst_size', 20)
 
         for entry in domains:
             domain = entry.get('domain', '')
@@ -197,15 +249,19 @@ class ConfigGenerator:
             alias = entry.get('alias')
             timeout = entry.get('timeout', '30s')
             read_only = entry.get('read_only', False)
+            allowed_paths = entry.get('allowed_paths', [])
+            domain_rl = entry.get('rate_limit', {})
 
             # Generate cluster name from domain
             cluster_name = self._domain_to_cluster_name(domain)
 
             # Domain patterns for virtual host
             domain_patterns = [domain, f"{domain}:443"]
+
+            # Determine actual upstream domain for tracking
+            actual_domain = domain
             if domain.startswith('*.'):
-                # Keep wildcard as-is for Envoy
-                pass
+                actual_domain = domain[2:]
 
             # Build routes
             routes = []
@@ -224,14 +280,43 @@ class ConfigGenerator:
                         }
                     })
 
-            # Main route
-            routes.append({
-                'match': {'prefix': '/'},
-                'route': {
-                    'cluster': cluster_name,
-                    'timeout': timeout,
+            if allowed_paths:
+                # Per-path routes (allow specific paths only)
+                for path_pattern in allowed_paths:
+                    route_entry = self._build_route_entry(
+                        path_pattern, cluster_name, timeout, actual_domain,
+                        domain_rl, default_rpm, default_burst,
+                    )
+                    routes.append(route_entry)
+                # Catch-all deny for this domain
+                routes.append({
+                    'match': {'prefix': '/'},
+                    'direct_response': {
+                        'status': 403,
+                        'body': {'inline_string': '{"error": "path_not_allowed", "message": "This path is not in the allowlist for this domain"}'}
+                    }
+                })
+            else:
+                # Main route (all paths allowed)
+                route = {
+                    'match': {'prefix': '/'},
+                    'route': {
+                        'cluster': cluster_name,
+                        'timeout': timeout,
+                    },
+                    'request_headers_to_add': [
+                        {'header': {'key': 'X-Real-Domain', 'value': actual_domain},
+                         'append_action': 'OVERWRITE_IF_EXISTS_OR_ADD'},
+                    ],
                 }
-            })
+                # Per-route rate limit override if domain has custom rate limit
+                if domain_rl:
+                    route['typed_per_filter_config'] = {
+                        'envoy.filters.http.local_ratelimit': self._build_per_route_ratelimit(
+                            cluster_name, domain_rl, default_rpm, default_burst,
+                        )
+                    }
+                routes.append(route)
 
             # Add virtual host for real domain
             virtual_hosts.append({
@@ -246,18 +331,29 @@ class ConfigGenerator:
                     f"{alias}.devbox.local",
                     f"{alias}.devbox.local:*",
                 ]
-                alias_routes = [{
+                alias_route = {
                     'match': {'prefix': '/'},
                     'route': {
                         'cluster': cluster_name,
                         'timeout': timeout,
                         'auto_host_rewrite': True
+                    },
+                    'request_headers_to_add': [
+                        {'header': {'key': 'X-Real-Domain', 'value': actual_domain},
+                         'append_action': 'OVERWRITE_IF_EXISTS_OR_ADD'},
+                    ],
+                }
+                # Per-route rate limit for alias too
+                if domain_rl:
+                    alias_route['typed_per_filter_config'] = {
+                        'envoy.filters.http.local_ratelimit': self._build_per_route_ratelimit(
+                            cluster_name, domain_rl, default_rpm, default_burst,
+                        )
                     }
-                }]
                 virtual_hosts.append({
                     'name': f"devbox_{alias}",
                     'domains': alias_domains,
-                    'routes': alias_routes
+                    'routes': [alias_route]
                 })
 
             # Generate cluster if not already added
@@ -291,8 +387,62 @@ class ConfigGenerator:
         })
 
         # Build full Envoy config
-        config = self._build_envoy_config(virtual_hosts, clusters, default_rate_limit)
+        config = self._build_envoy_config(
+            virtual_hosts, clusters, default_rate_limit, credential_headers,
+        )
         return config
+
+    def _build_route_entry(self, path_pattern: str, cluster_name: str,
+                           timeout: str, actual_domain: str,
+                           domain_rl: dict, default_rpm: int, default_burst: int) -> dict:
+        """Build a single route entry for an allowed path pattern."""
+        # Determine match type from pattern
+        if path_pattern.endswith('*'):
+            # Prefix match: /api/* or /api*
+            prefix = path_pattern.rstrip('*')
+            match = {'prefix': prefix}
+        else:
+            # Exact match
+            match = {'path': path_pattern}
+
+        route = {
+            'match': match,
+            'route': {
+                'cluster': cluster_name,
+                'timeout': timeout,
+            },
+            'request_headers_to_add': [
+                {'header': {'key': 'X-Real-Domain', 'value': actual_domain},
+                 'append_action': 'OVERWRITE_IF_EXISTS_OR_ADD'},
+            ],
+        }
+
+        if domain_rl:
+            route['typed_per_filter_config'] = {
+                'envoy.filters.http.local_ratelimit': self._build_per_route_ratelimit(
+                    cluster_name, domain_rl, default_rpm, default_burst,
+                )
+            }
+
+        return route
+
+    def _build_per_route_ratelimit(self, cluster_name: str, domain_rl: dict,
+                                   default_rpm: int, default_burst: int) -> dict:
+        """Build per-route local_ratelimit typed_per_filter_config."""
+        rpm = domain_rl.get('requests_per_minute', default_rpm)
+        burst = domain_rl.get('burst_size', default_burst)
+        return {
+            '@type': 'type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit',
+            'stat_prefix': f'{cluster_name}_rl',
+            'token_bucket': self._rpm_to_token_bucket(rpm, burst),
+            'filter_enabled': {
+                'default_value': {'numerator': 100, 'denominator': 'HUNDRED'}
+            },
+            'filter_enforced': {
+                'default_value': {'numerator': 100, 'denominator': 'HUNDRED'}
+            },
+            'status': {'code': 'TooManyRequests'},
+        }
 
     def _generate_email_envoy_config(self) -> tuple:
         """Generate Envoy virtual host + cluster for email proxy if email accounts exist."""
@@ -382,7 +532,8 @@ class ConfigGenerator:
             }
         }
 
-    def _build_envoy_config(self, virtual_hosts: list, clusters: list, default_rate_limit: dict) -> dict:
+    def _build_envoy_config(self, virtual_hosts: list, clusters: list,
+                            default_rate_limit: dict, credential_headers: set) -> dict:
         """Build complete Envoy config."""
         return {
             'admin': {
@@ -392,7 +543,9 @@ class ConfigGenerator:
             },
             'static_resources': {
                 'listeners': [
-                    self._build_https_listener(virtual_hosts, default_rate_limit)
+                    self._build_https_listener(
+                        virtual_hosts, default_rate_limit, credential_headers,
+                    )
                 ],
                 'clusters': [
                     self._build_control_plane_cluster(),
@@ -418,14 +571,10 @@ class ConfigGenerator:
         }
 
     def _build_control_plane_cluster(self) -> dict:
-        """Build cluster for the domain policy API.
+        """Build cluster for the warden API.
 
-        Points to warden on infra-net (Docker DNS) so the Envoy Lua
-        filter can reach the domain-policy endpoint locally without needing
-        direct access to the control plane.
-
-        The cluster name is kept as ``control_plane_api`` for Lua compatibility
-        (Lua's httpCall references this cluster name).
+        Points to warden on infra-net (Docker DNS) so the ext_authz filter
+        can reach the credential injection endpoint.
         """
         return {
             'name': 'control_plane_api',
@@ -449,7 +598,8 @@ class ConfigGenerator:
             }
         }
 
-    def _build_https_listener(self, virtual_hosts: list, default_rate_limit: dict) -> dict:
+    def _build_https_listener(self, virtual_hosts: list, default_rate_limit: dict,
+                              credential_headers: set) -> dict:
         """Build HTTPS egress listener."""
         return {
             'name': 'egress_https',
@@ -469,7 +619,8 @@ class ConfigGenerator:
                             'virtual_hosts': virtual_hosts
                         },
                         'http_filters': [
-                            self._build_lua_filter(default_rate_limit),
+                            self._build_ext_authz_filter(credential_headers),
+                            self._build_local_ratelimit_filter(default_rate_limit),
                             {'name': 'envoy.filters.http.router', 'typed_config': {
                                 '@type': 'type.googleapis.com/envoy.extensions.filters.http.router.v3.Router'
                             }}
@@ -505,325 +656,86 @@ class ConfigGenerator:
             }
         }
 
-    def _build_lua_filter(self, default_rate_limit: dict) -> dict:
-        """Build Lua filter referencing external filter.lua file."""
+    def _build_ext_authz_filter(self, credential_headers: set) -> dict:
+        """Build ext_authz HTTP service filter for credential injection via warden."""
+        # Build allowed upstream header patterns from credential headers
+        upstream_patterns = [
+            {'exact': 'x-credential-injected'},  # tracking header
+        ]
+        for header in sorted(credential_headers):
+            upstream_patterns.append({'exact': header})
+
         return {
-            'name': 'envoy.filters.http.lua',
+            'name': 'envoy.filters.http.ext_authz',
             'typed_config': {
-                '@type': 'type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua',
-                'default_source_code': {
-                    'filename': '/etc/envoy/filter.lua'
-                }
+                '@type': 'type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz',
+                'transport_api_version': 'V3',
+                'http_service': {
+                    'server_uri': {
+                        'uri': 'warden:8080',
+                        'cluster': 'control_plane_api',
+                        'timeout': '5s',
+                    },
+                    'path_prefix': '/api/v1/ext-authz',
+                    'authorization_request': {
+                        'allowed_headers': {
+                            'patterns': [
+                                {'exact': ':authority'},
+                                {'exact': ':method'},
+                                {'exact': ':path'},
+                            ]
+                        }
+                    },
+                    'authorization_response': {
+                        'allowed_upstream_headers': {
+                            'patterns': upstream_patterns
+                        }
+                    }
+                },
+                'failure_mode_allow': True,
             }
         }
 
-    def _escape_lua_string(self, s: str) -> str:
-        """Escape a string for safe inclusion in a Lua string literal.
+    def _build_local_ratelimit_filter(self, default_rate_limit: dict) -> dict:
+        """Build global local_ratelimit filter with default rate limit."""
+        rpm = default_rate_limit.get('requests_per_minute', 120)
+        burst = default_rate_limit.get('burst_size', 20)
 
-        Prevents Lua injection by escaping backslashes, double quotes,
-        and control characters.
-        """
-        s = s.replace('\\', '\\\\')
-        s = s.replace('"', '\\"')
-        s = s.replace('\n', '\\n')
-        s = s.replace('\r', '\\r')
-        s = s.replace('\0', '')
-        return s
+        return {
+            'name': 'envoy.filters.http.local_ratelimit',
+            'typed_config': {
+                '@type': 'type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit',
+                'stat_prefix': 'local_rate_limiter',
+                'token_bucket': self._rpm_to_token_bucket(rpm, burst),
+                'filter_enabled': {
+                    'default_value': {'numerator': 100, 'denominator': 'HUNDRED'}
+                },
+                'filter_enforced': {
+                    'default_value': {'numerator': 100, 'denominator': 'HUNDRED'}
+                },
+                'status': {'code': 'TooManyRequests'},
+                'response_headers_to_add': [
+                    {'header': {'key': 'x-rate-limited', 'value': 'true'},
+                     'append_action': 'OVERWRITE_IF_EXISTS_OR_ADD'}
+                ],
+            }
+        }
 
-    def generate_lua_filter(self) -> str:
-        """Generate Lua filter code.
+    @staticmethod
+    def _rpm_to_token_bucket(rpm: int, burst: int) -> dict:
+        """Convert requests_per_minute + burst_size to Envoy token bucket config."""
+        if rpm >= 60:
+            tokens_per_fill = rpm // 60
+            fill_interval = '1s'
+        else:
+            tokens_per_fill = 1
+            fill_interval = f'{60 // rpm}s'
 
-        Produces a simplified filter that talks to warden (local,
-        no auth) for domain policy lookups.  Warden handles both
-        standalone and connected mode internally.
-        """
-        lines = [
-            '-- =======================================================================',
-            '-- Auto-generated Lua filter from cagent.yaml',
-            f'-- Generated: {datetime.utcnow().isoformat()}Z',
-            '-- DO NOT EDIT - changes will be overwritten by warden',
-            '-- =======================================================================',
-            '-- Talks to warden (local, no auth) for domain policy lookups.',
-            '',
-            '-- Configuration',
-            'local CACHE_TTL_SECONDS = 300',
-            'local CP_FAILURE_BACKOFF = 30',
-            '',
-            '-- Caches',
-            'local domain_policy_cache = {}',
-            'local token_buckets = {}',
-            'local cp_available = true',
-            'local cp_last_failure = 0',
-            '',
-            '-- =======================================================================',
-            '-- Utility Functions',
-            '-- =======================================================================',
-            '',
-            'function clean_host(host)',
-            '  return string.match(host, "^([^:]+)") or host',
-            'end',
-            '',
-            'function is_devbox_local(host)',
-            '  local host_clean = clean_host(host)',
-            '  return string.match(host_clean, "%.devbox%.local$") ~= nil',
-            'end',
-            '',
-            'function url_encode(str)',
-            '  if str then',
-            '    str = string.gsub(str, "([^%w%-%.%_%~])", function(c)',
-            '      return string.format("%%%02X", string.byte(c))',
-            '    end)',
-            '  end',
-            '  return str',
-            'end',
-            '',
-            'function detect_dns_tunneling(host)',
-            '  local parts = {}',
-            '  for part in string.gmatch(host, "[^%.]+") do',
-            '    table.insert(parts, part)',
-            '  end',
-            '  for _, part in ipairs(parts) do',
-            '    if string.len(part) > 63 then',
-            '      return true, "Subdomain exceeds 63 characters"',
-            '    end',
-            '  end',
-            '  if string.len(host) > 100 then',
-            '    return true, "Hostname unusually long"',
-            '  end',
-            '  if #parts > 6 then',
-            '    return true, "Excessive subdomain depth"',
-            '  end',
-            '  local suspicious_labels = 0',
-            '  for _, part in ipairs(parts) do',
-            '    if string.len(part) > 20 and string.match(part, "^[%x%-]+$") then',
-            '      suspicious_labels = suspicious_labels + 1',
-            '    end',
-            '  end',
-            '  if suspicious_labels >= 2 then',
-            '    return true, "Multiple hex-encoded subdomain labels"',
-            '  end',
-            '  return false, nil',
-            'end',
-            '',
-            'function should_contact_cp()',
-            '  if not cp_available and (os.time() - cp_last_failure) < CP_FAILURE_BACKOFF then',
-            '    return false',
-            '  end',
-            '  return true',
-            'end',
-            '',
-            'function mark_cp_failure()',
-            '  cp_available = false',
-            '  cp_last_failure = os.time()',
-            'end',
-            '',
-            'function mark_cp_success()',
-            '  cp_available = true',
-            'end',
-            '',
-            '-- =======================================================================',
-            '-- Domain Policy (talks to local warden)',
-            '-- =======================================================================',
-            '',
-            'function get_domain_policy(request_handle, domain)',
-            '  local host_clean = clean_host(domain)',
-            '  local cached = domain_policy_cache[host_clean]',
-            '  if cached and cached.expires_at > os.time() then',
-            '    return cached.policy',
-            '  end',
-            '  local policy = nil',
-            '  if should_contact_cp() then',
-            '    local headers, body = request_handle:httpCall(',
-            '      "control_plane_api",',
-            '      {[":method"] = "GET",',
-            '       [":path"] = "/api/v1/domain-policies/for-domain?domain=" .. url_encode(host_clean),',
-            '       [":authority"] = "warden"},',
-            '      "", 5000, false)',
-            '    if body and string.len(body) > 0 then',
-            '      mark_cp_success()',
-            '      policy = parse_domain_policy_response(body)',
-            '    else',
-            '      mark_cp_failure()',
-            '    end',
-            '  end',
-            '  if not policy then',
-            '    policy = {matched = false, allowed_paths = {},',
-            '      requests_per_minute = 120, burst_size = 20,',
-            '      credential = nil, target_domain = nil}',
-            '  end',
-            '  domain_policy_cache[host_clean] = {policy = policy, expires_at = os.time() + CACHE_TTL_SECONDS}',
-            '  return policy',
-            'end',
-            '',
-            'function parse_domain_policy_response(body)',
-            '  if not body or body == "" then return nil end',
-            '  local policy = {',
-            '    matched = string.match(body, \'"matched"%s*:%s*true\') ~= nil,',
-            '    allowed_paths = {},',
-            '    requests_per_minute = tonumber(string.match(body, \'"requests_per_minute"%s*:%s*(%d+)\')) or 120,',
-            '    burst_size = tonumber(string.match(body, \'"burst_size"%s*:%s*(%d+)\')) or 20,',
-            '    credential = nil, target_domain = nil',
-            '  }',
-            '  local paths_str = string.match(body, \'"allowed_paths"%s*:%s*%[([^%]]*)%]\')',
-            '  if paths_str then',
-            '    for path in string.gmatch(paths_str, \'"([^"]+)"\') do',
-            '      table.insert(policy.allowed_paths, path)',
-            '    end',
-            '  end',
-            '  local cred_header = string.match(body, \'"header_name"%s*:%s*"([^"]*)"\')',
-            '  local cred_value = string.match(body, \'"header_value"%s*:%s*"([^"]*)"\')',
-            '  local target = string.match(body, \'"target_domain"%s*:%s*"([^"]*)"\')',
-            '  if cred_header and cred_value then',
-            '    policy.credential = {header_name = cred_header, header_value = cred_value}',
-            '    policy.target_domain = target',
-            '  end',
-            '  local alias = string.match(body, \'"alias"%s*:%s*"([^"]*)"\')',
-            '  if alias then policy.alias = alias end',
-            '  return policy',
-            'end',
-            '',
-            '-- =======================================================================',
-            '-- Path Filtering',
-            '-- =======================================================================',
-            '',
-            'function match_path_pattern(pattern, path)',
-            '  if string.sub(pattern, -2) == "/*" then',
-            '    local prefix = string.sub(pattern, 1, -2)',
-            '    return string.sub(path, 1, string.len(prefix)) == prefix',
-            '  elseif string.sub(pattern, -1) == "*" then',
-            '    local prefix = string.sub(pattern, 1, -2)',
-            '    return string.sub(path, 1, string.len(prefix)) == prefix',
-            '  else',
-            '    return path == pattern',
-            '  end',
-            'end',
-            '',
-            'function is_path_allowed(policy, path)',
-            '  if not policy.allowed_paths or #policy.allowed_paths == 0 then',
-            '    return true, "no_restrictions"',
-            '  end',
-            '  for _, pattern in ipairs(policy.allowed_paths) do',
-            '    if match_path_pattern(pattern, path) then',
-            '      return true, pattern',
-            '    end',
-            '  end',
-            '  return false, "path_not_in_allowlist"',
-            'end',
-            '',
-            '-- =======================================================================',
-            '-- Rate Limiting',
-            '-- =======================================================================',
-            '',
-            'function check_rate_limit_with_config(request_handle, domain, rpm, burst)',
-            '  local host_clean = clean_host(domain)',
-            '  local now = os.time()',
-            '  local bucket = token_buckets[host_clean]',
-            '  if not bucket then',
-            '    bucket = {tokens = burst, last_refill = now}',
-            '    token_buckets[host_clean] = bucket',
-            '  end',
-            '  local elapsed = now - bucket.last_refill',
-            '  local new_tokens = elapsed * (rpm / 60.0)',
-            '  bucket.tokens = math.min(burst, bucket.tokens + new_tokens)',
-            '  bucket.last_refill = now',
-            '  if bucket.tokens >= 1 then',
-            '    bucket.tokens = bucket.tokens - 1',
-            '    return true',
-            '  end',
-            '  request_handle:logWarn(string.format("Rate limit exceeded for %s (limit: %d rpm)", host_clean, rpm))',
-            '  return false',
-            'end',
-            '',
-            '-- =======================================================================',
-            '-- Request / Response Handlers',
-            '-- =======================================================================',
-            '',
-            'function envoy_on_request(request_handle)',
-            '  local host = request_handle:headers():get(":authority") or ""',
-            '  local host_clean = clean_host(host)',
-            '  local credential_injected = "false"',
-            '  local rate_limited = "false"',
-            '  local devbox_local = is_devbox_local(host)',
-            '',
-            '  if not devbox_local then',
-            '    local suspicious, reason = detect_dns_tunneling(host)',
-            '    if suspicious then',
-            '      request_handle:logWarn("DNS tunneling blocked: " .. host .. " - " .. reason)',
-            '      request_handle:respond({[":status"] = "403"}, "Blocked: suspicious hostname")',
-            '      return',
-            '    end',
-            '  end',
-            '',
-            '  local policy = get_domain_policy(request_handle, host_clean)',
-            '  local real_domain = host_clean',
-            '  if policy and policy.target_domain then',
-            '    real_domain = policy.target_domain',
-            '  end',
-            '',
-            '  local rpm = policy and policy.requests_per_minute or 120',
-            '  local burst = policy and policy.burst_size or 20',
-            '  if not check_rate_limit_with_config(request_handle, real_domain, rpm, burst) then',
-            '    rate_limited = "true"',
-            '    request_handle:headers():add("X-Rate-Limited", rate_limited)',
-            '    request_handle:respond({[":status"] = "429", ["retry-after"] = "60"},',
-            '      \'{"error": "rate_limit_exceeded", "message": "Too many requests to this domain"}\')',
-            '    return',
-            '  end',
-            '',
-            '  local request_path = request_handle:headers():get(":path") or "/"',
-            '  local path_only = string.match(request_path, "^([^?]+)") or request_path',
-            '  local path_allowed, path_reason = is_path_allowed(policy, path_only)',
-            '  if not path_allowed then',
-            '    request_handle:logWarn(string.format("Path not allowed: %s%s (reason: %s)", real_domain, path_only, path_reason))',
-            '    request_handle:respond({[":status"] = "403"},',
-            '      \'{"error": "path_not_allowed", "message": "This path is not in the allowlist for this domain"}\')',
-            '    return',
-            '  end',
-            '',
-            '  request_handle:streamInfo():dynamicMetadata():set("envoy.filters.http.lua", "request_domain", real_domain)',
-            '',
-            '  if policy and policy.credential and policy.credential.header_name and policy.credential.header_value then',
-            '    request_handle:headers():remove(policy.credential.header_name)',
-            '    request_handle:headers():add(policy.credential.header_name, policy.credential.header_value)',
-            '    credential_injected = "true"',
-            '  end',
-            '',
-            '  request_handle:headers():add("X-Credential-Injected", credential_injected)',
-            '  request_handle:headers():add("X-Rate-Limited", rate_limited)',
-            '  request_handle:headers():add("X-Real-Domain", real_domain)',
-            '  request_handle:headers():add("X-Devbox-Timestamp", os.date("!%Y-%m-%dT%H:%M:%SZ"))',
-            '',
-            '  if devbox_local then',
-            '    request_handle:logInfo(string.format("Devbox proxy: %s -> %s (credential_injected=%s)", host, real_domain, credential_injected))',
-            '  end',
-            'end',
-            '',
-            'function envoy_on_response(response_handle)',
-            '  -- no-op: response handler reserved for future use',
-            'end',
-        ]
-
-        return '\n'.join(lines) + '\n'
-
-    def _lua_table(self, d: dict) -> str:
-        """Convert Python dict to Lua table literal with proper escaping."""
-        if not d:
-            return '{}'
-
-        items = []
-        for k, v in d.items():
-            escaped_key = self._escape_lua_string(str(k))
-            if isinstance(v, dict):
-                items.append(f'["{escaped_key}"] = {self._lua_table(v)}')
-            elif isinstance(v, str):
-                escaped_val = self._escape_lua_string(v)
-                items.append(f'["{escaped_key}"] = "{escaped_val}"')
-            elif isinstance(v, bool):
-                items.append(f'["{escaped_key}"] = {"true" if v else "false"}')
-            elif isinstance(v, (int, float)):
-                items.append(f'["{escaped_key}"] = {v}')
-
-        return '{' + ', '.join(items) + '}'
+        return {
+            'max_tokens': burst,
+            'tokens_per_fill': tokens_per_fill,
+            'fill_interval': fill_interval,
+        }
 
     # =========================================================================
     # Output Methods
@@ -865,25 +777,64 @@ class ConfigGenerator:
             logger.error(f"Failed to write Envoy config: {e}")
             return False
 
-    def write_lua_filter(self, output_path: str) -> bool:
-        """Write generated Lua filter file."""
+    def write_resource_env(self, env_path: str) -> bool:
+        """Write resource limits from cagent.yaml to .env file.
+
+        Merges CELL_CPU_LIMIT, CELL_MEMORY_LIMIT, CELL_PIDS_LIMIT into the
+        existing .env file (preserves other variables).  If resources section
+        is absent or null in cagent.yaml, does nothing.
+        """
+        resources = self.get_resources()
+        if not resources:
+            return True  # Nothing to write
+
+        env_vars = {}
+        if resources.get('cpu_limit') is not None:
+            env_vars['CELL_CPU_LIMIT'] = str(resources['cpu_limit'])
+        if resources.get('memory_limit_mb') is not None:
+            mb = int(resources['memory_limit_mb'])
+            # Convert MB to Docker format (e.g., 4096 -> 4G, 512 -> 512M)
+            if mb >= 1024 and mb % 1024 == 0:
+                env_vars['CELL_MEMORY_LIMIT'] = f"{mb // 1024}G"
+            else:
+                env_vars['CELL_MEMORY_LIMIT'] = f"{mb}M"
+        if resources.get('pids_limit') is not None:
+            env_vars['CELL_PIDS_LIMIT'] = str(int(resources['pids_limit']))
+
+        if not env_vars:
+            return True
+
         try:
-            content = self.generate_lua_filter()
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            Path(output_path).write_text(content)
-            logger.info(f"Wrote Lua filter to {output_path}")
+            env_file = Path(env_path)
+            existing_lines = []
+            existing_keys = set()
+
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    key = line.split('=', 1)[0].strip() if '=' in line else ''
+                    if key in env_vars:
+                        existing_keys.add(key)
+                        existing_lines.append(f"{key}={env_vars[key]}")
+                    else:
+                        existing_lines.append(line)
+
+            # Append any new keys not already in the file
+            for key, value in env_vars.items():
+                if key not in existing_keys:
+                    existing_lines.append(f"{key}={value}")
+
+            env_file.write_text('\n'.join(existing_lines) + '\n')
+            logger.info(f"Wrote resource limits to {env_path}: {env_vars}")
             return True
         except Exception as e:
-            logger.error(f"Failed to write Lua filter: {e}")
+            logger.error(f"Failed to write resource env: {e}")
             return False
 
-    def generate_all(self, coredns_path: str, envoy_path: str, lua_path: str = None) -> bool:
+    def generate_all(self, coredns_path: str, envoy_path: str) -> bool:
         """Generate all configs."""
         success = True
         success = self.write_corefile(coredns_path) and success
         success = self.write_envoy_config(envoy_path) and success
-        if lua_path:
-            success = self.write_lua_filter(lua_path) and success
         return success
 
 

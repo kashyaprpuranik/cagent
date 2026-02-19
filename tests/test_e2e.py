@@ -60,18 +60,19 @@ def is_data_plane_running():
 
 @pytest.fixture(scope="module")
 def data_plane_running():
-    """Verify data plane is running and proxy is accepting connections.
+    """Verify data plane is running and all services accept connections.
 
-    The warden restarts Envoy on startup (config generation), so
-    even after ``run_tests.sh``'s initial sleep the proxy may still be
-    coming back up.  Poll from a cell container until connectivity is
-    confirmed.
+    Warden restarts Envoy/CoreDNS on startup (config generation), so
+    even after ``run_tests.sh``'s initial sleep services may still be
+    coming back up.  Poll from a cell container until connectivity to
+    both the proxy and DNS filter is confirmed.
     """
     assert is_data_plane_running(), \
         "Data plane not running — run_tests.sh should have started it"
 
-    # Wait for Envoy to accept connections (warden restarts it on startup)
     cell = _discover_cell_container_name()
+
+    # Wait for Envoy proxy to accept connections
     deadline = time.time() + 60
     while time.time() < deadline:
         try:
@@ -81,15 +82,49 @@ def data_plane_running():
                 capture_output=True, text=True, timeout=10,
             )
             if "OK" in probe.stdout:
-                return True
+                break
         except (subprocess.TimeoutExpired, subprocess.SubprocessError):
             pass
         time.sleep(3)
+    else:
+        pytest.fail(
+            "Envoy proxy not reachable from cell container after 60s — "
+            "warden may still be restarting it"
+        )
 
-    pytest.fail(
-        "Envoy proxy not reachable from cell container after 60s — "
-        "warden may still be restarting it"
-    )
+    # Wait for CoreDNS to accept connections
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        try:
+            probe = subprocess.run(
+                ["docker", "exec", cell, "sh", "-c",
+                 "nc -z -w 2 10.200.1.5 53 && echo OK"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if "OK" in probe.stdout:
+                break
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+            pass
+        time.sleep(2)
+    else:
+        pytest.fail(
+            "CoreDNS not reachable from cell container after 30s"
+        )
+
+    # Wait for admin API to be ready
+    admin = get_admin_url()
+    if admin:
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                r = requests.get(f"{admin}/api/health", timeout=3)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                pass
+            time.sleep(2)
+
+    return True
 
 
 @pytest.fixture(scope="module")
@@ -244,7 +279,7 @@ class TestProxyEgress:
 
 @pytest.mark.e2e
 class TestCredentialInjection:
-    """Test credential injection functionality (via Envoy Lua filter)."""
+    """Test credential injection functionality (via Envoy ext_authz)."""
 
     def test_request_headers_not_contain_secrets(self, data_plane_running):
         """Cell requests should not contain raw secrets."""
@@ -254,7 +289,7 @@ class TestCredentialInjection:
             "Cell environment should not contain API keys"
 
     def test_envoy_handles_credential_injection(self, data_plane_running):
-        """Envoy should be running (handles credential injection via Lua)."""
+        """Envoy should be running (handles credential injection via ext_authz)."""
         result = subprocess.run(
             ["docker", "ps", "--filter", "name=http-proxy", "--format", "{{.Status}}"],
             capture_output=True,
@@ -717,8 +752,17 @@ class TestLocalAdminConfigPipeline:
             # Give it a moment to regenerate configs
             time.sleep(3)
 
-            # -- Step 5: Reload CoreDNS to pick up new Corefile --
-            r = requests.post(f"{admin_url}/api/config/reload", timeout=15)
+            # -- Step 5: Wait for warden API, then reload CoreDNS --
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                try:
+                    r = requests.get(f"{admin_url}/api/health", timeout=3)
+                    if r.status_code == 200:
+                        break
+                except Exception:
+                    pass
+                time.sleep(1)
+            r = requests.post(f"{admin_url}/api/config/reload", timeout=30)
             assert r.status_code == 200
             assert wait_for_container("dns-filter", timeout=15), \
                 "dns-filter did not come back after reload"
@@ -752,7 +796,7 @@ class TestLocalAdminConfigPipeline:
                 except Exception:
                     pass
                 time.sleep(1)
-            requests.post(f"{admin_url}/api/config/reload", timeout=15)
+            requests.post(f"{admin_url}/api/config/reload", timeout=30)
 
 
 def ws_recv_until(ws, marker, max_reads: int = 30) -> str:

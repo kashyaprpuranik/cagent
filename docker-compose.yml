@@ -42,7 +42,7 @@
 #
 # Security Controls:
 #   - Cell has no direct internet/CP access (IP bypass prevention)
-#   - Credential injection handled by HTTP proxy Lua filter
+#   - Credential injection handled by HTTP proxy ext_authz filter (warden)
 #   - Only HTTP proxy and log shipper can reach control plane
 #
 # =============================================================================
@@ -78,12 +78,13 @@ services:
       # Block raw sockets to prevent proxy bypass via packet crafting
       - seccomp:./configs/seccomp/cell-profile.json
 
-    # Resource limits
+    # Resource limits (configurable via cagent.yaml → warden → .env)
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 4G
+          cpus: '${CELL_CPU_LIMIT:-2}'
+          memory: ${CELL_MEMORY_LIMIT:-4G}
+          pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.5'
           memory: 512M
@@ -169,12 +170,13 @@ services:
       - no-new-privileges:true
       - seccomp:./configs/seccomp/cell-profile.json  # defense-in-depth: host seccomp + gVisor
 
-    # Stricter resource limits for secure mode
+    # Resource limits (configurable via cagent.yaml → warden → .env)
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 2G
+          cpus: '${CELL_CPU_LIMIT:-1}'
+          memory: ${CELL_MEMORY_LIMIT:-2G}
+          pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
           memory: 256M
@@ -281,14 +283,12 @@ services:
       - proxy-config:/etc/envoy
       # Static config as fallback (copied by entrypoint if no generated config)
       - ./configs/envoy/envoy-enhanced.yaml:/etc/envoy/envoy.default.yaml:ro
-      # Static Lua filter as fallback (copied by entrypoint if no generated filter)
-      - ./configs/envoy/filter.lua:/etc/envoy/filter.default.lua:ro
       # Entrypoint script
       - ./configs/envoy/entrypoint.sh:/entrypoint.sh:ro
 
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
 
-    # No env vars needed: Lua filter talks to warden (local, no auth)
+    # No env vars needed: ext_authz filter talks to warden (local, no auth)
 
     # JSON logs to stdout (captured by Docker, read by log shipper)
     logging:

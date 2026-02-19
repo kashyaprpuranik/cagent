@@ -23,8 +23,7 @@ This guide covers local development setup, testing, and Docker workflows for the
 │   ├── cagent.yaml                 # Source of truth for domain policies
 │   ├── coredns/Corefile            # DNS filter (generated)
 │   ├── envoy/                      # HTTP proxy config (generated)
-│   │   ├── envoy-enhanced.yaml     # Full config with Lua filter
-│   │   └── filter.lua              # Envoy Lua filter
+│   │   └── envoy-enhanced.yaml     # Envoy config with ext_authz + local_ratelimit
 │   ├── vector/                     # Log collection
 │   │   ├── vector.yaml             # Sources and transforms
 │   │   └── sinks/                  # Mode-specific sinks
@@ -127,7 +126,7 @@ Shared components come from [@cagent/ui](https://github.com/kashyaprpuranik/cage
 
 The warden watches `cagent.yaml` and generates:
 - `coredns/Corefile` — DNS filter rules
-- `envoy/envoy-enhanced.yaml` — Envoy config with Lua filter
+- `envoy/envoy-enhanced.yaml` — Envoy config with ext_authz + local_ratelimit filters
 
 Changes to `cagent.yaml` trigger automatic regeneration and service restart.
 

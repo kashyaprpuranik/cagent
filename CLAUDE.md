@@ -129,9 +129,10 @@ npm run lint
 ### Warden
 
 - **Framework**: FastAPI with background polling loop (main_loop in separate thread)
-- **Config generation**: `config_generator.py` reads `cagent.yaml` and generates CoreDNS Corefile + Envoy config
-- **Routers**: health, config, containers, logs, terminal, analytics, ssh_tunnel, domain_policy
-- **Domain policy API**: Serves Envoy Lua filter with domain-specific policies (connected: proxy to CP, standalone: resolve from cagent.yaml)
+- **Config generation**: `config_generator.py` reads `cagent.yaml` and generates CoreDNS Corefile + Envoy config (with ext_authz + local_ratelimit filters)
+- **Routers**: health, config, containers, logs, terminal, analytics, ssh_tunnel, domain_policy, ext_authz
+- **ext_authz endpoint**: Implements Envoy ext_authz HTTP protocol for credential injection (connected: proxy to CP, standalone: resolve from cagent.yaml)
+- **Domain policy API**: Serves domain policy lookups (connected: proxy to CP, standalone: resolve from cagent.yaml)
 - **Beta features**: Gated by `BETA_FEATURES` env var (comma-separated). Currently: `email`
 
 ### Testing
@@ -154,18 +155,34 @@ npm run lint
 - **Networks**: `cell-net` (10.200.1.0/24, internal, no external access) and `infra-net` (10.200.2.0/24, can reach external). IPv6 disabled to prevent bypass
 - **Static IPs**: dns-filter=10.200.1.5, http-proxy=10.200.1.10, cell=10.200.1.20
 - **Profiles**: `dev` (runc), `standard` (gVisor), `admin` (admin UI via warden), `managed` (warden without UI), `auditing` (log shipping), `ssh` (FRP tunnel), `email` (email proxy - beta)
-- **Config generation**: `cagent.yaml` is the source of truth. Warden generates CoreDNS Corefile and Envoy config from it
+- **Config generation**: `cagent.yaml` is the primary source. In connected mode, warden merges CP domain policies into config generation (see Config Sources below)
 - **Security layers**: Seccomp profile blocks raw sockets, gVisor intercepts syscalls, Envoy enforces domain allowlist/rate limits/path filtering, CoreDNS blocks unauthorized DNS
 - **Vector sinks**: `configs/vector/sinks/standalone.yaml` (file backup + optional S3/ES) or `sinks/connected.yaml` (CP API + file backup), selected via `DATAPLANE_MODE` env var
 
 ## Data Flow
 
 1. Cell makes HTTP request via `HTTP_PROXY` (Envoy at 10.200.1.10:8443)
-2. Envoy checks domain against allowlist, enforces rate limits and path filtering
-3. Envoy injects credentials (if configured) and forwards request upstream
-4. DNS queries go through CoreDNS (10.200.1.5) which only resolves allowed domains
-5. Vector collects logs from Docker/Envoy/CoreDNS and writes to file (standalone) or ships to CP (connected)
-6. In connected mode, warden polls CP for policy updates and regenerates configs
+2. Envoy ext_authz calls warden for credential injection (returns credential headers if configured)
+3. Envoy local_ratelimit enforces per-domain rate limits (global default + per-route overrides)
+4. Envoy router matches domain (virtual host) and path (route rules), forwards to upstream or returns 403
+5. DNS queries go through CoreDNS (10.200.1.5) which only resolves allowed domains
+6. Vector collects logs from Docker/Envoy/CoreDNS and writes to file (standalone) or ships to CP (connected)
+7. In connected mode, warden polls CP for policy updates and regenerates configs
+
+## Config Sources (Standalone vs Connected)
+
+In standalone mode, `cagent.yaml` is the sole config source. In connected mode, warden syncs additional data from the control plane and merges it. The full breakdown:
+
+| Config Section | Source | Notes |
+|----------------|--------|-------|
+| `domains[]` | yaml + CP (merged) | CP domains synced via `GET /api/v1/domain-policies`; yaml entries take precedence. Credentials are NOT in config — ext_authz resolves them per-request. |
+| `dns` (upstream, cache_ttl) | yaml only | No CP equivalent |
+| `internal_services[]` | yaml only | devbox.local, etc. |
+| `circuit_breakers` | yaml only | No CP equivalent |
+| `rate_limits.default` | yaml only | Global fallback; per-domain overrides come from domains[] |
+| `security.seccomp_profile` | CP via heartbeat | Pushed in heartbeat response, not config generation |
+| `resources` (cpu/mem) | CP via heartbeat | Pushed in heartbeat response, not config generation |
+| `email.accounts[]` | yaml only (**gap**) | CP has `/api/v1/email-policies` but warden doesn't sync them yet |
 
 ## Important Files
 
@@ -174,7 +191,8 @@ npm run lint
 | `configs/cagent.yaml` | Unified data plane config |
 | `services/warden/config_generator.py` | Generates CoreDNS + Envoy configs |
 | `services/warden/main.py` | Warden: FastAPI app, polling loop, admin UI |
-| `services/warden/routers/domain_policy.py` | Domain policy API for Envoy Lua filter |
+| `services/warden/routers/domain_policy.py` | Domain policy API for domain lookups |
+| `services/warden/routers/ext_authz.py` | ext_authz endpoint for Envoy credential injection |
 | `docker-compose.yml` | Service definitions |
 | `dev_up.sh` | Dev environment orchestration |
 | `run_tests.sh` | Test runner |

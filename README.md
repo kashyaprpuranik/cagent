@@ -73,7 +73,7 @@ The `standard` profile uses [gVisor](https://gvisor.dev) to intercept syscalls i
 ### Credential Security
 | Control | Implementation |
 |---------|----------------|
-| Injection at proxy | Envoy Lua filter adds headers at egress |
+| Injection at proxy | Envoy ext_authz filter injects credentials at egress |
 | Short-lived cache | Credentials cached for 5 minutes |
 
 ## Quick Start

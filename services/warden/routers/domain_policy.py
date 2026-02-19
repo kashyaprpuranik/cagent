@@ -1,8 +1,8 @@
-"""Domain policy endpoint for Lua filter.
+"""Domain policy endpoint.
 
-Serves GET /api/v1/domain-policies/for-domain?domain=X so the Envoy Lua
-filter can get credential injection, rate limits, and path filtering from
-a single local endpoint instead of reaching the control plane directly.
+Serves GET /api/v1/domain-policies/for-domain?domain=X so the ext_authz
+endpoint can look up credential injection, rate limits, and path filtering
+from a single local endpoint instead of reaching the control plane directly.
 
 - Connected mode: forwards to CP, caches 5 minutes.
 - Standalone mode: builds response from cagent.yaml config.
@@ -143,7 +143,7 @@ def _resolve_devbox_alias(domain: str) -> str | None:
 
 @router.get("/api/v1/domain-policies/for-domain")
 async def get_domain_policy(domain: str = Query(..., min_length=1)):
-    """Get domain policy for Lua filter.
+    """Get domain policy for a given domain.
 
     devbox.local domains: always resolve locally from cagent.yaml
       (CP doesn't know about devbox.local aliases).

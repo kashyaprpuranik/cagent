@@ -283,7 +283,7 @@ async def diagnose_domain(
         code = recent_requests[0]["response_code"]
         flags = recent_requests[0]["response_flags"]
         if code == 403:
-            parts.append(f"Proxy returns 403 via Lua filter{f' (flags: {flags})' if flags else ''}.")
+            parts.append(f"Proxy returns 403{f' (flags: {flags})' if flags else ''}.")
         else:
             parts.append(f"Most recent response: HTTP {code}.")
 

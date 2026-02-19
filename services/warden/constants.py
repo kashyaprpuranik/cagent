@@ -29,7 +29,6 @@ FRPC_CONTAINER_NAME = "tunnel-client"
 CAGENT_CONFIG_PATH = os.environ.get("CAGENT_CONFIG_PATH", "/etc/cagent/cagent.yaml")
 COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Corefile")
 ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
-ENVOY_LUA_PATH = os.environ.get("ENVOY_LUA_PATH", "/etc/envoy/filter.lua")
 DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/cagent")
 
 # ---------------------------------------------------------------------------
