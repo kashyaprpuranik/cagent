@@ -19,6 +19,7 @@
 FROM ubuntu:22.04
 
 ARG VARIANT=lean
+ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 ENV VARIANT=${VARIANT}
 
@@ -103,20 +104,21 @@ RUN pip3 install --no-cache-dir \
 # Dev variant: Go, Rust, Cloud CLIs
 # =============================================================================
 RUN if [ "$VARIANT" = "dev" ] || [ "$VARIANT" = "ml" ]; then \
-    # Go
-    curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
+    # Go (multi-arch: TARGETARCH is amd64 or arm64)
+    curl -fsSL "https://go.dev/dl/go1.22.0.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xzf - \
     && echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh \
     # Rust
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && echo 'source $HOME/.cargo/env' >> /etc/profile.d/rust.sh \
-    # AWS CLI
-    && curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" \
+    # AWS CLI (multi-arch: map TARGETARCH to AWS naming)
+    && AWS_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
+    && curl "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o "/tmp/awscliv2.zip" \
     && unzip -q /tmp/awscliv2.zip -d /tmp \
     && /tmp/aws/install \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
-    # Docker CLI (for container management)
+    # Docker CLI (multi-arch: TARGETARCH matches Docker's arch naming)
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
+    && echo "deb [arch=${TARGETARCH} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
     && apt-get update && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/* \
     ; fi
