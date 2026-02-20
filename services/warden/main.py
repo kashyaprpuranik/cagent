@@ -144,10 +144,7 @@ def _get_current_seccomp_label(container) -> Optional[str]:
     before this feature was added).
     """
     try:
-        # Optimization: container.labels works on both list() and reload() attrs.
-        # Avoid unnecessary reload if labels are already present.
-        if container.labels is None:
-            container.reload()
+        container.reload()
         labels = container.labels or {}
         return labels.get("cagent.seccomp_profile")
     except Exception:
@@ -309,12 +306,8 @@ def _get_current_resource_limits(container) -> dict:
     Values are None if not set / unlimited.
     """
     try:
+        container.reload()
         host_config = container.attrs.get("HostConfig", {})
-        # Optimization: Only reload if we don't have detailed HostConfig (e.g. NanoCpus)
-        # container.list() returns a subset of HostConfig; container.reload() returns full.
-        if "NanoCpus" not in host_config:
-            container.reload()
-            host_config = container.attrs.get("HostConfig", {})
 
         # CPU: prefer NanoCpus (set by update and docker-compose --cpus),
         # fall back to CpuQuota/CpuPeriod
