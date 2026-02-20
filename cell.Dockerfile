@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # SSH Server
     openssh-server \
     # Core utilities
+    gosu \
     curl \
     wget \
     git \

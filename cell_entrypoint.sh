@@ -90,15 +90,15 @@ setup_ssh_keys
 setup_tmux
 recover_tmux_sessions
 
-# Start SSH daemon
+# Start SSH daemon (requires root for port 22)
 echo "Starting SSH server..."
 /usr/sbin/sshd
 
-# Keep container running
+# Drop root privileges — PID 1 runs as the cell user from here
 echo ""
 echo "Cell ready!"
 echo "  - SSH: port 22"
 echo "  - Sessions: auto-attach to tmux on login"
 echo "  - Workspace: $WORKSPACE (persistent)"
 echo ""
-exec tail -f /dev/null
+exec gosu "$USER_NAME" tail -f /dev/null
