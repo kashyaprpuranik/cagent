@@ -195,6 +195,17 @@ docker compose --profile dev --profile admin --profile auditing up -d
 docker compose --profile dev --profile admin --profile auditing --profile email up -d
 ```
 
+#### Multiple Cells
+
+Run multiple isolated cells on the same data plane. Each cell gets its own container with independent network isolation, sharing the same proxy, DNS filter, and policy configuration.
+
+```bash
+# 3 cells with admin UI and auditing
+docker compose --profile dev --profile admin --profile auditing up -d --scale cell-dev=3
+```
+
+Cells are named `cagent-cell-dev-1`, `cagent-cell-dev-2`, etc. All share the same `cell-net` network and are subject to the same domain allowlist, rate limits, and credential injection policies.
+
 **Accessing the Cell**
 
 | Method | How |
