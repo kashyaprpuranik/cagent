@@ -1,14 +1,27 @@
+import os
+import sys
 import pytest
 from unittest.mock import MagicMock, patch
 import json
 from datetime import datetime, timezone, timedelta
 
-# Import the module under test
-from services.warden.routers import analytics
+# Add services/warden to sys.path so 'constants' resolves at import time
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "warden")))
+
+# Mock docker client before importing analytics (constants.py calls docker.from_env() at module scope)
+mock_docker = MagicMock()
+sys.modules["docker"] = MagicMock()
+sys.modules["docker"].from_env.return_value = mock_docker
+sys.modules["docker"].errors = MagicMock()
+sys.modules["docker"].errors.NotFound = Exception
+mock_docker.containers.list.return_value = []
+
+from routers import analytics
 
 @pytest.fixture
 def mock_docker_client():
-    with patch("services.warden.routers.analytics.docker_client") as mock:
+    with patch("routers.analytics.docker_client") as mock:
+        mock.containers.list.return_value = []
         yield mock
 
 @pytest.fixture
@@ -99,8 +112,8 @@ def test_get_bandwidth(mock_docker_client, sample_logs):
     assert allowed["bytes_sent"] == 200
     assert allowed["bytes_received"] == 100
 
-@patch("services.warden.routers.analytics.subprocess.run")
-@patch("services.warden.routers.analytics.Path") # Mock Path to avoid reading real file
+@patch("routers.analytics.subprocess.run")
+@patch("routers.analytics.Path") # Mock Path to avoid reading real file
 def test_diagnose_domain(mock_path, mock_subprocess, mock_docker_client, sample_logs):
     # Setup logs mock
     mock_container = MagicMock()
