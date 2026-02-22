@@ -100,27 +100,34 @@ if [ "$RUN_E2E" = true ]; then
     cp configs/cagent.yaml configs/.cagent.yaml.bak
     cp configs/coredns/Corefile configs/coredns/.Corefile.bak
 
-    # Always clean up stale networks (may have wrong labels from previous runs)
-    for net in cagent-infra-net cagent-cell-net; do
-        if docker network inspect "$net" >/dev/null 2>&1; then
-            for cid in $(docker network inspect "$net" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null); do
-                echo "  Removing orphan container $cid from $net..."
-                docker stop "$cid" 2>/dev/null || true
-                docker rm "$cid" 2>/dev/null || true
-            done
-            docker network rm "$net" 2>/dev/null || true
-        fi
-    done
-
     if [ "$NEED_RESTART" = true ]; then
         echo "Stopping any existing containers first..."
-        docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
-        docker compose --profile standard --profile admin --profile email --profile auditing down 2>/dev/null || true
+        # Use -v to remove volumes (proxy-config may have stale envoy config from
+        # a prior connected-mode run, e.g. CP+DP e2e) and --remove-orphans to catch
+        # containers started with a different compose file (e.g. e2e override).
+        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
+
+        # Clean up stale networks (may have wrong labels or orphan endpoints)
+        for net in cagent-infra-net cagent-cell-net; do
+            if docker network inspect "$net" >/dev/null 2>&1; then
+                for cid in $(docker network inspect "$net" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null); do
+                    echo "  Removing orphan container $cid from $net..."
+                    docker stop "$cid" 2>/dev/null || true
+                    docker rm "$cid" 2>/dev/null || true
+                done
+                docker network rm "$net" 2>/dev/null || true
+            fi
+        done
+
+        # Also clean up e2e-bridge network left by CP+DP e2e
+        docker network rm e2e-bridge 2>/dev/null || true
+
         echo "Starting data plane (standalone, --profile dev --profile admin --profile auditing, 2 cells)..."
-        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --scale cell-dev=2
+        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --remove-orphans --scale cell-dev=2
         CONTAINERS_STARTED=true
         echo "Waiting for containers to stabilize..."
-        sleep 5
+        sleep 10
     else
         echo "Data plane already running, rebuilding images in case code changed..."
         DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --scale cell-dev=2

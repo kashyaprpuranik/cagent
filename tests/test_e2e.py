@@ -45,16 +45,25 @@ def _discover_cell_container_name() -> str:
 
 
 def is_data_plane_running():
-    """Check if data plane containers are running."""
+    """Check if data plane containers are running.
+
+    Uses ``docker ps -a`` and checks for status containing "Up" so we
+    detect containers that exist but are crash-looping (status would
+    show "Restarting" or "Exited").
+    """
     try:
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=http-proxy", "--format", "{{.Names}}"],
+            ["docker", "ps", "-a", "--filter", "name=http-proxy",
+             "--format", "{{.Names}} {{.Status}}"],
             capture_output=True,
             text=True,
             timeout=5
         )
-        return "http-proxy" in result.stdout
-    except:
+        for line in result.stdout.strip().splitlines():
+            if "http-proxy" in line and "Up" in line:
+                return True
+        return False
+    except Exception:
         return False
 
 
@@ -64,11 +73,31 @@ def data_plane_running():
 
     Warden restarts Envoy/CoreDNS on startup (config generation), so
     even after ``test.sh``'s initial sleep services may still be
-    coming back up.  Poll from a cell container until connectivity to
-    both the proxy and DNS filter is confirmed.
+    coming back up.  Poll until http-proxy is running (it may briefly
+    restart while warden regenerates its config after a fresh start).
     """
-    assert is_data_plane_running(), \
-        "Data plane not running — test.sh should have started it"
+    # Retry for up to 30s — after a fresh start, warden regenerates
+    # the Envoy config and restarts http-proxy, causing a brief gap.
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if is_data_plane_running():
+            break
+        time.sleep(2)
+    else:
+        # Provide diagnostic info on failure
+        try:
+            diag = subprocess.run(
+                ["docker", "ps", "-a", "--filter", "name=http-proxy",
+                 "--format", "{{.Names}} {{.Status}}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            status = diag.stdout.strip() or "(no http-proxy container found)"
+        except Exception:
+            status = "(docker command failed)"
+        pytest.fail(
+            f"Data plane not running after 30s — test.sh should have started it. "
+            f"http-proxy status: {status}"
+        )
 
     cell = _discover_cell_container_name()
 
