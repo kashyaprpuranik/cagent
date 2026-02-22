@@ -4,7 +4,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 # Add services/warden to sys.path so we can import main
-sys.path.append(os.path.abspath("services/warden"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "warden")))
 
 from fastapi.testclient import TestClient
 import pytest
@@ -19,14 +19,16 @@ sys.modules["docker"].errors.NotFound = Exception
 # Configure list to return empty list so discover_cell_container_names returns fallback
 mock_docker.containers.list.return_value = []
 
-# Patch constants
-with patch("services.warden.constants.docker_client", mock_docker):
-    from services.warden.main import app
+import main
+from routers import logs as logs_module
 
-client = TestClient(app)
+client = TestClient(main.app)
 
 def test_logs_access_control():
     # Setup mocks
+    test_docker = MagicMock()
+    test_docker.containers.list.return_value = []
+
     mock_container_managed = MagicMock()
     mock_container_managed.logs.return_value = b"managed logs"
 
@@ -41,16 +43,18 @@ def test_logs_access_control():
         else:
             raise Exception("Container not found")
 
-    mock_docker.containers.get.side_effect = get_container_side_effect
+    test_docker.containers.get.side_effect = get_container_side_effect
 
-    # 1. Test unmanaged container logs
-    # This should now return 403 Forbidden
-    response = client.get("/api/containers/unmanaged-container/logs")
-    assert response.status_code == 403
-    assert "Access denied" in response.json()["detail"]
+    # Patch docker_client directly in the logs module to survive test ordering
+    with patch.object(logs_module, "docker_client", test_docker):
+        # 1. Test unmanaged container logs
+        # This should now return 403 Forbidden
+        response = client.get("/api/containers/unmanaged-container/logs")
+        assert response.status_code == 403
+        assert "Access denied" in response.json()["detail"]
 
-    # 2. Test managed container logs
-    # 'cell' is in default managed containers list because mock_docker list returns []
-    response = client.get("/api/containers/cell/logs")
-    assert response.status_code == 200
-    assert response.json()["lines"] == ["managed logs"]
+        # 2. Test managed container logs
+        # 'cell' is in default managed containers list because mock_docker list returns []
+        response = client.get("/api/containers/cell/logs")
+        assert response.status_code == 200
+        assert response.json()["lines"] == ["managed logs"]

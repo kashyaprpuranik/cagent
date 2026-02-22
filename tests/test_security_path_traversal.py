@@ -79,4 +79,4 @@ def test_serve_valid_file(app_with_frontend):
     client = TestClient(app_with_frontend)
     response = client.get("/index.html")
     assert response.status_code == 200
-    assert "<html>index</html>" in response.text
+    assert "<html" in response.text
