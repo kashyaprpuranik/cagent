@@ -2,8 +2,9 @@ import asyncio
 import socket
 
 import docker
-from constants import discover_cell_container_names, docker_client
+from constants import ALLOWED_CORS_ORIGINS, discover_cell_container_names, docker_client
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from utils import validate_websocket_origin
 
 router = APIRouter()
 
@@ -33,6 +34,10 @@ def _get_raw_socket(sock):
 @router.websocket("/terminal/{name}")
 async def web_terminal(websocket: WebSocket, name: str):
     """Interactive terminal session via WebSocket."""
+    if not validate_websocket_origin(websocket, ALLOWED_CORS_ORIGINS):
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
 
     # Only allow terminal access to cell containers, not infrastructure
