@@ -1,6 +1,6 @@
 
-import sys
 import os
+import sys
 import unittest
 from unittest.mock import Mock
 
@@ -8,6 +8,7 @@ from unittest.mock import Mock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../services/warden')))
 
 from utils import validate_websocket_origin
+
 
 class TestWebSocketOriginValidation(unittest.TestCase):
     def setUp(self):
