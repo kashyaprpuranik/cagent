@@ -152,14 +152,11 @@ function ContainerCard({ container, readOnly }: { container: ContainerInfo; read
   const statusColor = isRunning ? 'text-green-400' : 'text-red-400';
 
   // Icon based on container name
-  const getIcon = () => {
-    if (container.name.includes('email')) return Mail;
-    if (container.name.includes('agent')) return Server;
-    if (container.name.includes('dns')) return Globe;
-    if (container.name.includes('proxy')) return Shield;
-    return Server;
-  };
-  const Icon = getIcon();
+  const Icon = container.name.includes('email') ? Mail
+    : container.name.includes('agent') ? Server
+    : container.name.includes('dns') ? Globe
+    : container.name.includes('proxy') ? Shield
+    : Server;
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">

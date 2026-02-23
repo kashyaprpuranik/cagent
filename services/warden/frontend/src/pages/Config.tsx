@@ -716,7 +716,8 @@ export default function ConfigPage() {
       searchParams.delete('add-domains');
       setSearchParams(searchParams, { replace: true });
     }
-  }, [searchParams, isReadOnly, config.domains, setSearchParams]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, isReadOnly, setSearchParams]);
 
   const saveMutation = useMutation({
     mutationFn: updateConfigRaw,

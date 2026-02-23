@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Terminal as TerminalIcon, RefreshCw, X, ChevronDown } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
@@ -28,11 +28,14 @@ export default function TerminalPage() {
   });
 
   // Extract agent containers (anything not infrastructure)
-  const agentContainers = containersData
-    ? Object.values(containersData.containers)
-        .filter((c) => !INFRA_CONTAINERS.has(c.name) && c.status === 'running')
-        .map((c) => c.name)
-    : [];
+  const agentContainers = useMemo(
+    () => containersData
+      ? Object.values(containersData.containers)
+          .filter((c) => !INFRA_CONTAINERS.has(c.name) && c.status === 'running')
+          .map((c) => c.name)
+      : [],
+    [containersData],
+  );
 
   // Auto-select first agent container
   useEffect(() => {
