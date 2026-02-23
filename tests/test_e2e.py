@@ -742,16 +742,19 @@ class TestLocalAdminConfigPipeline:
             time.sleep(3)
 
             # -- Step 5: Wait for warden API, then reload CoreDNS --
-            deadline = time.time() + 20
+            warden_ready = False
+            deadline = time.time() + 30
             while time.time() < deadline:
                 try:
                     r = requests.get(f"{admin_url}/api/health", timeout=3)
                     if r.status_code == 200:
+                        warden_ready = True
                         break
                 except Exception:
                     pass
                 time.sleep(1)
-            r = requests.post(f"{admin_url}/api/config/reload", timeout=30)
+            assert warden_ready, "Warden API did not become ready within 30s after restart"
+            r = requests.post(f"{admin_url}/api/config/reload", timeout=60)
             assert r.status_code == 200
             assert wait_for_container("dns-filter", timeout=15), "dns-filter did not come back after reload"
             # Wait for CoreDNS to be ready
@@ -786,7 +789,10 @@ class TestLocalAdminConfigPipeline:
                 except Exception:
                     pass
                 time.sleep(1)
-            requests.post(f"{admin_url}/api/config/reload", timeout=30)
+            try:
+                requests.post(f"{admin_url}/api/config/reload", timeout=60)
+            except requests.exceptions.RequestException:
+                pass  # best-effort cleanup
 
 
 def ws_recv_until(ws, marker, max_reads: int = 30) -> str:

@@ -1,4 +1,6 @@
+import asyncio
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import docker
@@ -84,23 +86,29 @@ async def update_config_raw(body: dict):
     return {"status": "updated"}
 
 
+def _restart_container(name: str) -> tuple[str, str]:
+    """Restart a container by name (blocking). Returns (name, result)."""
+    try:
+        container = docker_client.containers.get(name)
+        container.restart(timeout=10)
+        return name, "restarted"
+    except docker.errors.NotFound:
+        return name, "not_found"
+    except Exception as e:
+        return name, f"error: {e}"
+
+
 @router.post("/config/reload")
 async def reload_config():
     """Trigger config reload (regenerate CoreDNS + Envoy configs)."""
     if READ_ONLY:
         raise HTTPException(403, "Config reload is disabled in connected mode (managed by control plane)")
-    # This would trigger warden to reload
-    # For now, we restart the containers
+    # Restart containers in a thread pool so the event loop stays responsive
+    # (container.restart blocks for up to timeout seconds per container).
+    loop = asyncio.get_running_loop()
     results = {}
-
     for name in [COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME]:
-        try:
-            container = docker_client.containers.get(name)
-            container.restart(timeout=10)
-            results[name] = "restarted"
-        except docker.errors.NotFound:
-            results[name] = "not_found"
-        except Exception as e:
-            results[name] = f"error: {e}"
+        cname, status = await loop.run_in_executor(None, partial(_restart_container, name))
+        results[cname] = status
 
     return {"status": "reload_triggered", "results": results}
