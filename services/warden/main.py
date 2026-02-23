@@ -9,59 +9,52 @@ injection).
 Runs as a FastAPI server with the polling loop in a background thread.
 """
 
+import hashlib
+import json
+import logging
 import os
 import sys
-import time
-import json
-import hashlib
-import signal
-import logging
 import threading
-from contextlib import asynccontextmanager
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional, List
 from pathlib import Path
+from typing import List, Optional
 
 import docker
 import requests
 import yaml
-
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
 from config_generator import ConfigGenerator
 from constants import (
-    docker_client,
-    DATAPLANE_MODE,
-    CONTROL_PLANE_URL,
-    CONTROL_PLANE_TOKEN,
-    HEARTBEAT_INTERVAL,
-    CELL_LABEL,
-    CELL_CONTAINER_FALLBACK,
     CAGENT_CONFIG_PATH,
+    CELL_CONTAINER_FALLBACK,
+    CELL_LABEL,
+    CONFIG_SYNC_INTERVAL,
+    CONTROL_PLANE_TOKEN,
+    CONTROL_PLANE_URL,
+    COREDNS_CONTAINER_NAME,
     COREDNS_COREFILE_PATH,
+    DATA_PLANE_DIR,
+    DATAPLANE_MODE,
     ENVOY_CONFIG_PATH,
+    ENVOY_CONTAINER_NAME,
+    HEARTBEAT_INTERVAL,
+    MAX_HEARTBEAT_WORKERS,
     SECCOMP_PROFILES_DIR,
     VALID_SECCOMP_PROFILES,
-    CONFIG_SYNC_INTERVAL,
-    MAX_HEARTBEAT_WORKERS,
-    COREDNS_CONTAINER_NAME,
-    ENVOY_CONTAINER_NAME,
-    BETA_FEATURES,
-    DATA_PLANE_DIR,
+    docker_client,
 )
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 # Path to .env file for docker-compose resource overrides
 ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Config generator instance
@@ -81,6 +74,7 @@ _container_original_resources: dict = {}
 # ---------------------------------------------------------------------------
 # Container discovery
 # ---------------------------------------------------------------------------
+
 
 def discover_cell_containers() -> List:
     """Discover cell containers by the ``cagent.role=cell`` label.
@@ -120,6 +114,7 @@ def _workspace_volume_for(container) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Seccomp profile management
 # ---------------------------------------------------------------------------
+
 
 def _load_seccomp_profile(name: str) -> dict:
     """Read a seccomp profile JSON from disk.
@@ -205,12 +200,14 @@ def recreate_container_with_seccomp(container, profile_name: str) -> tuple:
         for mount in attrs.get("Mounts", []):
             mount_type = mount.get("Type", "volume")
             if mount_type == "volume":
-                mounts.append(docker.types.Mount(
-                    target=mount["Destination"],
-                    source=mount["Name"],
-                    type="volume",
-                    read_only=not mount.get("RW", True),
-                ))
+                mounts.append(
+                    docker.types.Mount(
+                        target=mount["Destination"],
+                        source=mount["Name"],
+                        type="volume",
+                        read_only=not mount.get("RW", True),
+                    )
+                )
 
         # DNS
         dns = host_config.get("Dns", [])
@@ -221,8 +218,7 @@ def recreate_container_with_seccomp(container, profile_name: str) -> tuple:
         # Security opts - keep non-seccomp entries, replace seccomp
         old_security_opt = host_config.get("SecurityOpt", [])
         new_security_opt = [
-            opt for opt in old_security_opt
-            if not opt.startswith("seccomp=") and not opt.startswith("seccomp:")
+            opt for opt in old_security_opt if not opt.startswith("seccomp=") and not opt.startswith("seccomp:")
         ]
         new_security_opt.append(f"seccomp={inline_json}")
 
@@ -381,7 +377,7 @@ def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, 
 
     try:
         logger.info(f"Updating resource limits on {name}: {data}")
-        url = container.client.api._url('/containers/{0}/update', container.id)
+        url = container.client.api._url("/containers/{0}/update", container.id)
         res = container.client.api._post_json(url, data=data)
         container.client.api._result(res, True)
         msg = f"Resource limits updated on {name}"
@@ -395,6 +391,7 @@ def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, 
 # ---------------------------------------------------------------------------
 # Status helpers
 # ---------------------------------------------------------------------------
+
 
 def get_container_status(container) -> dict:
     """Get status metrics for a single cell container."""
@@ -431,10 +428,10 @@ def get_container_status(container) -> dict:
             stats = container.stats(stream=False)
 
             # CPU calculation
-            cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - \
-                       stats["precpu_stats"]["cpu_usage"]["total_usage"]
-            system_delta = stats["cpu_stats"]["system_cpu_usage"] - \
-                          stats["precpu_stats"]["system_cpu_usage"]
+            cpu_delta = (
+                stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"]
+            )
+            system_delta = stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"]
             num_cpus = stats["cpu_stats"].get("online_cpus", 1)
 
             if system_delta > 0:
@@ -462,6 +459,7 @@ def get_container_status(container) -> dict:
 # ---------------------------------------------------------------------------
 # Command execution
 # ---------------------------------------------------------------------------
+
 
 def execute_command(command: str, container, args: Optional[dict] = None) -> tuple:
     """Execute a command on a specific cell container.
@@ -524,6 +522,7 @@ def execute_command(command: str, container, args: Optional[dict] = None) -> tup
 # Infrastructure restarts (shared across all cells)
 # ---------------------------------------------------------------------------
 
+
 def restart_coredns():
     """Restart CoreDNS container to pick up new config."""
     try:
@@ -558,12 +557,10 @@ def reload_envoy():
 # Config generation (shared — same Corefile / Envoy config for all cells)
 # ---------------------------------------------------------------------------
 
+
 def _stable_hash(content: str) -> str:
     """Hash content after stripping auto-generated timestamp lines."""
-    stable = "\n".join(
-        line for line in content.splitlines()
-        if "Generated:" not in line
-    )
+    stable = "\n".join(line for line in content.splitlines() if "Generated:" not in line)
     return hashlib.md5(stable.encode()).hexdigest()
 
 
@@ -573,10 +570,12 @@ class _ConfigState:
     Encapsulated in a class instead of bare module globals so there is a
     single, obvious mutation point and no ``global`` statements needed.
     """
+
     def __init__(self):
         self.envoy_hash: Optional[str] = None
         self.corefile_hash: Optional[str] = None
         self.last_policy_version: Optional[int] = None
+
 
 _config_state = _ConfigState()
 
@@ -625,6 +624,7 @@ def regenerate_configs(additional_domains: list = None) -> bool:
             # Invalidate caches when config changes
             from routers.domain_policy import invalidate_cache
             from routers.ext_authz import invalidate_cache as invalidate_ext_authz_cache
+
             invalidate_cache()
             invalidate_ext_authz_cache()
             return True
@@ -704,6 +704,7 @@ def sync_config() -> bool:
 # ---------------------------------------------------------------------------
 # Heartbeat
 # ---------------------------------------------------------------------------
+
 
 def _send_bare_heartbeat(cell_name: str, command: str, result: str, message: str):
     """Send a heartbeat without a live container (e.g., after wipe).
@@ -786,6 +787,7 @@ def send_heartbeat(container) -> Optional[dict]:
 # Main loop
 # ---------------------------------------------------------------------------
 
+
 def _heartbeat_and_handle(container):
     """Send heartbeat for one container and execute any pending command.
 
@@ -812,10 +814,7 @@ def _heartbeat_and_handle(container):
                 "result": result_str,
                 "message": message,
             }
-        logger.info(
-            f"Command {command} on {container.name} "
-            f"{'succeeded' if success else 'failed'}: {message}"
-        )
+        logger.info(f"Command {command} on {container.name} {'succeeded' if success else 'failed'}: {message}")
         # Wipe removes the container, so it won't be discovered next cycle.
         # Send the result immediately via a bare heartbeat.
         if command == "wipe":
@@ -831,10 +830,7 @@ def _heartbeat_and_handle(container):
         current_label = _get_current_seccomp_label(container)
         # Skip unlabelled containers (existing deployments) and gVisor containers
         if current_label is not None and current_label != desired_profile:
-            logger.info(
-                f"Seccomp mismatch on {container.name}: "
-                f"current={current_label}, desired={desired_profile}"
-            )
+            logger.info(f"Seccomp mismatch on {container.name}: current={current_label}, desired={desired_profile}")
             success, message = recreate_container_with_seccomp(container, desired_profile)
             seccomp_changed = True
             with _command_results_lock:
@@ -893,7 +889,7 @@ def _heartbeat_and_handle(container):
             restore_data = _container_original_resources[container.name]
             try:
                 logger.info(f"Restoring resource limits on {container.name}: {restore_data}")
-                url = container.client.api._url('/containers/{0}/update', container.id)
+                url = container.client.api._url("/containers/{0}/update", container.id)
                 res = container.client.api._post_json(url, data=restore_data)
                 container.client.api._result(res, True)
                 logger.info(f"Resource limits restored on {container.name}")
@@ -925,8 +921,7 @@ def _check_standalone_seccomp(agents):
             current_label = _get_current_seccomp_label(container)
             if current_label is not None and current_label != desired:
                 logger.info(
-                    f"Standalone seccomp mismatch on {container.name}: "
-                    f"current={current_label}, desired={desired}"
+                    f"Standalone seccomp mismatch on {container.name}: current={current_label}, desired={desired}"
                 )
                 recreate_container_with_seccomp(container, desired)
     except Exception as e:
@@ -1066,6 +1061,7 @@ def main_loop():
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the polling loop in a background thread."""
@@ -1073,6 +1069,7 @@ async def lifespan(app: FastAPI):
     loop_thread.start()
     logger.info("Polling loop thread started")
     yield
+
 
 app = FastAPI(
     title="Cagent Warden",
@@ -1091,9 +1088,7 @@ app.add_middleware(
 )
 
 # Register routers
-from routers import health, config, containers, logs, terminal, analytics, domain_policy
-from routers import ssh_tunnel
-from routers import ext_authz
+from routers import analytics, config, containers, domain_policy, ext_authz, health, logs, ssh_tunnel, terminal
 
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(config.router, prefix="/api", tags=["config"])

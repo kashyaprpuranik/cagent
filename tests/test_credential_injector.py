@@ -5,14 +5,13 @@ These tests verify the domain matching and header formatting logic used
 by the ext_authz endpoint for credential injection.
 """
 
-import pytest
-
 
 class TestDomainMatching:
     """Test domain matching logic used by credential injection."""
 
     def test_exact_domain_match(self):
         """Should match exact domains."""
+
         def match_domain(pattern: str, domain: str) -> bool:
             """Match domain against pattern (supports wildcard prefix)."""
             if not pattern:
@@ -23,15 +22,16 @@ class TestDomainMatching:
             return domain == pattern
 
         # Exact matches
-        assert match_domain("api.openai.com", "api.openai.com") == True
-        assert match_domain("api.github.com", "api.github.com") == True
+        assert match_domain("api.openai.com", "api.openai.com")
+        assert match_domain("api.github.com", "api.github.com")
 
         # Should not match different domains
-        assert match_domain("api.openai.com", "api.anthropic.com") == False
-        assert match_domain("github.com", "api.github.com") == False
+        assert not match_domain("api.openai.com", "api.anthropic.com")
+        assert not match_domain("github.com", "api.github.com")
 
     def test_wildcard_domain_match(self):
         """Should match wildcard domain patterns."""
+
         def match_domain(pattern: str, domain: str) -> bool:
             if not pattern:
                 return False
@@ -41,18 +41,19 @@ class TestDomainMatching:
             return domain == pattern
 
         # Wildcard matches
-        assert match_domain("*.github.com", "api.github.com") == True
-        assert match_domain("*.github.com", "raw.github.com") == True
-        assert match_domain("*.github.com", "github.com") == True
+        assert match_domain("*.github.com", "api.github.com")
+        assert match_domain("*.github.com", "raw.github.com")
+        assert match_domain("*.github.com", "github.com")
 
         # Should not match unrelated domains
-        assert match_domain("*.github.com", "githubusercontent.com") == False
-        assert match_domain("*.github.com", "evil-github.com") == False
+        assert not match_domain("*.github.com", "githubusercontent.com")
+        assert not match_domain("*.github.com", "evil-github.com")
 
     def test_host_with_port(self):
         """Should strip port from host before matching."""
+
         def clean_host(host):
-            return host.split(':')[0] if ':' in host else host
+            return host.split(":")[0] if ":" in host else host
 
         assert clean_host("api.github.com:443") == "api.github.com"
         assert clean_host("api.github.com") == "api.github.com"
@@ -64,6 +65,7 @@ class TestHeaderFormatting:
 
     def test_bearer_token_format(self):
         """Should format Bearer token correctly."""
+
         def format_header(template: str, value: str) -> str:
             return template.replace("{value}", value)
 
@@ -73,6 +75,7 @@ class TestHeaderFormatting:
 
     def test_custom_header_format(self):
         """Should handle custom header formats."""
+
         def format_header(template: str, value: str) -> str:
             return template.replace("{value}", value)
 
@@ -92,11 +95,8 @@ class TestCredentialResponseParsing:
             try:
                 data = json.loads(body)
                 if data.get("matched"):
-                    return {
-                        "header_name": data.get("header_name"),
-                        "header_value": data.get("header_value")
-                    }
-            except:
+                    return {"header_name": data.get("header_name"), "header_value": data.get("header_value")}
+            except Exception:
                 pass
             return None
 
@@ -115,11 +115,8 @@ class TestCredentialResponseParsing:
             try:
                 data = json.loads(body)
                 if data.get("matched"):
-                    return {
-                        "header_name": data.get("header_name"),
-                        "header_value": data.get("header_value")
-                    }
-            except:
+                    return {"header_name": data.get("header_name"), "header_value": data.get("header_value")}
+            except Exception:
                 pass
             return None
 
@@ -135,11 +132,8 @@ class TestCredentialResponseParsing:
             try:
                 data = json.loads(body)
                 if data.get("matched"):
-                    return {
-                        "header_name": data.get("header_name"),
-                        "header_value": data.get("header_value")
-                    }
-            except:
+                    return {"header_name": data.get("header_name"), "header_value": data.get("header_value")}
+            except Exception:
                 pass
             return None
 
@@ -179,18 +173,18 @@ class TestDevboxLocalMapping:
         import re
 
         def is_devbox_local(host):
-            host_clean = host.split(':')[0] if ':' in host else host
-            return bool(re.match(r'.*\.devbox\.local$', host_clean))
+            host_clean = host.split(":")[0] if ":" in host else host
+            return bool(re.match(r".*\.devbox\.local$", host_clean))
 
         # devbox.local domains
-        assert is_devbox_local("openai.devbox.local") == True
-        assert is_devbox_local("api-github-com.devbox.local") == True
-        assert is_devbox_local("openai.devbox.local:80") == True
+        assert is_devbox_local("openai.devbox.local")
+        assert is_devbox_local("api-github-com.devbox.local")
+        assert is_devbox_local("openai.devbox.local:80")
 
         # NOT devbox.local domains (regular domains)
-        assert is_devbox_local("api.openai.com") == False
-        assert is_devbox_local("api.github.com") == False
-        assert is_devbox_local("devbox.local") == False  # No subdomain
+        assert not is_devbox_local("api.openai.com")
+        assert not is_devbox_local("api.github.com")
+        assert not is_devbox_local("devbox.local")  # No subdomain
 
     def test_https_domains_not_rewritten(self):
         """HTTPS requests to real domains should NOT be mapped.
@@ -202,10 +196,10 @@ class TestDevboxLocalMapping:
 
         def get_real_domain(host, mappings):
             """Simulate domain resolution logic."""
-            host_clean = host.split(':')[0] if ':' in host else host
+            host_clean = host.split(":")[0] if ":" in host else host
 
             # Only map devbox.local domains
-            if re.match(r'.*\.devbox\.local$', host_clean):
+            if re.match(r".*\.devbox\.local$", host_clean):
                 return mappings.get(host_clean, host_clean), True
 
             # Regular domains pass through unchanged
@@ -219,17 +213,17 @@ class TestDevboxLocalMapping:
         # devbox.local -> maps to real domain
         domain, is_local = get_real_domain("openai.devbox.local", mappings)
         assert domain == "api.openai.com"
-        assert is_local == True
+        assert is_local
 
         # Real domain -> passes through unchanged (CONNECT tunnel)
         domain, is_local = get_real_domain("api.openai.com", mappings)
         assert domain == "api.openai.com"
-        assert is_local == False
+        assert not is_local
 
         # Unknown devbox.local -> stays as-is
         domain, is_local = get_real_domain("unknown.devbox.local", mappings)
         assert domain == "unknown.devbox.local"
-        assert is_local == True
+        assert is_local
 
     def test_credential_injection_only_for_devbox_local(self):
         """Credentials should only be looked up for mapped devbox.local domains."""
@@ -237,10 +231,10 @@ class TestDevboxLocalMapping:
 
         def should_inject_credentials(host, mappings):
             """Determine if we should attempt credential injection."""
-            host_clean = host.split(':')[0] if ':' in host else host
+            host_clean = host.split(":")[0] if ":" in host else host
 
             # For devbox.local, map to real domain and inject
-            if re.match(r'.*\.devbox\.local$', host_clean):
+            if re.match(r".*\.devbox\.local$", host_clean):
                 real_domain = mappings.get(host_clean)
                 if real_domain:
                     return True, real_domain
@@ -255,13 +249,13 @@ class TestDevboxLocalMapping:
 
         # devbox.local with known alias -> inject
         inject, domain = should_inject_credentials("openai.devbox.local", mappings)
-        assert inject == True
+        assert inject
         assert domain == "api.openai.com"
 
         # devbox.local with unknown alias -> don't inject
         inject, domain = should_inject_credentials("unknown.devbox.local", mappings)
-        assert inject == False
+        assert not inject
 
         # Direct HTTPS domain -> can't inject (CONNECT tunnel)
         inject, domain = should_inject_credentials("api.openai.com", mappings)
-        assert inject == False
+        assert not inject

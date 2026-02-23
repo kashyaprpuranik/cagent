@@ -1,9 +1,10 @@
+import json
 import os
 import sys
-import pytest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
-import json
-from datetime import datetime, timezone, timedelta
+
+import pytest
 
 # Add services/warden to sys.path so 'constants' resolves at import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "warden")))
@@ -18,44 +19,59 @@ mock_docker.containers.list.return_value = []
 
 from routers import analytics
 
+
 @pytest.fixture
 def mock_docker_client():
     with patch("routers.analytics.docker_client") as mock:
         mock.containers.list.return_value = []
         yield mock
 
+
 @pytest.fixture
 def sample_logs():
     now = datetime.now(timezone.utc)
     logs = []
     # Blocked entry
-    logs.append(json.dumps({
-        "timestamp": now.isoformat(),
-        "response_code": 403,
-        "authority": "blocked.com",
-        "bytes_sent": 100,
-        "bytes_received": 50,
-        "duration_ms": 10
-    }))
+    logs.append(
+        json.dumps(
+            {
+                "timestamp": now.isoformat(),
+                "response_code": 403,
+                "authority": "blocked.com",
+                "bytes_sent": 100,
+                "bytes_received": 50,
+                "duration_ms": 10,
+            }
+        )
+    )
     # Allowed entry
-    logs.append(json.dumps({
-        "timestamp": (now - timedelta(minutes=10)).isoformat(),
-        "response_code": 200,
-        "authority": "allowed.com",
-        "bytes_sent": 200,
-        "bytes_received": 100,
-        "duration_ms": 20
-    }))
+    logs.append(
+        json.dumps(
+            {
+                "timestamp": (now - timedelta(minutes=10)).isoformat(),
+                "response_code": 200,
+                "authority": "allowed.com",
+                "bytes_sent": 200,
+                "bytes_received": 100,
+                "duration_ms": 20,
+            }
+        )
+    )
     # Another blocked entry
-    logs.append(json.dumps({
-        "timestamp": (now - timedelta(minutes=5)).isoformat(),
-        "response_code": 403,
-        "authority": "blocked.com",
-        "bytes_sent": 100,
-        "bytes_received": 50,
-        "duration_ms": 15
-    }))
+    logs.append(
+        json.dumps(
+            {
+                "timestamp": (now - timedelta(minutes=5)).isoformat(),
+                "response_code": 403,
+                "authority": "blocked.com",
+                "bytes_sent": 100,
+                "bytes_received": 50,
+                "duration_ms": 15,
+            }
+        )
+    )
     return "\n".join(logs)
+
 
 def test_get_blocked_domains(mock_docker_client, sample_logs):
     # Setup mock
@@ -72,6 +88,7 @@ def test_get_blocked_domains(mock_docker_client, sample_logs):
     assert len(domains) == 1
     assert domains[0]["domain"] == "blocked.com"
     assert domains[0]["count"] == 2
+
 
 def test_get_blocked_timeseries(mock_docker_client, sample_logs):
     # Setup mock
@@ -90,6 +107,7 @@ def test_get_blocked_timeseries(mock_docker_client, sample_logs):
     total_count = sum(b["count"] for b in buckets)
     assert total_count == 2
 
+
 def test_get_bandwidth(mock_docker_client, sample_logs):
     # Setup mock
     mock_container = MagicMock()
@@ -102,7 +120,7 @@ def test_get_bandwidth(mock_docker_client, sample_logs):
     # Verify
     assert "domains" in result
     domains = result["domains"]
-    assert len(domains) == 2 # blocked.com and allowed.com
+    assert len(domains) == 2  # blocked.com and allowed.com
 
     blocked = next(d for d in domains if d["domain"] == "blocked.com")
     assert blocked["bytes_sent"] == 200
@@ -112,13 +130,16 @@ def test_get_bandwidth(mock_docker_client, sample_logs):
     assert allowed["bytes_sent"] == 200
     assert allowed["bytes_received"] == 100
 
+
 @patch("routers.analytics.subprocess.run")
-@patch("routers.analytics.Path") # Mock Path to avoid reading real file
+@patch("routers.analytics.Path")  # Mock Path to avoid reading real file
 def test_diagnose_domain(mock_path, mock_subprocess, mock_docker_client, sample_logs):
     # Setup logs mock
     mock_container = MagicMock()
     mock_container.logs.return_value = sample_logs.encode("utf-8")
-    mock_docker_client.containers.get.side_effect = lambda name: mock_container # Returns same mock for both ENVOY and COREDNS lookup if needed, but diagnose uses subprocess for DNS
+    mock_docker_client.containers.get.side_effect = lambda name: (
+        mock_container
+    )  # Returns same mock for both ENVOY and COREDNS lookup if needed, but diagnose uses subprocess for DNS
 
     # Setup subprocess mock for DNS
     mock_proc = MagicMock()
@@ -137,6 +158,6 @@ def test_diagnose_domain(mock_path, mock_subprocess, mock_docker_client, sample_
 
     # Verify
     assert result["domain"] == "blocked.com"
-    assert result["in_allowlist"] == False
+    assert not result["in_allowlist"]
     assert result["dns_result"] == "1.2.3.4"
     assert "Proxy returns 403" in result["diagnosis"]

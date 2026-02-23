@@ -3,10 +3,11 @@ Generic IMAP/SMTP provider - uses plain password authentication.
 """
 
 import imaplib
-import smtplib
 import logging
+import smtplib
 
 from config import EmailAccount
+
 from .base import EmailProvider
 
 logger = logging.getLogger(__name__)

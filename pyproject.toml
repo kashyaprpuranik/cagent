@@ -4,7 +4,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]  # pyflakes + pycodestyle + isort
-ignore = ["E501"]               # line length handled by formatter
+ignore = ["E501", "E402"]       # E501: line length handled by formatter; E402: late imports (intentional for setup/mock patterns)
 
 [tool.ruff.lint.isort]
 known-first-party = ["warden"]

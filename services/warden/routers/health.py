@@ -1,22 +1,20 @@
 import socket
 from datetime import datetime
 
-from fastapi import APIRouter
-
 import docker
-
 from constants import (
+    BETA_FEATURES,
+    CAGENT_CONFIG_PATH,
     CELL_CONTAINER_NAME,
     COREDNS_CONTAINER_NAME,
-    ENVOY_CONTAINER_NAME,
-    FRPC_CONTAINER_NAME,
-    CAGENT_CONFIG_PATH,
     DATA_PLANE_DIR,
     DATAPLANE_MODE,
-    BETA_FEATURES,
+    ENVOY_CONTAINER_NAME,
+    FRPC_CONTAINER_NAME,
     MANAGED_CONTAINERS,
     docker_client,
 )
+from fastapi import APIRouter
 
 router = APIRouter()
 
@@ -55,12 +53,11 @@ async def detailed_health():
             resolver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             resolver.settimeout(3)
             # Build a minimal DNS query for google.com A record
-            import struct
-            query = b'\x12\x34'  # transaction ID
-            query += b'\x01\x00'  # flags: standard query, recursion desired
-            query += b'\x00\x01\x00\x00\x00\x00\x00\x00'  # 1 question
-            query += b'\x06google\x03com\x00'  # google.com
-            query += b'\x00\x01\x00\x01'  # type A, class IN
+            query = b"\x12\x34"  # transaction ID
+            query += b"\x01\x00"  # flags: standard query, recursion desired
+            query += b"\x00\x01\x00\x00\x00\x00\x00\x00"  # 1 question
+            query += b"\x06google\x03com\x00"  # google.com
+            query += b"\x00\x01\x00\x01"  # type A, class IN
             resolver.sendto(query, ("10.200.2.5", 53))
             data, _ = resolver.recvfrom(512)
             resolver.close()
@@ -111,6 +108,6 @@ async def info():
             "cell": CELL_CONTAINER_NAME,
             "dns": COREDNS_CONTAINER_NAME,
             "http_proxy": ENVOY_CONTAINER_NAME,
-            "tunnel": FRPC_CONTAINER_NAME
-        }
+            "tunnel": FRPC_CONTAINER_NAME,
+        },
     }

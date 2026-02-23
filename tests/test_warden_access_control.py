@@ -1,13 +1,11 @@
-
-import sys
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 # Add services/warden to sys.path so we can import main
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "warden")))
 
 from fastapi.testclient import TestClient
-import pytest
 
 # Mock docker client before importing main which imports constants which creates docker_client
 mock_docker = MagicMock()
@@ -23,6 +21,7 @@ import main
 from routers import logs as logs_module
 
 client = TestClient(main.app)
+
 
 def test_logs_access_control():
     # Setup mocks

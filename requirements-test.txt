@@ -6,3 +6,9 @@ pyyaml>=6.0.0
 dnspython>=2.4.0
 requests>=2.31.0
 websocket-client>=1.7.0
+
+# Warden runtime dependencies (needed by unit tests that import warden modules)
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic>=2.0.0
+websockets==12.0

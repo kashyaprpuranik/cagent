@@ -8,14 +8,13 @@ from pathlib import Path
 
 import docker
 import yaml
-from fastapi import APIRouter, Query, HTTPException
-
-from constants import ENVOY_CONTAINER_NAME, COREDNS_CONTAINER_NAME, CAGENT_CONFIG_PATH, docker_client
+from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, docker_client
+from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter()
 
 # Only allow valid DNS domain characters to prevent command injection in nslookup
-_VALID_DOMAIN_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
+_VALID_DOMAIN_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 def _get_envoy_logs(hours: int) -> str:
@@ -158,9 +157,7 @@ def get_bandwidth(
     """Get bandwidth usage per domain from Envoy access logs."""
     raw = _get_envoy_logs(hours)
 
-    domain_stats: dict[str, dict] = defaultdict(
-        lambda: {"bytes_sent": 0, "bytes_received": 0, "request_count": 0}
-    )
+    domain_stats: dict[str, dict] = defaultdict(lambda: {"bytes_sent": 0, "bytes_received": 0, "request_count": 0})
 
     for entry in _parse_log_entries(raw):
         authority = entry.get("authority", "")
@@ -223,12 +220,14 @@ def diagnose_domain(
     # Check DNS resolution via CoreDNS
     dns_result = None
     try:
-        container = docker_client.containers.get(COREDNS_CONTAINER_NAME)
+        docker_client.containers.get(COREDNS_CONTAINER_NAME)
         # Get CoreDNS IP from container networks
         dns_ip = "10.200.1.5"
         result = subprocess.run(
             ["docker", "exec", COREDNS_CONTAINER_NAME, "nslookup", domain, dns_ip],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if "NXDOMAIN" in result.stdout or "NXDOMAIN" in result.stderr:
             dns_result = "NXDOMAIN"
@@ -254,14 +253,16 @@ def diagnose_domain(
             authority = entry.get("authority", "")
             if authority != domain:
                 continue
-            recent_requests.append({
-                "timestamp": entry.get("timestamp", ""),
-                "method": entry.get("method", ""),
-                "path": entry.get("path", ""),
-                "response_code": int(entry.get("response_code", 0)),
-                "response_flags": entry.get("response_flags", ""),
-                "duration_ms": int(entry.get("duration_ms", 0)),
-            })
+            recent_requests.append(
+                {
+                    "timestamp": entry.get("timestamp", ""),
+                    "method": entry.get("method", ""),
+                    "path": entry.get("path", ""),
+                    "response_code": int(entry.get("response_code", 0)),
+                    "response_flags": entry.get("response_flags", ""),
+                    "duration_ms": int(entry.get("duration_ms", 0)),
+                }
+            )
         # Keep only last 5, most recent first
         recent_requests = recent_requests[-5:][::-1]
     except Exception:

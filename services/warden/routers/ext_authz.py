@@ -11,15 +11,13 @@ import logging
 import time
 
 import requests
+from constants import (
+    CONTROL_PLANE_TOKEN,
+    CONTROL_PLANE_URL,
+    DATAPLANE_MODE,
+)
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
-from pathlib import Path
-
-from constants import (
-    DATAPLANE_MODE,
-    CONTROL_PLANE_URL,
-    CONTROL_PLANE_TOKEN,
-)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

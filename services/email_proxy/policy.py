@@ -5,9 +5,10 @@ Uses fnmatch-style patterns for email address matching and
 in-memory token bucket for rate limiting.
 """
 
-import time
 import fnmatch
 import logging
+import time
+
 from config import EmailPolicy
 
 logger = logging.getLogger(__name__)
@@ -21,10 +22,7 @@ def check_recipients_allowed(recipients: list[str], policy: EmailPolicy) -> list
     disallowed = []
     for addr in recipients:
         addr_lower = addr.lower().strip()
-        if not any(
-            fnmatch.fnmatch(addr_lower, pattern.lower())
-            for pattern in policy.allowed_recipients
-        ):
+        if not any(fnmatch.fnmatch(addr_lower, pattern.lower()) for pattern in policy.allowed_recipients):
             disallowed.append(addr)
     return disallowed
 
@@ -34,10 +32,7 @@ def check_sender_allowed(sender: str, policy: EmailPolicy) -> bool:
     if "*" in policy.allowed_senders:
         return True
     sender_lower = sender.lower().strip()
-    return any(
-        fnmatch.fnmatch(sender_lower, pattern.lower())
-        for pattern in policy.allowed_senders
-    )
+    return any(fnmatch.fnmatch(sender_lower, pattern.lower()) for pattern in policy.allowed_senders)
 
 
 class RateLimiter:

@@ -3,8 +3,6 @@ Tests for the DNS filter (CoreDNS) configuration.
 """
 
 import pytest
-import subprocess
-from pathlib import Path
 
 
 class TestCoreDNSConfig:
@@ -63,18 +61,14 @@ class TestDNSFilterWithContainer:
         container = client.containers.run(
             "coredns/coredns:latest",
             command=["-conf", "/Corefile"],
-            volumes={
-                str(configs_dir / "coredns" / "Corefile"): {
-                    "bind": "/Corefile",
-                    "mode": "ro"
-                }
-            },
+            volumes={str(configs_dir / "coredns" / "Corefile"): {"bind": "/Corefile", "mode": "ro"}},
             detach=True,
             remove=True,
         )
 
         # Wait for container to be ready
         import time
+
         time.sleep(2)
 
         yield container
@@ -82,7 +76,7 @@ class TestDNSFilterWithContainer:
         # Cleanup
         try:
             container.stop(timeout=5)
-        except:
+        except Exception:
             pass
 
 
@@ -96,14 +90,14 @@ class TestDNSAllowlist:
 
         # Extract domains that have forward directives
         allowed_domains = []
-        lines = content.split('\n')
+        lines = content.split("\n")
 
         for i, line in enumerate(lines):
             line = line.strip()
             # Domain blocks look like "domain.com {"
-            if line.endswith('{') and not line.startswith('.') and not line.startswith('#'):
-                domain = line.rstrip(' {').strip()
-                if domain and '.' in domain:
+            if line.endswith("{") and not line.startswith(".") and not line.startswith("#"):
+                domain = line.rstrip(" {").strip()
+                if domain and "." in domain:
                     allowed_domains.append(domain)
 
         # Should have our key domains

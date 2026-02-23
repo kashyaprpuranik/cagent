@@ -5,35 +5,39 @@ Supports Gmail (OAuth2), Outlook/M365 (OAuth2), and generic IMAP/SMTP (password)
 Enforces address allowlists and rate limits per account.
 """
 
-import logging
 import json
+import logging
 import re
 import sys
 from contextlib import asynccontextmanager
 
+from config import EmailAccount, load_email_config
 from fastapi import FastAPI, HTTPException, Query, Response
-from pydantic import BaseModel
-
-from config import load_email_config, EmailAccount
+from policy import check_recipients_allowed, check_sender_allowed, rate_limiter
 from providers import create_provider
 from providers.base import EmailProvider
-from policy import check_recipients_allowed, check_sender_allowed, rate_limiter
+from pydantic import BaseModel
 
 
 def _sanitize_filename(filename: str) -> str:
     """Remove characters that could cause header injection or path traversal."""
-    return re.sub(r'[\r\n\x00/\\]', '', filename)[:255] or "attachment"
+    return re.sub(r"[\r\n\x00/\\]", "", filename)[:255] or "attachment"
+
 
 # JSON logging to stdout
 handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter(
-    json.dumps({
-        "timestamp": "%(asctime)s",
-        "level": "%(levelname)s",
-        "logger": "%(name)s",
-        "message": "%(message)s",
-    })
-))
+handler.setFormatter(
+    logging.Formatter(
+        json.dumps(
+            {
+                "timestamp": "%(asctime)s",
+                "level": "%(levelname)s",
+                "logger": "%(name)s",
+                "message": "%(message)s",
+            }
+        )
+    )
+)
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger("email_proxy")
 
@@ -66,6 +70,7 @@ app = FastAPI(title="Email Proxy", lifespan=lifespan)
 # Pydantic Models
 # =========================================================================
 
+
 class SendRequest(BaseModel):
     account: str
     to: list[str]
@@ -90,6 +95,7 @@ class FoldersRequest(BaseModel):
 # Helpers
 # =========================================================================
 
+
 def _get_provider(account_name: str) -> tuple[EmailProvider, EmailAccount]:
     """Get provider and account by name, or raise 404."""
     if account_name not in providers:
@@ -100,6 +106,7 @@ def _get_provider(account_name: str) -> tuple[EmailProvider, EmailAccount]:
 # =========================================================================
 # Endpoints
 # =========================================================================
+
 
 @app.get("/health")
 def health():
@@ -137,16 +144,13 @@ def send_email(req: SendRequest):
 
     disallowed = check_recipients_allowed(all_recipients, acct.policy)
     if disallowed:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Recipients not allowed by policy: {', '.join(disallowed)}"
-        )
+        raise HTTPException(status_code=403, detail=f"Recipients not allowed by policy: {', '.join(disallowed)}")
 
     # Policy: rate limit
     if not rate_limiter.check(acct.name, "send", acct.policy):
         raise HTTPException(
             status_code=429,
-            detail=f"Send rate limit exceeded for account {acct.name} ({acct.policy.sends_per_hour}/hour)"
+            detail=f"Send rate limit exceeded for account {acct.name} ({acct.policy.sends_per_hour}/hour)",
         )
 
     try:
@@ -180,19 +184,19 @@ def list_inbox(
     if not rate_limiter.check(acct.name, "read", acct.policy):
         raise HTTPException(
             status_code=429,
-            detail=f"Read rate limit exceeded for account {acct.name} ({acct.policy.reads_per_hour}/hour)"
+            detail=f"Read rate limit exceeded for account {acct.name} ({acct.policy.reads_per_hour}/hour)",
         )
 
     try:
         messages = provider.list_messages(
-            folder=folder, limit=limit, since=since, from_filter=from_filter,
+            folder=folder,
+            limit=limit,
+            since=since,
+            from_filter=from_filter,
         )
 
         # Policy: filter by allowed senders
-        filtered = [
-            msg for msg in messages
-            if check_sender_allowed(msg.get("from", ""), acct.policy)
-        ]
+        filtered = [msg for msg in messages if check_sender_allowed(msg.get("from", ""), acct.policy)]
 
         return {"messages": filtered}
     except Exception as e:
@@ -210,10 +214,7 @@ def get_message(
     provider, acct = _get_provider(account)
 
     if not rate_limiter.check(acct.name, "read", acct.policy):
-        raise HTTPException(
-            status_code=429,
-            detail=f"Read rate limit exceeded for account {acct.name}"
-        )
+        raise HTTPException(status_code=429, detail=f"Read rate limit exceeded for account {acct.name}")
 
     try:
         message = provider.get_message(uid=uid, folder=folder)
@@ -241,14 +242,13 @@ def get_attachment(
     provider, acct = _get_provider(account)
 
     if not rate_limiter.check(acct.name, "read", acct.policy):
-        raise HTTPException(
-            status_code=429,
-            detail=f"Read rate limit exceeded for account {acct.name}"
-        )
+        raise HTTPException(status_code=429, detail=f"Read rate limit exceeded for account {acct.name}")
 
     try:
         data, filename, content_type = provider.get_attachment(
-            uid=uid, part_id=part_id, folder=folder,
+            uid=uid,
+            part_id=part_id,
+            folder=folder,
         )
         return Response(
             content=data,
@@ -266,10 +266,7 @@ def list_folders(req: FoldersRequest):
     provider, acct = _get_provider(req.account)
 
     if not rate_limiter.check(acct.name, "read", acct.policy):
-        raise HTTPException(
-            status_code=429,
-            detail=f"Read rate limit exceeded for account {acct.name}"
-        )
+        raise HTTPException(status_code=429, detail=f"Read rate limit exceeded for account {acct.name}")
 
     try:
         folders = provider.list_folders()

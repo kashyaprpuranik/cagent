@@ -1,5 +1,6 @@
 import asyncio
 
+
 async def async_generator(sync_generator):
     """Convert a blocking generator into an async one.
 

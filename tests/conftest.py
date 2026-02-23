@@ -2,11 +2,11 @@
 Pytest fixtures for data-plane integration tests.
 """
 
-import os
-import pytest
 import socket
 import subprocess
 from pathlib import Path
+
+import pytest
 
 # Data plane directory
 DATA_PLANE_DIR = Path(__file__).parent.parent
@@ -35,11 +35,7 @@ def is_port_open(host: str, port: int) -> bool:
 def is_docker_available() -> bool:
     """Check if Docker is available."""
     try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            timeout=5
-        )
+        result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False

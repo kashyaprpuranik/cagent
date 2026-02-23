@@ -4,11 +4,12 @@ Config loader - loads email configuration from cagent.yaml.
 Resolves credential env var references to actual values.
 """
 
-import os
-import yaml
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -148,12 +149,7 @@ def _validate_account(account: EmailAccount):
         raise ValueError(f"Account {account.name}: provider must be gmail, outlook, or generic")
     if account.provider in ("gmail", "outlook"):
         if not account.credential.refresh_token:
-            logger.warning(
-                f"Account {account.name}: OAuth refresh_token not set "
-                f"(check env var)"
-            )
+            logger.warning(f"Account {account.name}: OAuth refresh_token not set (check env var)")
     if account.provider == "generic":
         if not account.credential.password:
-            logger.warning(
-                f"Account {account.name}: password not set (check env var)"
-            )
+            logger.warning(f"Account {account.name}: password not set (check env var)")

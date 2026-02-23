@@ -1,6 +1,6 @@
+from .generic import GenericProvider
 from .gmail import GmailProvider
 from .outlook import OutlookProvider
-from .generic import GenericProvider
 
 PROVIDER_REGISTRY = {
     "gmail": GmailProvider,

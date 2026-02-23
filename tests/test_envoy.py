@@ -3,9 +3,7 @@ Tests for the Envoy proxy configuration.
 """
 
 import pytest
-import subprocess
 import yaml
-from pathlib import Path
 
 
 class TestEnvoyConfig:
@@ -56,15 +54,13 @@ class TestEnvoyConfig:
         """Envoy config should not contain any Lua filter references."""
         config_file = configs_dir / "envoy" / "envoy-enhanced.yaml"
         content = config_file.read_text()
-        assert "lua" not in content.lower() or "lua" in "failure", \
-            "Envoy config should not reference Lua filters"
+        assert "lua" not in content.lower() or "lua" in "failure", "Envoy config should not reference Lua filters"
 
     def test_envoy_config_has_local_ratelimit(self, configs_dir):
         """Envoy static config should have local_ratelimit filter."""
         config_file = configs_dir / "envoy" / "envoy-enhanced.yaml"
         content = config_file.read_text()
-        assert "envoy.filters.http.local_ratelimit" in content, \
-            "Envoy config should have local_ratelimit filter"
+        assert "envoy.filters.http.local_ratelimit" in content, "Envoy config should have local_ratelimit filter"
 
 
 class TestEnvoyProxySettings:
@@ -95,8 +91,9 @@ class TestEnvoyProxySettings:
         content = config_file.read_text()
 
         # Check for access log configuration
-        assert "access_log" in content.lower() or "accesslog" in content.lower(), \
+        assert "access_log" in content.lower() or "accesslog" in content.lower(), (
             "Envoy should have access logging configured"
+        )
 
 
 class TestEnvoyNativeFilters:
@@ -105,6 +102,7 @@ class TestEnvoyNativeFilters:
     def _generate_config(self, configs_dir):
         """Generate Envoy config from cagent.yaml for testing."""
         import sys
+
         sys.path.insert(0, str(configs_dir.parent / "services" / "warden"))
         from config_generator import ConfigGenerator
 
@@ -119,8 +117,7 @@ class TestEnvoyNativeFilters:
         http_filters = listeners[0]["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"]
 
         filter_names = [f["name"] for f in http_filters]
-        assert "envoy.filters.http.ext_authz" in filter_names, \
-            "Generated config should have ext_authz filter"
+        assert "envoy.filters.http.ext_authz" in filter_names, "Generated config should have ext_authz filter"
 
     def test_envoy_config_has_local_ratelimit(self, configs_dir):
         """Generated config should have local_ratelimit filter."""
@@ -129,8 +126,9 @@ class TestEnvoyNativeFilters:
         http_filters = listeners[0]["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"]
 
         filter_names = [f["name"] for f in http_filters]
-        assert "envoy.filters.http.local_ratelimit" in filter_names, \
+        assert "envoy.filters.http.local_ratelimit" in filter_names, (
             "Generated config should have local_ratelimit filter"
+        )
 
     def test_envoy_config_no_lua_filter(self, configs_dir):
         """Generated config should not have Lua filter."""
@@ -139,8 +137,7 @@ class TestEnvoyNativeFilters:
         http_filters = listeners[0]["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"]
 
         filter_names = [f["name"] for f in http_filters]
-        assert "envoy.filters.http.lua" not in filter_names, \
-            "Generated config should not have Lua filter"
+        assert "envoy.filters.http.lua" not in filter_names, "Generated config should not have Lua filter"
 
     def test_envoy_config_has_rate_limit_per_route(self, configs_dir):
         """Generated config should have per-route rate limit for domains with custom rate limits."""
@@ -162,8 +159,7 @@ class TestEnvoyNativeFilters:
             if found_per_route_rl:
                 break
 
-        assert found_per_route_rl, \
-            "Should have at least one route with per-route rate limit config"
+        assert found_per_route_rl, "Should have at least one route with per-route rate limit config"
 
     def test_envoy_config_ext_authz_has_credential_headers(self, configs_dir):
         """ext_authz filter should allow credential headers upstream."""
@@ -209,19 +205,20 @@ class TestEnvoyNativeFilters:
     def test_rpm_to_token_bucket(self, configs_dir):
         """_rpm_to_token_bucket should correctly convert RPM to token bucket config."""
         import sys
+
         sys.path.insert(0, str(configs_dir.parent / "services" / "warden"))
         from config_generator import ConfigGenerator
 
         # rpm >= 60: tokens_per_fill = rpm // 60, fill_interval = 1s
         result = ConfigGenerator._rpm_to_token_bucket(120, 20)
-        assert result == {'max_tokens': 20, 'tokens_per_fill': 2, 'fill_interval': '1s'}
+        assert result == {"max_tokens": 20, "tokens_per_fill": 2, "fill_interval": "1s"}
 
         result = ConfigGenerator._rpm_to_token_bucket(60, 10)
-        assert result == {'max_tokens': 10, 'tokens_per_fill': 1, 'fill_interval': '1s'}
+        assert result == {"max_tokens": 10, "tokens_per_fill": 1, "fill_interval": "1s"}
 
         # rpm < 60: tokens_per_fill = 1, fill_interval = {60 // rpm}s
         result = ConfigGenerator._rpm_to_token_bucket(30, 5)
-        assert result == {'max_tokens': 5, 'tokens_per_fill': 1, 'fill_interval': '2s'}
+        assert result == {"max_tokens": 5, "tokens_per_fill": 1, "fill_interval": "2s"}
 
         result = ConfigGenerator._rpm_to_token_bucket(10, 3)
-        assert result == {'max_tokens': 3, 'tokens_per_fill': 1, 'fill_interval': '6s'}
+        assert result == {"max_tokens": 3, "tokens_per_fill": 1, "fill_interval": "6s"}

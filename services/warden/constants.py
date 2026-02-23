@@ -57,14 +57,13 @@ MAX_HEARTBEAT_WORKERS = int(os.environ.get("HEARTBEAT_MAX_WORKERS", "20"))
 # ---------------------------------------------------------------------------
 # Beta features
 # ---------------------------------------------------------------------------
-BETA_FEATURES = set(
-    f.strip() for f in os.environ.get('BETA_FEATURES', '').split(',') if f.strip()
-)
+BETA_FEATURES = set(f.strip() for f in os.environ.get("BETA_FEATURES", "").split(",") if f.strip())
 
 
 # ---------------------------------------------------------------------------
 # Container discovery helpers
 # ---------------------------------------------------------------------------
+
 
 def discover_cell_container_names() -> List[str]:
     """Return names of cell containers discovered by label.

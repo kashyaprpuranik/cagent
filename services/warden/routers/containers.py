@@ -1,7 +1,6 @@
 import docker
+from constants import MANAGED_CONTAINERS, READ_ONLY, discover_cell_container_names, docker_client
 from fastapi import APIRouter, HTTPException
-
-from constants import MANAGED_CONTAINERS, READ_ONLY, docker_client, discover_cell_container_names
 from models import ContainerAction
 
 router = APIRouter()
@@ -29,10 +28,10 @@ def get_container_info(name: str) -> dict:
                 stats = container.stats(stream=False)
 
                 # CPU
-                cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - \
-                           stats["precpu_stats"]["cpu_usage"]["total_usage"]
-                system_delta = stats["cpu_stats"]["system_cpu_usage"] - \
-                              stats["precpu_stats"]["system_cpu_usage"]
+                cpu_delta = (
+                    stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"]
+                )
+                system_delta = stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"]
                 num_cpus = stats["cpu_stats"].get("online_cpus", 1)
 
                 if system_delta > 0:

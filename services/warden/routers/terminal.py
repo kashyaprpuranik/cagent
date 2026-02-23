@@ -2,9 +2,8 @@ import asyncio
 import socket
 
 import docker
+from constants import discover_cell_container_names, docker_client
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-
-from constants import docker_client, discover_cell_container_names
 
 router = APIRouter()
 
@@ -39,9 +38,7 @@ async def web_terminal(websocket: WebSocket, name: str):
     # Only allow terminal access to cell containers, not infrastructure
     allowed = set(discover_cell_container_names())
     if name not in allowed:
-        await websocket.send_text(
-            f"\r\nTerminal access denied: '{name}' is not a cell container.\r\n"
-        )
+        await websocket.send_text(f"\r\nTerminal access denied: '{name}' is not a cell container.\r\n")
         await websocket.close()
         return
 
@@ -83,14 +80,10 @@ async def web_terminal(websocket: WebSocket, name: str):
             loop = asyncio.get_event_loop()
             while True:
                 try:
-                    data = await loop.run_in_executor(
-                        None, lambda: raw_sock.recv(4096)
-                    )
+                    data = await loop.run_in_executor(None, lambda: raw_sock.recv(4096))
                     if not data:
                         break
-                    await websocket.send_text(
-                        data.decode("utf-8", errors="replace")
-                    )
+                    await websocket.send_text(data.decode("utf-8", errors="replace"))
                 except (OSError, socket.timeout):
                     break
                 except Exception:
@@ -108,11 +101,7 @@ async def web_terminal(websocket: WebSocket, name: str):
                     break
 
         # Run both tasks concurrently
-        await asyncio.gather(
-            read_from_container(),
-            write_to_container(),
-            return_exceptions=True
-        )
+        await asyncio.gather(read_from_container(), write_to_container(), return_exceptions=True)
 
     except docker.errors.NotFound:
         await websocket.send_text(f"\r\nContainer '{name}' not found.\r\n")

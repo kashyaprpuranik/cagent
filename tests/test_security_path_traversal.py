@@ -1,10 +1,10 @@
-import sys
-import os
-import shutil
-import pytest
-from pathlib import Path
-from fastapi.testclient import TestClient
 import importlib
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
 
 # Add services/warden to path
 REPO_ROOT = Path(__file__).parent.parent
@@ -14,6 +14,7 @@ sys.path.insert(0, str(WARDEN_PATH))
 # Path to frontend dist
 FRONTEND_DIST = WARDEN_PATH / "frontend" / "dist"
 ASSETS_DIR = FRONTEND_DIST / "assets"
+
 
 @pytest.fixture(scope="module")
 def app_with_frontend():
@@ -29,6 +30,7 @@ def app_with_frontend():
     # If it was already imported, reload it to pick up the existence of FRONTEND_DIST
     # (because the route registration is conditional on FRONTEND_DIST.exists())
     import main
+
     importlib.reload(main)
 
     yield main.app
@@ -36,6 +38,7 @@ def app_with_frontend():
     # Teardown
     if created_dist:
         shutil.rmtree(FRONTEND_DIST, ignore_errors=True)
+
 
 def test_path_traversal(app_with_frontend):
     client = TestClient(app_with_frontend)
@@ -74,6 +77,7 @@ def test_path_traversal(app_with_frontend):
     finally:
         if secret_file.exists():
             secret_file.unlink()
+
 
 def test_serve_valid_file(app_with_frontend):
     client = TestClient(app_with_frontend)

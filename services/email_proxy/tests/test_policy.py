@@ -1,14 +1,13 @@
 """Tests for email address allowlists and rate limiting."""
 
-import sys
 import os
-import time
+import sys
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import EmailPolicy
-from policy import check_recipients_allowed, check_sender_allowed, RateLimiter
+from policy import RateLimiter, check_recipients_allowed, check_sender_allowed
 
 
 class TestRecipientAllowlist:
@@ -41,9 +40,7 @@ class TestRecipientAllowlist:
 
     def test_mixed_allowed_and_blocked(self):
         """Some allowed, some blocked"""
-        policy = EmailPolicy(
-            allowed_recipients=["*@company.com", "partner@external.com"]
-        )
+        policy = EmailPolicy(allowed_recipients=["*@company.com", "partner@external.com"])
         disallowed = check_recipients_allowed(
             ["user@company.com", "hacker@evil.com", "partner@external.com"],
             policy,

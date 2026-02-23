@@ -3,12 +3,12 @@ Microsoft 365 / Outlook OAuth2 provider - uses XOAUTH2 for IMAP/SMTP authenticat
 """
 
 import imaplib
-import smtplib
 import logging
+import smtplib
 
 import msal
-
 from config import EmailAccount
+
 from .base import EmailProvider
 
 logger = logging.getLogger(__name__)

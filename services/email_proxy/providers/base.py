@@ -5,32 +5,33 @@ Concrete methods (send, list_messages, get_message, etc.) use the abstract
 connect_imap()/connect_smtp() methods, so providers only implement connection logic.
 """
 
+import email
+import email.policy
+import email.utils
 import imaplib
+import logging
 import re
 import smtplib
-import email
-import email.utils
-import email.policy
-import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 
 def _sanitize_filename(filename: str) -> str:
     """Remove characters that could cause header injection or path traversal."""
     # Strip CR/LF (header injection), NUL, and path separators
-    filename = re.sub(r'[\r\n\x00/\\]', '', filename)
+    filename = re.sub(r"[\r\n\x00/\\]", "", filename)
     # Collapse to a reasonable length
     return filename[:255] if filename else "attachment"
 
 
 def _escape_imap_string(value: str) -> str:
     """Escape a string for safe use inside IMAP double-quoted search criteria."""
-    return value.replace('\\', '\\\\').replace('"', '\\"')
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
 
 from config import EmailAccount
 
@@ -97,6 +98,7 @@ class EmailProvider(ABC):
             for att in attachments:
                 part = MIMEBase("application", "octet-stream")
                 import base64
+
                 part.set_payload(base64.b64decode(att["content_base64"]))
                 encoders.encode_base64(part)
                 part.add_header(
@@ -141,7 +143,7 @@ class EmailProvider(ABC):
                 # Convert YYYY-MM-DD to IMAP date format (DD-Mon-YYYY)
                 dt = datetime.strptime(since, "%Y-%m-%d")
                 imap_date = dt.strftime("%d-%b-%Y")
-                criteria.append(f'SINCE {imap_date}')
+                criteria.append(f"SINCE {imap_date}")
             if from_filter:
                 criteria.append(f'FROM "{_escape_imap_string(from_filter)}"')
 
@@ -163,14 +165,16 @@ class EmailProvider(ABC):
                 msg = email.message_from_bytes(raw, policy=email.policy.default)
 
                 # Extract snippet from subject as placeholder
-                messages.append({
-                    "uid": uid.decode(),
-                    "from": msg.get("From", ""),
-                    "to": msg.get("To", ""),
-                    "subject": msg.get("Subject", ""),
-                    "date": msg.get("Date", ""),
-                    "snippet": msg.get("Subject", "")[:100],
-                })
+                messages.append(
+                    {
+                        "uid": uid.decode(),
+                        "from": msg.get("From", ""),
+                        "to": msg.get("To", ""),
+                        "subject": msg.get("Subject", ""),
+                        "date": msg.get("Date", ""),
+                        "snippet": msg.get("Subject", "")[:100],
+                    }
+                )
 
             return messages
         finally:
@@ -198,12 +202,14 @@ class EmailProvider(ABC):
                     disposition = str(part.get("Content-Disposition", ""))
 
                     if "attachment" in disposition:
-                        attachments.append({
-                            "part_id": str(i),
-                            "filename": part.get_filename() or f"attachment_{i}",
-                            "content_type": content_type,
-                            "size": len(part.get_payload(decode=True) or b""),
-                        })
+                        attachments.append(
+                            {
+                                "part_id": str(i),
+                                "filename": part.get_filename() or f"attachment_{i}",
+                                "content_type": content_type,
+                                "size": len(part.get_payload(decode=True) or b""),
+                            }
+                        )
                     elif content_type == "text/plain" and not body_text:
                         body_text = part.get_content()
                     elif content_type == "text/html" and not body_html:

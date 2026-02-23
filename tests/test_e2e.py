@@ -11,17 +11,16 @@ Run with:
     sg docker -c "python -m pytest tests/test_e2e.py -v"
 """
 
-import pytest
-import requests
 import subprocess
 import time
+
+import pytest
+import requests
 import websocket
 
 
 def pytest_configure(config):
-    config.addinivalue_line(
-        "markers", "e2e: mark test as end-to-end (requires full stack running)"
-    )
+    config.addinivalue_line("markers", "e2e: mark test as end-to-end (requires full stack running)")
 
 
 CELL_LABEL = "cagent.role=cell"
@@ -32,9 +31,10 @@ def _discover_cell_container_name() -> str:
     """Discover a cell container by label, falling back to 'cell'."""
     try:
         result = subprocess.run(
-            ["docker", "ps", "--filter", "label=cagent.role=cell",
-             "--format", "{{.Names}}"],
-            capture_output=True, text=True, timeout=5,
+            ["docker", "ps", "--filter", "label=cagent.role=cell", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         names = result.stdout.strip().splitlines()
         if names:
@@ -53,11 +53,10 @@ def is_data_plane_running():
     """
     try:
         result = subprocess.run(
-            ["docker", "ps", "-a", "--filter", "name=http-proxy",
-             "--format", "{{.Names}} {{.Status}}"],
+            ["docker", "ps", "-a", "--filter", "name=http-proxy", "--format", "{{.Names}} {{.Status}}"],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
         )
         for line in result.stdout.strip().splitlines():
             if "http-proxy" in line and "Up" in line:
@@ -87,17 +86,15 @@ def data_plane_running():
         # Provide diagnostic info on failure
         try:
             diag = subprocess.run(
-                ["docker", "ps", "-a", "--filter", "name=http-proxy",
-                 "--format", "{{.Names}} {{.Status}}"],
-                capture_output=True, text=True, timeout=5,
+                ["docker", "ps", "-a", "--filter", "name=http-proxy", "--format", "{{.Names}} {{.Status}}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             status = diag.stdout.strip() or "(no http-proxy container found)"
         except Exception:
             status = "(docker command failed)"
-        pytest.fail(
-            f"Data plane not running after 30s — test.sh should have started it. "
-            f"http-proxy status: {status}"
-        )
+        pytest.fail(f"Data plane not running after 30s — test.sh should have started it. http-proxy status: {status}")
 
     cell = _discover_cell_container_name()
 
@@ -106,9 +103,10 @@ def data_plane_running():
     while time.time() < deadline:
         try:
             probe = subprocess.run(
-                ["docker", "exec", cell, "sh", "-c",
-                 "nc -z -w 2 10.200.1.10 8443 && echo OK"],
-                capture_output=True, text=True, timeout=10,
+                ["docker", "exec", cell, "sh", "-c", "nc -z -w 2 10.200.1.10 8443 && echo OK"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if "OK" in probe.stdout:
                 break
@@ -116,19 +114,17 @@ def data_plane_running():
             pass
         time.sleep(3)
     else:
-        pytest.fail(
-            "Envoy proxy not reachable from cell container after 60s — "
-            "warden may still be restarting it"
-        )
+        pytest.fail("Envoy proxy not reachable from cell container after 60s — warden may still be restarting it")
 
     # Wait for CoreDNS to accept connections
     deadline = time.time() + 30
     while time.time() < deadline:
         try:
             probe = subprocess.run(
-                ["docker", "exec", cell, "sh", "-c",
-                 "nc -z -w 2 10.200.1.5 53 && echo OK"],
-                capture_output=True, text=True, timeout=10,
+                ["docker", "exec", cell, "sh", "-c", "nc -z -w 2 10.200.1.5 53 && echo OK"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if "OK" in probe.stdout:
                 break
@@ -136,9 +132,7 @@ def data_plane_running():
             pass
         time.sleep(2)
     else:
-        pytest.fail(
-            "CoreDNS not reachable from cell container after 30s"
-        )
+        pytest.fail("CoreDNS not reachable from cell container after 30s")
 
     # Wait for admin API to be ready
     admin = get_admin_url()
@@ -165,12 +159,7 @@ def agent_container_name():
 def exec_in_cell(command: str, container_name: str = None) -> subprocess.CompletedProcess:
     """Execute a command in a cell container (discovered by label)."""
     name = container_name or _discover_cell_container_name()
-    return subprocess.run(
-        ["docker", "exec", name, "sh", "-c", command],
-        capture_output=True,
-        text=True,
-        timeout=30
-    )
+    return subprocess.run(["docker", "exec", name, "sh", "-c", command], capture_output=True, text=True, timeout=30)
 
 
 @pytest.mark.e2e
@@ -180,28 +169,24 @@ class TestCellNetworkIsolation:
     def test_cell_can_reach_envoy(self, data_plane_running):
         """Cell should be able to reach Envoy proxy."""
         result = exec_in_cell("nc -z 10.200.1.10 8443 && echo OK")
-        assert result.returncode == 0 or "OK" in result.stdout, \
-            f"Cell cannot reach Envoy: {result.stderr}"
+        assert result.returncode == 0 or "OK" in result.stdout, f"Cell cannot reach Envoy: {result.stderr}"
 
     def test_cell_can_reach_dns(self, data_plane_running):
         """Cell should be able to reach DNS filter."""
         result = exec_in_cell("nc -z 10.200.1.5 53 && echo OK")
-        assert result.returncode == 0 or "OK" in result.stdout, \
-            f"Cell cannot reach DNS: {result.stderr}"
+        assert result.returncode == 0 or "OK" in result.stdout, f"Cell cannot reach DNS: {result.stderr}"
 
     def test_cell_cannot_reach_external_directly(self, data_plane_running):
         """Cell should NOT be able to reach external IPs directly."""
         # Try to reach Google DNS directly (should fail)
         result = exec_in_cell("nc -z -w 2 8.8.8.8 53 && echo FAIL || echo BLOCKED")
-        assert "BLOCKED" in result.stdout, \
-            "Cell can reach external IPs directly - network isolation broken!"
+        assert "BLOCKED" in result.stdout, "Cell can reach external IPs directly - network isolation broken!"
 
     def test_cell_cannot_reach_control_plane(self, data_plane_running):
         """Cell should NOT be able to reach control plane directly."""
         # Control plane is on infra-net, cell should not reach it
         result = exec_in_cell("nc -z -w 2 10.200.2.1 8000 && echo FAIL || echo BLOCKED")
-        assert "BLOCKED" in result.stdout, \
-            "Cell can reach infra-net (10.200.2.1:8000) — network isolation broken!"
+        assert "BLOCKED" in result.stdout, "Cell can reach infra-net (10.200.2.1:8000) — network isolation broken!"
 
 
 @pytest.mark.e2e
@@ -214,9 +199,10 @@ class TestMultiCellContainers:
 
     def _discover_all(self):
         result = subprocess.run(
-            ["docker", "ps", "--filter", "label=cagent.role=cell",
-             "--format", "{{.Names}}"],
-            capture_output=True, text=True, timeout=5,
+            ["docker", "ps", "--filter", "label=cagent.role=cell", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return sorted(result.stdout.strip().splitlines())
 
@@ -244,8 +230,7 @@ class TestMultiCellContainers:
                 "nc -z -w 2 8.8.8.8 53 && echo FAIL || echo BLOCKED",
                 container_name=name,
             )
-            assert "BLOCKED" in result.stdout, \
-                f"{name} can reach external IPs directly — isolation broken!"
+            assert "BLOCKED" in result.stdout, f"{name} can reach external IPs directly — isolation broken!"
 
     def test_cells_have_distinct_hostnames(self, data_plane_running):
         """Each cell container should report a different hostname."""
@@ -253,8 +238,7 @@ class TestMultiCellContainers:
         for name in self._discover_all():
             result = exec_in_cell("hostname", container_name=name)
             hostnames.add(result.stdout.strip())
-        assert len(hostnames) >= 2, \
-            f"Expected distinct hostnames, got: {hostnames}"
+        assert len(hostnames) >= 2, f"Expected distinct hostnames, got: {hostnames}"
 
 
 @pytest.mark.e2e
@@ -271,8 +255,7 @@ class TestDNSFiltering:
         """Non-allowed domains should fail DNS resolution."""
         result = exec_in_cell("nslookup evil-malware.com 10.200.1.5")
         # Should return NXDOMAIN or fail
-        assert "NXDOMAIN" in result.stdout or result.returncode != 0, \
-            "Blocked domain should not resolve"
+        assert "NXDOMAIN" in result.stdout or result.returncode != 0, "Blocked domain should not resolve"
 
 
 @pytest.mark.e2e
@@ -282,14 +265,11 @@ class TestProxyEgress:
     def test_https_through_proxy_allowed_domain(self, data_plane_running):
         """Should successfully reach allowed domains through proxy."""
         result = exec_in_cell(
-            "curl -s -o /dev/null -w '%{http_code}' "
-            "-x http://10.200.1.10:8443 "
-            "https://api.github.com"
+            "curl -s -o /dev/null -w '%{http_code}' -x http://10.200.1.10:8443 https://api.github.com"
         )
         # Should get some HTTP response (even 401 unauthorized is fine)
         http_code = result.stdout.strip()
-        assert http_code.isdigit() and int(http_code) < 500, \
-            f"Request to allowed domain failed with: {http_code}"
+        assert http_code.isdigit() and int(http_code) < 500, f"Request to allowed domain failed with: {http_code}"
 
     def test_https_through_proxy_blocked_domain(self, data_plane_running):
         """Should fail to reach blocked domains through proxy."""
@@ -302,8 +282,9 @@ class TestProxyEgress:
         # Should fail (connection refused, timeout, or 403)
         http_code = result.stdout.strip()
         # Empty or error code means blocked
-        assert not http_code or http_code == "000" or http_code == "403", \
+        assert not http_code or http_code == "000" or http_code == "403", (
             f"Request to blocked domain succeeded with: {http_code}"
+        )
 
 
 @pytest.mark.e2e
@@ -314,15 +295,14 @@ class TestCredentialInjection:
         """Cell requests should not contain raw secrets."""
         # Make a request and capture what the cell sees
         result = exec_in_cell("env | grep -i api_key || echo 'NO_SECRETS_IN_ENV'")
-        assert "NO_SECRETS_IN_ENV" in result.stdout or not result.stdout.strip(), \
+        assert "NO_SECRETS_IN_ENV" in result.stdout or not result.stdout.strip(), (
             "Cell environment should not contain API keys"
+        )
 
     def test_envoy_handles_credential_injection(self, data_plane_running):
         """Envoy should be running (handles credential injection via ext_authz)."""
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=http-proxy", "--format", "{{.Status}}"],
-            capture_output=True,
-            text=True
+            ["docker", "ps", "--filter", "name=http-proxy", "--format", "{{.Status}}"], capture_output=True, text=True
         )
         assert "Up" in result.stdout, "Envoy proxy is not running"
 
@@ -344,8 +324,7 @@ class TestCredentialInjection:
         # Should see CONNECT method in verbose output (indicates tunnel mode)
         # Note: This test verifies the tunnel is established, not that headers aren't injected
         # (we can't easily verify header injection didn't happen from outside the tunnel)
-        assert "CONNECT" in result.stdout or result.returncode == 0, \
-            "HTTPS should use CONNECT tunnel through proxy"
+        assert "CONNECT" in result.stdout or result.returncode == 0, "HTTPS should use CONNECT tunnel through proxy"
 
     def test_http_devbox_local_gets_credentials(self, data_plane_running):
         """HTTP requests to *.devbox.local should get credentials injected.
@@ -365,8 +344,7 @@ class TestCredentialInjection:
         # Not 000 (connection failed) or 403 (blocked)
         http_code = result.stdout.strip()
         # Any response indicates the devbox.local routing worked
-        assert http_code and http_code != "000", \
-            f"devbox.local request failed: {result.stderr}"
+        assert http_code and http_code != "000", f"devbox.local request failed: {result.stderr}"
 
 
 @pytest.mark.e2e
@@ -376,9 +354,7 @@ class TestLogging:
     def test_vector_running(self, data_plane_running):
         """Vector should be running for log collection."""
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=log-shipper", "--format", "{{.Status}}"],
-            capture_output=True,
-            text=True
+            ["docker", "ps", "--filter", "name=log-shipper", "--format", "{{.Status}}"], capture_output=True, text=True
         )
         assert "Up" in result.stdout, "Log shipper is not running"
 
@@ -405,19 +381,24 @@ class TestLogging:
         marker = f"logtest-{int(time.time())}"
 
         # Generate traffic through the proxy with a unique path
-        exec_in_cell(
-            f"curl -s -o /dev/null -x http://10.200.1.10:8443 "
-            f"http://pypi.org/{marker} || true"
-        )
+        exec_in_cell(f"curl -s -o /dev/null -x http://10.200.1.10:8443 http://pypi.org/{marker} || true")
 
         # Poll the file backup volume for the marker (up to 30s)
         deadline = time.time() + 30
         found = False
         while time.time() < deadline:
             result = subprocess.run(
-                ["docker", "exec", "log-shipper",
-                 "sh", "-c", f"grep -r '{marker}' /var/log/vector/backup/ 2>/dev/null"],
-                capture_output=True, text=True, timeout=10,
+                [
+                    "docker",
+                    "exec",
+                    "log-shipper",
+                    "sh",
+                    "-c",
+                    f"grep -r '{marker}' /var/log/vector/backup/ 2>/dev/null",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if marker in result.stdout:
                 found = True
@@ -437,8 +418,9 @@ class TestCellSecurityHardening:
     def test_no_docker_socket(self, data_plane_running):
         """Cell should not have access to the Docker socket."""
         result = exec_in_cell("ls /var/run/docker.sock 2>&1 || echo NO_SOCKET")
-        assert "NO_SOCKET" in result.stdout or "No such file" in result.stdout, \
+        assert "NO_SOCKET" in result.stdout or "No such file" in result.stdout, (
             "Docker socket is accessible inside cell — container escape risk!"
+        )
 
     def test_no_host_filesystem(self, data_plane_running):
         """Cell should not see host filesystem mounts."""
@@ -450,24 +432,20 @@ class TestCellSecurityHardening:
     def test_proxy_env_vars_set(self, data_plane_running):
         """Cell must have HTTP_PROXY and HTTPS_PROXY pointing to Envoy."""
         result = exec_in_cell("echo $HTTP_PROXY")
-        assert "10.200.1.10:8443" in result.stdout, \
-            f"HTTP_PROXY not set correctly: {result.stdout}"
+        assert "10.200.1.10:8443" in result.stdout, f"HTTP_PROXY not set correctly: {result.stdout}"
 
         result = exec_in_cell("echo $HTTPS_PROXY")
-        assert "10.200.1.10:8443" in result.stdout, \
-            f"HTTPS_PROXY not set correctly: {result.stdout}"
+        assert "10.200.1.10:8443" in result.stdout, f"HTTPS_PROXY not set correctly: {result.stdout}"
 
     def test_cannot_reach_infra_net(self, data_plane_running):
         """Cell should not be able to reach any infra-net addresses."""
         # dns-filter's infra side
         result = exec_in_cell("nc -z -w 2 10.200.2.5 53 && echo FAIL || echo BLOCKED")
-        assert "BLOCKED" in result.stdout, \
-            "Cell can reach dns-filter on infra-net (10.200.2.5)"
+        assert "BLOCKED" in result.stdout, "Cell can reach dns-filter on infra-net (10.200.2.5)"
 
         # envoy's infra side
         result = exec_in_cell("nc -z -w 2 10.200.2.10 8443 && echo FAIL || echo BLOCKED")
-        assert "BLOCKED" in result.stdout, \
-            "Cell can reach envoy on infra-net (10.200.2.10)"
+        assert "BLOCKED" in result.stdout, "Cell can reach envoy on infra-net (10.200.2.10)"
 
     def test_envoy_admin_not_reachable(self, data_plane_running):
         """Envoy admin API (port 9901) must not be reachable from cell-net.
@@ -478,47 +456,44 @@ class TestCellSecurityHardening:
         cell-net. Either outcome means the admin API is not exposed.
         """
         # Try via proxy (cell's default) — Envoy rejects unknown destinations
-        result = exec_in_cell(
-            "curl -s --connect-timeout 2 http://10.200.1.10:9901/ready "
-            "2>&1 || echo BLOCKED"
-        )
-        assert "BLOCKED" in result.stdout \
-            or "refused" in result.stdout \
-            or "destination_not_allowed" in result.stdout, \
+        result = exec_in_cell("curl -s --connect-timeout 2 http://10.200.1.10:9901/ready 2>&1 || echo BLOCKED")
+        assert "BLOCKED" in result.stdout or "refused" in result.stdout or "destination_not_allowed" in result.stdout, (
             "Cell can reach Envoy admin API — config_dump would leak credentials!"
+        )
 
         # Try bypassing the proxy — admin binds to 127.0.0.1, so direct
         # connection to 10.200.1.10:9901 should be refused
         result = exec_in_cell(
-            "curl -s --connect-timeout 2 --noproxy '*' http://10.200.1.10:9901/ready "
-            "2>&1 || echo BLOCKED"
+            "curl -s --connect-timeout 2 --noproxy '*' http://10.200.1.10:9901/ready 2>&1 || echo BLOCKED"
         )
-        assert "BLOCKED" in result.stdout \
-            or "refused" in result.stdout, \
+        assert "BLOCKED" in result.stdout or "refused" in result.stdout, (
             "Cell can reach Envoy admin API directly (bypassing proxy)!"
+        )
 
     def test_raw_socket_blocked(self, data_plane_running):
         """Raw sockets should be blocked (CAP_NET_RAW dropped + seccomp)."""
         # SOCK_RAW with AF_INET requires CAP_NET_RAW
         result = exec_in_cell(
-            "python3 -c \""
+            'python3 -c "'
             "import socket; "
             "s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP); "
             "print('RAW_ALLOWED')\" 2>&1 || echo RAW_BLOCKED"
         )
-        assert "RAW_BLOCKED" in result.stdout or "Operation not permitted" in result.stdout, \
+        assert "RAW_BLOCKED" in result.stdout or "Operation not permitted" in result.stdout, (
             "Raw sockets are allowed — cell could craft packets to bypass proxy!"
+        )
 
     def test_af_packet_blocked(self, data_plane_running):
         """AF_PACKET sockets should be blocked by seccomp profile."""
         result = exec_in_cell(
-            "python3 -c \""
+            'python3 -c "'
             "import socket; "
             "s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW); "
             "print('PACKET_ALLOWED')\" 2>&1 || echo PACKET_BLOCKED"
         )
-        assert "PACKET_BLOCKED" in result.stdout or "Operation not permitted" in result.stdout, \
+        assert "PACKET_BLOCKED" in result.stdout or "Operation not permitted" in result.stdout, (
             "AF_PACKET sockets are allowed — cell could sniff/inject raw frames!"
+        )
 
     def test_no_privilege_escalation(self, data_plane_running):
         """no-new-privileges should prevent setuid escalation."""
@@ -530,35 +505,32 @@ class TestCellSecurityHardening:
             # Verify the security_opt is in place via container inspect.
             result = subprocess.run(
                 ["docker", "inspect", cell_name, "--format", "{{.HostConfig.SecurityOpt}}"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
-            assert "no-new-privileges" in result.stdout, \
-                "no-new-privileges is not set on cell container"
+            assert "no-new-privileges" in result.stdout, "no-new-privileges is not set on cell container"
         else:
             # Non-root — sudo's setuid bit should be blocked by no-new-privileges
             result = exec_in_cell("sudo id 2>&1 || echo SUDO_FAILED")
-            assert "SUDO_FAILED" in result.stdout or "root" not in result.stdout, \
+            assert "SUDO_FAILED" in result.stdout or "root" not in result.stdout, (
                 "sudo succeeded — no-new-privileges may not be set!"
+            )
 
     def test_ipv6_disabled(self, data_plane_running):
         """IPv6 should be disabled to prevent bypass of IPv4 cell egress controls."""
         result = exec_in_cell(
-            "curl -6 -s --connect-timeout 2 http://[2607:f8b0:4004:800::200e] "
-            "2>&1 || echo IPV6_BLOCKED"
+            "curl -6 -s --connect-timeout 2 http://[2607:f8b0:4004:800::200e] 2>&1 || echo IPV6_BLOCKED"
         )
-        assert "IPV6_BLOCKED" in result.stdout \
-            or "Could not resolve" in result.stdout \
-            or "connect to" in result.stdout, \
-            "IPv6 connectivity is available — could bypass egress controls!"
+        assert (
+            "IPV6_BLOCKED" in result.stdout or "Could not resolve" in result.stdout or "connect to" in result.stdout
+        ), "IPv6 connectivity is available — could bypass egress controls!"
 
 
 def get_admin_url():
     """Get local admin base URL, detecting the mapped port."""
     try:
-        result = subprocess.run(
-            ["docker", "port", "warden", "8080"],
-            capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["docker", "port", "warden", "8080"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0 and result.stdout.strip():
             # Output like "0.0.0.0:8080" or ":::8080"
             mapping = result.stdout.strip().splitlines()[0]
@@ -573,8 +545,7 @@ def get_admin_url():
 def admin_url():
     """Get local admin URL (guaranteed by test.sh --profile admin)."""
     url = get_admin_url()
-    assert url is not None, \
-        "Local admin not running — test.sh should have started it with --profile admin"
+    assert url is not None, "Local admin not running — test.sh should have started it with --profile admin"
     return url
 
 
@@ -583,7 +554,9 @@ def is_container_running(name):
     try:
         result = subprocess.run(
             ["docker", "ps", "--filter", f"name=^{name}$", "--format", "{{.Status}}"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return "Up" in result.stdout
     except Exception:
@@ -718,8 +691,9 @@ class TestLocalAdminAPI:
         assert r.json()["action"] == "restart"
 
         # Verify container comes back
-        assert wait_for_container(agent_container_name, timeout=30), \
+        assert wait_for_container(agent_container_name, timeout=30), (
             f"{agent_container_name} did not recover after restart"
+        )
 
     def test_ssh_tunnel_connect_info_unconfigured(self, admin_url):
         """Should return 400 when tunnel is not configured."""
@@ -744,15 +718,15 @@ class TestLocalAdminConfigPipeline:
         """Updating config via local admin should change cell DNS behavior."""
         # -- Step 1: Read original config (for cleanup) --
         original = requests.get(f"{admin_url}/api/config", timeout=5)
-        assert original.status_code == 200, \
-            f"cagent.yaml should be configured, got {original.status_code}"
+        assert original.status_code == 200, f"cagent.yaml should be configured, got {original.status_code}"
         original_raw = original.json()["raw"]
         original_config = original.json()["config"]
 
         # -- Step 2: Confirm test domain is currently blocked --
         result = exec_in_cell(f"nslookup {self.TEST_DOMAIN} 10.200.1.5")
-        assert "NXDOMAIN" in result.stdout or result.returncode != 0, \
+        assert "NXDOMAIN" in result.stdout or result.returncode != 0, (
             f"{self.TEST_DOMAIN} already resolves — it should not be in the default allowlist"
+        )
 
         try:
             # -- Step 3: Add test domain via local admin API --
@@ -774,10 +748,11 @@ class TestLocalAdminConfigPipeline:
             # On startup, warden reads cagent.yaml and writes new Corefile
             subprocess.run(
                 ["docker", "restart", "warden"],
-                capture_output=True, timeout=30, check=True,
+                capture_output=True,
+                timeout=30,
+                check=True,
             )
-            assert wait_for_container("warden", timeout=15), \
-                "warden did not restart"
+            assert wait_for_container("warden", timeout=15), "warden did not restart"
             # Give it a moment to regenerate configs
             time.sleep(3)
 
@@ -793,16 +768,16 @@ class TestLocalAdminConfigPipeline:
                 time.sleep(1)
             r = requests.post(f"{admin_url}/api/config/reload", timeout=30)
             assert r.status_code == 200
-            assert wait_for_container("dns-filter", timeout=15), \
-                "dns-filter did not come back after reload"
+            assert wait_for_container("dns-filter", timeout=15), "dns-filter did not come back after reload"
             # Wait for CoreDNS to be ready
             time.sleep(2)
 
             # -- Step 6: Verify domain now resolves from cell --
             result = exec_in_cell(f"nslookup {self.TEST_DOMAIN} 10.200.1.5")
-            assert result.returncode == 0 and "NXDOMAIN" not in result.stdout, \
-                f"{self.TEST_DOMAIN} should resolve after being added to config. " \
+            assert result.returncode == 0 and "NXDOMAIN" not in result.stdout, (
+                f"{self.TEST_DOMAIN} should resolve after being added to config. "
                 f"stdout: {result.stdout}, stderr: {result.stderr}"
+            )
 
         finally:
             # -- Cleanup: restore original config --
@@ -813,7 +788,8 @@ class TestLocalAdminConfigPipeline:
             )
             subprocess.run(
                 ["docker", "restart", "warden"],
-                capture_output=True, timeout=30,
+                capture_output=True,
+                timeout=30,
             )
             # Wait for warden API to be ready (not just container "Up")
             deadline = time.time() + 30
@@ -869,9 +845,7 @@ class TestWebTerminal:
     def _terminal_ws(self, admin_url, data_plane_running, agent_container_name):
         """Connect a WebSocket to the cell terminal for each test."""
         ws_url = admin_url.replace("http://", "ws://")
-        self.ws = websocket.create_connection(
-            f"{ws_url}/api/terminal/{agent_container_name}", timeout=10
-        )
+        self.ws = websocket.create_connection(f"{ws_url}/api/terminal/{agent_container_name}", timeout=10)
         # Drain the initial bash prompt / MOTD (root='#', user='$')
         ws_recv_until(self.ws, PROMPT_MARKERS, max_reads=15)
         # Disable echo so markers aren't found in the echoed command
@@ -941,8 +915,9 @@ class TestWebTerminal:
     def test_network_isolation_via_terminal(self, admin_url):
         """Direct external access should be blocked even through the terminal."""
         output = self._run("curl -s --connect-timeout 2 http://8.8.8.8 || echo BLOCKED")
-        assert "BLOCKED" in output or "not_allowed" in output, \
+        assert "BLOCKED" in output or "not_allowed" in output, (
             "Cell can reach external IPs directly through terminal — isolation broken!"
+        )
 
 
 def wait_for_dp_access_log(admin_url, domain, timeout=15.0, poll=1.0):
@@ -976,8 +951,7 @@ class TestAnalytics:
         # Fire several requests to a blocked domain via the proxy
         for _ in range(3):
             exec_in_cell(
-                f"curl -s -o /dev/null -x http://10.200.1.10:8443 "
-                f"--connect-timeout 5 http://{self.BLOCKED_DOMAIN}/test"
+                f"curl -s -o /dev/null -x http://10.200.1.10:8443 --connect-timeout 5 http://{self.BLOCKED_DOMAIN}/test"
             )
         # Give Envoy a moment to flush logs
         time.sleep(2)
@@ -985,9 +959,7 @@ class TestAnalytics:
     def test_blocked_domains_endpoint(self, admin_url):
         """GET /api/analytics/blocked-domains returns blocked domain with count."""
         entry = wait_for_dp_access_log(admin_url, self.BLOCKED_DOMAIN)
-        assert entry is not None, (
-            f"{self.BLOCKED_DOMAIN} not found in blocked domains after traffic + wait"
-        )
+        assert entry is not None, f"{self.BLOCKED_DOMAIN} not found in blocked domains after traffic + wait"
         assert entry["count"] >= 1
         assert "last_seen" in entry
 
@@ -1008,10 +980,7 @@ class TestAnalytics:
     def test_bandwidth_endpoint(self, admin_url, data_plane_running):
         """GET /api/analytics/bandwidth returns bandwidth data."""
         # Generate some traffic to an allowed domain (may already exist from fixture)
-        exec_in_cell(
-            "curl -s -o /dev/null -x http://10.200.1.10:8443 "
-            "http://ifconfig.me/"
-        )
+        exec_in_cell("curl -s -o /dev/null -x http://10.200.1.10:8443 http://ifconfig.me/")
         time.sleep(2)
 
         r = requests.get(

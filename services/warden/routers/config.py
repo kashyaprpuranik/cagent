@@ -1,10 +1,10 @@
 from datetime import datetime
 from pathlib import Path
 
+import docker
 import yaml
+from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, READ_ONLY, docker_client
 from fastapi import APIRouter, HTTPException
-
-from constants import COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, CAGENT_CONFIG_PATH, READ_ONLY, docker_client
 from models import ConfigUpdate
 
 router = APIRouter()

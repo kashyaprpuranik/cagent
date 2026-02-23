@@ -1,20 +1,19 @@
 import json
 import logging
 from pathlib import Path
-from urllib.request import Request, urlopen
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import docker
-from fastapi import APIRouter, HTTPException
-
 from constants import (
-    FRPC_CONTAINER_NAME,
+    CONTROL_PLANE_TOKEN,
+    CONTROL_PLANE_URL,
     DATA_PLANE_DIR,
     DATAPLANE_MODE,
-    CONTROL_PLANE_URL,
-    CONTROL_PLANE_TOKEN,
+    FRPC_CONTAINER_NAME,
     docker_client,
 )
+from fastapi import APIRouter, HTTPException
 from models import SshTunnelConfig
 
 router = APIRouter()
@@ -69,11 +68,7 @@ def get_tunnel_client_status() -> dict:
     try:
         container = docker_client.containers.get(FRPC_CONTAINER_NAME)
         container.reload()
-        return {
-            "exists": True,
-            "status": container.status,
-            "id": container.short_id
-        }
+        return {"exists": True, "status": container.status, "id": container.short_id}
     except docker.errors.NotFound:
         return {"exists": False, "status": "not_found"}
     except Exception as e:
@@ -83,10 +78,15 @@ def get_tunnel_client_status() -> dict:
 def _fetch_tunnel_config(cp_url: str, token: str) -> dict:
     """Call CP tunnel-config endpoint to get STCP credentials."""
     url = f"{cp_url}/api/v1/cell/tunnel-config"
-    req = Request(url, data=b"", method="POST", headers={
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    })
+    req = Request(
+        url,
+        data=b"",
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
     try:
         with urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
@@ -107,6 +107,7 @@ def _derive_frp_server(cp_url: str) -> str:
 # Tunnel-config proxy (Phase 3: FRP talks to warden instead of CP)
 # =========================================================================
 
+
 @proxy_router.post("/api/v1/cell/tunnel-config")
 async def proxy_tunnel_config():
     """Proxy tunnel-config request to control plane.
@@ -126,6 +127,7 @@ async def proxy_tunnel_config():
 # =========================================================================
 # Local admin SSH tunnel management endpoints
 # =========================================================================
+
 
 @router.get("/ssh-tunnel")
 async def get_ssh_tunnel_status():
@@ -182,7 +184,7 @@ async def configure_ssh_tunnel(config: SshTunnelConfig):
 
     return {
         "status": "configured",
-        "message": "FRP configuration saved. STCP credentials will be auto-provisioned on start."
+        "message": "FRP configuration saved. STCP credentials will be auto-provisioned on start.",
     }
 
 

@@ -2,15 +2,14 @@
 Gmail OAuth2 provider - uses XOAUTH2 for IMAP/SMTP authentication.
 """
 
-import base64
 import imaplib
-import smtplib
 import logging
-
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
+import smtplib
 
 from config import EmailAccount
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+
 from .base import EmailProvider
 
 logger = logging.getLogger(__name__)

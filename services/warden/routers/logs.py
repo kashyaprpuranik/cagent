@@ -1,9 +1,8 @@
 from typing import Optional
 
 import docker
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-
 from constants import docker_client, get_managed_containers
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from utils import async_generator
 
 router = APIRouter()

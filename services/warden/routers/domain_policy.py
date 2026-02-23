@@ -11,18 +11,17 @@ from a single local endpoint instead of reaching the control plane directly.
 import logging
 import os
 import time
+from pathlib import Path
 
 import requests
 import yaml
-from fastapi import APIRouter, Query, Header
-from pathlib import Path
-
 from constants import (
-    DATAPLANE_MODE,
-    CONTROL_PLANE_URL,
-    CONTROL_PLANE_TOKEN,
     CAGENT_CONFIG_PATH,
+    CONTROL_PLANE_TOKEN,
+    CONTROL_PLANE_URL,
+    DATAPLANE_MODE,
 )
+from fastapi import APIRouter, Header, Query
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -87,11 +86,8 @@ def _build_standalone_policy(domain: str) -> dict:
             break
         if entry_domain.startswith("*."):
             suffix = entry_domain[1:]  # e.g. ".github.com"
-            bare = entry_domain[2:]    # e.g. "github.com"
-            if domain_lower == bare or (
-                len(domain_lower) > len(suffix)
-                and domain_lower.endswith(suffix)
-            ):
+            bare = entry_domain[2:]  # e.g. "github.com"
+            if domain_lower == bare or (len(domain_lower) > len(suffix) and domain_lower.endswith(suffix)):
                 matched_entry = entry
                 break
 
@@ -182,10 +178,7 @@ async def get_domain_policy(
                     policy = resp.json()
                     _cache_set(domain_lower, policy)
                 else:
-                    logger.warning(
-                        f"CP domain-policy lookup failed: {resp.status_code}, "
-                        f"falling back to cagent.yaml"
-                    )
+                    logger.warning(f"CP domain-policy lookup failed: {resp.status_code}, falling back to cagent.yaml")
                     # Fallback
                     policy = _build_standalone_policy(domain_lower)
                     _cache_set(domain_lower, policy)

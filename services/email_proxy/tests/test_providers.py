@@ -1,19 +1,15 @@
 """Tests for email providers with mocked IMAP/SMTP."""
 
-import sys
 import os
-import imaplib
-import smtplib
-from unittest.mock import MagicMock, patch, PropertyMock
-from email.mime.text import MIMEText
+import sys
+from unittest.mock import MagicMock, patch
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import EmailAccount, EmailCredential, EmailPolicy
-from providers.gmail import GmailProvider, _build_xoauth2_string
-from providers.outlook import OutlookProvider
 from providers.generic import GenericProvider
+from providers.gmail import GmailProvider, _build_xoauth2_string
 
 
 def _make_account(provider="generic", **kwargs):
@@ -43,6 +39,7 @@ class TestXOAuth2Format:
     def test_outlook_xoauth2_format(self):
         """Outlook uses same XOAUTH2 format."""
         from providers.outlook import _build_xoauth2_string as outlook_xoauth2
+
         auth_string = outlook_xoauth2("user@outlook.com", "ms-token-456")
         expected = "user=user@outlook.com\x01auth=Bearer ms-token-456\x01\x01"
         assert auth_string == expected
