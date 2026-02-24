@@ -1,3 +1,5 @@
+import concurrent.futures
+
 import docker
 from constants import MANAGED_CONTAINERS, READ_ONLY, discover_cell_container_names, docker_client
 from fastapi import APIRouter, HTTPException
@@ -10,7 +12,7 @@ def get_container_info(name: str) -> dict:
     """Get container status info."""
     try:
         container = docker_client.containers.get(name)
-        container.reload()
+        # Removed redundant container.reload() to save an API call
 
         info = {
             "name": name,
@@ -58,8 +60,13 @@ def list_containers():
     """Get status of all managed containers."""
     containers = {}
 
-    for name in MANAGED_CONTAINERS:
-        containers[name] = get_container_info(name)
+    # Parallelize container info retrieval to reduce latency
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # map preserves order of MANAGED_CONTAINERS
+        results = executor.map(get_container_info, MANAGED_CONTAINERS)
+
+        for name, result in zip(MANAGED_CONTAINERS, results):
+            containers[name] = result
 
     return {"containers": containers}
 
