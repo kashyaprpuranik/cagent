@@ -1,9 +1,9 @@
 from typing import Optional
 
 import docker
-from constants import docker_client, get_managed_containers
+from constants import ALLOWED_CORS_ORIGINS, docker_client, get_managed_containers
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from utils import async_generator
+from utils import async_generator, validate_websocket_origin
 
 router = APIRouter()
 
@@ -36,6 +36,10 @@ def get_container_logs(name: str, tail: int = 100, since: Optional[str] = None):
 @router.websocket("/containers/{name}/logs/stream")
 async def stream_container_logs(websocket: WebSocket, name: str):
     """Stream container logs via WebSocket."""
+    if not validate_websocket_origin(websocket, ALLOWED_CORS_ORIGINS):
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
 
     # Restrict access to managed containers only

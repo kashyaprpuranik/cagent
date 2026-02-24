@@ -27,6 +27,7 @@ import requests
 import yaml
 from config_generator import ConfigGenerator
 from constants import (
+    ALLOWED_CORS_ORIGINS,
     CAGENT_CONFIG_PATH,
     CELL_CONTAINER_FALLBACK,
     CELL_LABEL,
@@ -1104,7 +1105,7 @@ app = FastAPI(
 # CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
+    allow_origins=ALLOWED_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

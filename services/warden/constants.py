@@ -60,6 +60,14 @@ BETA_FEATURES = set(f.strip() for f in os.environ.get("BETA_FEATURES", "").split
 
 
 # ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+_default_origins = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"]
+_env_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+ALLOWED_CORS_ORIGINS = list(set(_default_origins + _env_origins))
+
+
+# ---------------------------------------------------------------------------
 # Container discovery helpers
 # ---------------------------------------------------------------------------
 
