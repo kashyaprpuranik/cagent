@@ -1,4 +1,5 @@
 import concurrent.futures
+import threading
 
 import docker
 from constants import MANAGED_CONTAINERS, READ_ONLY, discover_cell_container_names, docker_client
@@ -7,11 +8,29 @@ from models import ContainerAction
 
 router = APIRouter()
 
+# Global executor for container checks (reused across requests)
+# Set max_workers to 20 to handle concurrent checks efficiently without excessive overhead
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
+
+# Thread-local storage for docker client
+_thread_local = threading.local()
+
+
+def _get_thread_client():
+    """Get or create a thread-local docker client.
+
+    This avoids the overhead of creating a new client (and parsing env vars)
+    for every single container check, while maintaining thread safety.
+    """
+    if not hasattr(_thread_local, "client"):
+        _thread_local.client = docker.from_env()
+    return _thread_local.client
+
 
 def get_container_info(name: str) -> dict:
     """Get container status info."""
-    # Create a new client per thread to ensure thread safety
-    client = docker.from_env()
+    # Use cached client per thread
+    client = _get_thread_client()
     try:
         container = client.containers.get(name)
         # get() returns fresh attributes; no reload needed
@@ -55,8 +74,7 @@ def get_container_info(name: str) -> dict:
         return {"name": name, "status": "not_found"}
     except Exception as e:
         return {"name": name, "status": "error", "error": str(e)}
-    finally:
-        client.close()
+    # No finally block needed as we reuse the client
 
 
 @router.get("/containers")
@@ -64,15 +82,12 @@ def list_containers():
     """Get status of all managed containers."""
     containers = {}
 
-    # Parallelize container info retrieval to reduce latency
-    # Use len(MANAGED_CONTAINERS) for max_workers to adapt to the list size
-    max_workers = len(MANAGED_CONTAINERS) or 1
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # map preserves order of MANAGED_CONTAINERS
-        results = executor.map(get_container_info, MANAGED_CONTAINERS)
+    # Parallelize container info retrieval using the global thread pool
+    # This avoids creating a new ThreadPoolExecutor for every request
+    results = _executor.map(get_container_info, MANAGED_CONTAINERS)
 
-        for name, result in zip(MANAGED_CONTAINERS, results):
-            containers[name] = result
+    for name, result in zip(MANAGED_CONTAINERS, results):
+        containers[name] = result
 
     return {"containers": containers}
 
