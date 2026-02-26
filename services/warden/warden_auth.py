@@ -8,13 +8,16 @@ When WARDEN_API_TOKEN is empty (standard mode), all requests are allowed.
 """
 
 from constants import WARDEN_API_TOKEN
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, WebSocket
 
 _LOCALHOST_PREFIXES = ("127.", "::1", "10.200.2.")
 
 
-async def verify_warden_token(request: Request):
+async def verify_warden_token(request: Request = None, websocket: WebSocket = None):
     """FastAPI dependency that verifies the warden bearer token.
+
+    Works for both HTTP and WebSocket routes. FastAPI injects ``Request``
+    for HTTP endpoints and ``WebSocket`` for WebSocket endpoints.
 
     Skips auth for:
     - Standard mode (no WARDEN_API_TOKEN set)
@@ -23,10 +26,12 @@ async def verify_warden_token(request: Request):
     if not WARDEN_API_TOKEN:
         return  # Standard mode — no auth required
 
-    client_ip = request.client.host if request.client else ""
+    conn = request or websocket
+    client_ip = conn.client.host if conn and conn.client else ""
     if any(client_ip.startswith(p) for p in _LOCALHOST_PREFIXES):
         return  # Local access — trusted
 
-    auth = request.headers.get("Authorization", "")
+    # Check Authorization header (works for both HTTP and WebSocket upgrade)
+    auth = conn.headers.get("Authorization", "") if conn else ""
     if not auth.startswith("Bearer ") or auth[7:] != WARDEN_API_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid warden API token")
