@@ -1109,7 +1109,10 @@ class TestLogIngestionPipeline:
         while time.time() < deadline:
             try:
                 r = requests.get(f"{admin_url}/api/health/deep", timeout=10)
-                if r.status_code == 200 and r.json().get("checks", {}).get("openobserve", {}).get("status") == "healthy":
+                if (
+                    r.status_code == 200
+                    and r.json().get("checks", {}).get("openobserve", {}).get("status") == "healthy"
+                ):
                     return
             except Exception:
                 pass
