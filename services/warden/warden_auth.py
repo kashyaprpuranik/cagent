@@ -7,6 +7,7 @@ Localhost requests (SSH users on the host) bypass auth for convenience.
 When WARDEN_API_TOKEN is empty (standard mode), all requests are allowed.
 """
 
+import secrets
 from constants import WARDEN_API_TOKEN
 from fastapi import HTTPException, Request
 
@@ -28,5 +29,6 @@ async def verify_warden_token(request: Request):
         return  # Local access — trusted
 
     auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer ") or auth[7:] != WARDEN_API_TOKEN:
+    expected = f"Bearer {WARDEN_API_TOKEN}"
+    if not secrets.compare_digest(auth, expected):
         raise HTTPException(status_code=401, detail="Invalid warden API token")
