@@ -825,7 +825,6 @@ PROMPT_MARKERS = ["$ ", "# "]
 
 
 @pytest.mark.e2e
-@pytest.mark.skip(reason="WebSocket terminal needs rework — 500 on handshake")
 class TestWebTerminal:
     """Test web terminal via WebSocket (requires --profile admin).
 
