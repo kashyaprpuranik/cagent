@@ -940,8 +940,20 @@ class TestAnalytics:
     @pytest.fixture(autouse=True)
     def _generate_blocked_traffic(self, admin_url, data_plane_running):
         """Generate blocked (403) traffic before analytics tests."""
-        # Fire several requests to a blocked domain via the proxy
-        for _ in range(3):
+        # The preceding test class restarts warden (which restarts Envoy).
+        # Wait for Envoy to accept connections before sending traffic.
+        assert wait_for_container("http-proxy", timeout=15), "http-proxy not running"
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            r = exec_in_cell(
+                f"curl -s -o /dev/null -w '%{{http_code}}' -x http://10.200.1.10:8443 --connect-timeout 2 http://{self.BLOCKED_DOMAIN}/test"
+            )
+            if r.returncode == 0 and "403" in r.stdout:
+                break
+            time.sleep(1)
+
+        # Fire additional requests to ensure enough data for analytics
+        for _ in range(2):
             exec_in_cell(
                 f"curl -s -o /dev/null -x http://10.200.1.10:8443 --connect-timeout 5 http://{self.BLOCKED_DOMAIN}/test"
             )

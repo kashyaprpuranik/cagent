@@ -2,18 +2,21 @@
 # Run tests for the Cagent data plane.
 #
 # Usage:
-#   ./scripts/test.sh          # DP unit/config + frontend type-check
-#   ./scripts/test.sh --e2e    # All tests including DP e2e
+#   ./scripts/test.sh              # DP unit/config + frontend type-check
+#   ./scripts/test.sh --e2e        # All tests including DP e2e
+#   ./scripts/test.sh --e2e --no-teardown  # Keep containers running after e2e
 
 set -e
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 RUN_E2E=false
+NO_TEARDOWN=false
 
 for arg in "$@"; do
     case "$arg" in
         --e2e) RUN_E2E=true ;;
+        --no-teardown) NO_TEARDOWN=true ;;
     esac
 done
 
@@ -146,11 +149,14 @@ if [ "$RUN_E2E" = true ]; then
     E2E_EXIT=$?
     set -e
 
-    # Tear down containers only if we started them
-    if [ "$CONTAINERS_STARTED" = true ]; then
+    # Tear down containers only if we started them (unless --no-teardown)
+    if [ "$CONTAINERS_STARTED" = true ] && [ "$NO_TEARDOWN" = false ]; then
         echo ""
         echo "Stopping containers started by this script..."
         docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
+    elif [ "$NO_TEARDOWN" = true ]; then
+        echo ""
+        echo "Keeping containers running (--no-teardown)"
     fi
 
     # Restore tracked config files modified by containers at runtime
