@@ -486,6 +486,11 @@ def execute_command(command: str, container, args: Optional[dict] = None) -> tup
         elif command == "wipe":
             wipe_workspace = args.get("wipe_workspace", False) if args else False
 
+            # Capture config before removing so we can recreate
+            from routers.commands import _capture_container_config, _recreate_container
+
+            create_kwargs = _capture_container_config(container)
+
             # Stop and remove container
             if container.status == "running":
                 container.stop(timeout=10)
@@ -506,7 +511,15 @@ def execute_command(command: str, container, args: Optional[dict] = None) -> tup
                     except Exception as e:
                         logger.warning(f"Could not wipe workspace for {name}: {e}")
 
-            return True, f"Agent {name} wiped (workspace={'wiped' if wipe_workspace else 'preserved'})"
+            # Recreate the container with the same config
+            try:
+                new_container = _recreate_container(create_kwargs)
+                logger.info(f"Recreated container {name} as {new_container.short_id}")
+            except Exception as e:
+                logger.error(f"Failed to recreate container {name}: {e}")
+                return True, f"Agent {name} wiped but recreation failed: {e}"
+
+            return True, f"Agent {name} wiped and recreated (workspace={'wiped' if wipe_workspace else 'preserved'})"
 
         else:
             return False, f"Unknown command: {command}"
@@ -707,15 +720,16 @@ def sync_config() -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _send_bare_heartbeat(cell_name: str, command: str, result: str, message: str):
-    """Send a heartbeat without a live container (e.g., after wipe).
+def _send_bare_heartbeat(cell_name: str, command: str, result: str, message: str, status: str = "removed"):
+    """Send a heartbeat without a live container (e.g., after wipe/stop).
 
-    Used to report command results when the container no longer exists.
+    Used to report command results immediately without waiting for the next
+    heartbeat cycle.
     """
     if not CONTROL_PLANE_URL or not CONTROL_PLANE_TOKEN:
         return
     heartbeat = {
-        "status": "removed",
+        "status": status,
         "last_command": command,
         "last_command_result": result,
         "last_command_message": message,
@@ -817,9 +831,16 @@ def _heartbeat_and_handle(container):
             }
         logger.info(f"Command {command} on {container.name} {'succeeded' if success else 'failed'}: {message}")
         # Wipe removes the container, so it won't be discovered next cycle.
-        # Send the result immediately via a bare heartbeat.
+        # Stop leaves the container in "exited" state — next heartbeat cycle
+        # would work but container.stop(timeout=10) can block for up to 10s,
+        # making the round-trip too slow for tight e2e timeouts.
+        # Send the result immediately via a bare heartbeat for both.
         if command == "wipe":
             _send_bare_heartbeat(container.name, command, result_str, message)
+            with _command_results_lock:
+                _last_command_results.pop(container.name, None)
+        elif command == "stop":
+            _send_bare_heartbeat(container.name, command, result_str, message, status="exited")
             with _command_results_lock:
                 _last_command_results.pop(container.name, None)
         return policy_version
