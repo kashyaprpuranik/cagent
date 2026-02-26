@@ -13,23 +13,32 @@ import yaml
 from config_generator import ConfigGenerator
 from constants import CAGENT_CONFIG_PATH, COREDNS_COREFILE_PATH, ENVOY_CONFIG_PATH, docker_client
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
+class PolicyEntry(BaseModel):
+    domain: str
+    allowed_paths: Optional[list[str]] = None
+    requests_per_minute: Optional[int] = None
+    burst_size: Optional[int] = None
+    read_only: Optional[bool] = None
+
+
+class ApplyPoliciesRequest(BaseModel):
+    policies: list[PolicyEntry]
+
+
 @router.post("/policies/apply")
-async def apply_policies(body: dict):
+async def apply_policies(body: ApplyPoliciesRequest):
     """Apply updated domain policies.
 
     Accepts a list of domain policy objects, updates cagent.yaml,
     and regenerates Envoy + CoreDNS configs.
     """
-    policies = body.get("policies", [])
-    if not isinstance(policies, list):
-        raise HTTPException(status_code=400, detail="policies must be a list")
-
     config_path = Path(CAGENT_CONFIG_PATH)
     try:
         config = yaml.safe_load(config_path.read_text()) or {}
@@ -38,15 +47,15 @@ async def apply_policies(body: dict):
 
     # Convert CP domain policies to cagent.yaml domain format
     domains = []
-    for p in policies:
-        entry = {"domain": p["domain"]}
-        if p.get("allowed_paths"):
-            entry["allowed_paths"] = p["allowed_paths"]
-        if p.get("requests_per_minute"):
-            entry["rate_limit"] = {"requests_per_minute": p["requests_per_minute"]}
-            if p.get("burst_size"):
-                entry["rate_limit"]["burst_size"] = p["burst_size"]
-        if p.get("read_only"):
+    for p in body.policies:
+        entry = {"domain": p.domain}
+        if p.allowed_paths:
+            entry["allowed_paths"] = p.allowed_paths
+        if p.requests_per_minute:
+            entry["rate_limit"] = {"requests_per_minute": p.requests_per_minute}
+            if p.burst_size:
+                entry["rate_limit"]["burst_size"] = p.burst_size
+        if p.read_only:
             entry["read_only"] = True
         domains.append(entry)
 

@@ -212,16 +212,14 @@ class TestPolicyEndpoints:
         assert data["policy_count"] == 3
 
     def test_apply_policies_invalid_input(self):
-        """POST /api/policies/apply with non-list policies should fail."""
-        mock_config = "domains: []\n"
-        with patch("routers.policies.Path") as mock_path:
-            mock_path_instance = MagicMock()
-            mock_path_instance.read_text.return_value = mock_config
-            mock_path.return_value = mock_path_instance
+        """POST /api/policies/apply with non-list policies should fail validation."""
+        r = client.post("/api/policies/apply", json={"policies": "not-a-list"})
+        assert r.status_code == 422
 
-            r = client.post("/api/policies/apply", json={"policies": "not-a-list"})
-
-        assert r.status_code == 400
+    def test_apply_policies_missing_domain(self):
+        """POST /api/policies/apply with missing domain field should fail validation."""
+        r = client.post("/api/policies/apply", json={"policies": [{"allowed_paths": ["/"]}]})
+        assert r.status_code == 422
 
 
 # ---------------------------------------------------------------------------
