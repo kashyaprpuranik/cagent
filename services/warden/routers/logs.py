@@ -110,7 +110,7 @@ async def search_logs(
             conditions.append(f"cell_id = '{cell_id.replace(chr(39), chr(39) * 2)}'")
 
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        sql = f"SELECT * FROM \"{_STREAM}\"{where} ORDER BY _timestamp DESC LIMIT {limit}"
+        sql = f'SELECT * FROM "{_STREAM}"{where} ORDER BY _timestamp DESC LIMIT {limit}'
 
         hits = query_openobserve(sql, start_us, end_us)
         return {"hits": hits, "total": len(hits)}
