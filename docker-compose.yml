@@ -56,7 +56,7 @@ services:
       dockerfile: cell.Dockerfile
       args:
         - VARIANT=${CELL_VARIANT:-lean}
-    image: cell:${CELL_VARIANT:-lean}
+    image: ghcr.io/kashyaprpuranik/cagent-cell:latest-${CELL_VARIANT:-lean}
     # No container_name — allows `docker compose --scale cell-dev=N`
     labels:
       - "cagent.role=cell"
@@ -152,7 +152,7 @@ services:
       dockerfile: cell.Dockerfile
       args:
         - VARIANT=${CELL_VARIANT:-lean}
-    image: cell:${CELL_VARIANT:-lean}
+    image: ghcr.io/kashyaprpuranik/cagent-cell:latest-${CELL_VARIANT:-lean}
     # No container_name — allows `docker compose --scale cell=N`
     labels:
       - "cagent.role=cell"
@@ -413,6 +413,7 @@ services:
     build:
       context: .
       dockerfile: services/warden/Dockerfile
+    image: ghcr.io/kashyaprpuranik/cagent-warden:latest
     container_name: warden
     labels:
       - "cagent.log-collect=true"
@@ -533,6 +534,7 @@ services:
   email-proxy:
     build:
       context: ./services/email_proxy
+    image: ghcr.io/kashyaprpuranik/cagent-email-proxy:latest
     container_name: email-proxy
     labels:
       - "cagent.log-collect=true"
