@@ -87,7 +87,7 @@ async def search_logs(
     Falls back to Docker logs if OO is unavailable.
     """
     try:
-        from openobserve_client import datetime_to_us, now_us, query_openobserve
+        from openobserve_client import _STREAM, datetime_to_us, now_us, query_openobserve
 
         # Build time range
         end_us = now_us()
@@ -110,7 +110,7 @@ async def search_logs(
             conditions.append(f"cell_id = '{cell_id.replace(chr(39), chr(39) * 2)}'")
 
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        sql = f"SELECT * FROM default{where} ORDER BY _timestamp DESC LIMIT {limit}"
+        sql = f"SELECT * FROM \"{_STREAM}\"{where} ORDER BY _timestamp DESC LIMIT {limit}"
 
         hits = query_openobserve(sql, start_us, end_us)
         return {"hits": hits, "total": len(hits)}

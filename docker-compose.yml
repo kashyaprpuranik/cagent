@@ -482,6 +482,9 @@ services:
       - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD:-openobserve-local-dev}
       - ZO_COMPACT_DATA_RETENTION_DAYS=${LOG_RETENTION_DAYS:-30}
       - ZO_DATA_DIR=/data
+      # Cap worker threads to avoid OOM on high-core machines (default = num CPUs)
+      - ZO_HTTP_WORKER_NUM=4
+      - ZO_HTTP_WORKER_MAX_BLOCKING=4
 
     volumes:
       - log-store-data:/data

@@ -12,7 +12,7 @@ from constants import OPENOBSERVE_PASSWORD, OPENOBSERVE_URL, OPENOBSERVE_USER
 
 logger = logging.getLogger(__name__)
 
-_STREAM = "default"
+_STREAM = "cagent-logs"
 _ORG = "default"
 
 
@@ -29,7 +29,7 @@ def query_openobserve(sql: str, start_us: int, end_us: int) -> list[dict]:
     """Execute a SQL query against the local OpenObserve instance.
 
     Args:
-        sql: SQL query string (e.g., "SELECT * FROM default LIMIT 100")
+        sql: SQL query string (e.g., "SELECT * FROM \"cagent-logs\" LIMIT 100")
         start_us: Start time in microseconds since epoch.
         end_us: End time in microseconds since epoch.
 

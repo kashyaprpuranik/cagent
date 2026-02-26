@@ -23,6 +23,28 @@ sinks:
       codec: json
 
   # ---------------------------------------------------------------------------
+  # OpenObserve (local log store, enabled with --profile auditing)
+  # Uses the Elasticsearch-compatible bulk API.
+  # ---------------------------------------------------------------------------
+  openobserve:
+    type: http
+    inputs:
+      - parse_docker
+      - parse_gvisor
+      - parse_cell_app
+    uri: http://log-store:5080/api/default/cagent-logs/_json
+    method: post
+    auth:
+      strategy: basic
+      user: "${OPENOBSERVE_USER}"
+      password: "${OPENOBSERVE_PASSWORD}"
+    encoding:
+      codec: json
+    batch:
+      max_events: 100
+      timeout_secs: 5
+
+  # ---------------------------------------------------------------------------
   # Amazon S3
   # Writes NDJSON logs to S3, partitioned by date.
   # Add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY to the log-shipper
