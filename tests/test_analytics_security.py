@@ -3,6 +3,8 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
+from fastapi import HTTPException
+
 # Add services/warden to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "warden")))
 
@@ -15,7 +17,7 @@ sys.modules["docker"].errors.NotFound = Exception
 mock_docker.containers.list.return_value = []
 
 from routers import analytics
-from fastapi import HTTPException
+
 
 class TestAnalyticsSecurity(unittest.TestCase):
 
