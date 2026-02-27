@@ -20,7 +20,6 @@ from routers import analytics
 
 
 class TestAnalyticsSecurity(unittest.TestCase):
-
     @patch("routers.analytics.subprocess.run")
     @patch("routers.analytics.docker_client")
     def test_diagnose_domain_argument_injection(self, mock_docker_client, mock_subprocess):
@@ -76,6 +75,7 @@ class TestAnalyticsSecurity(unittest.TestCase):
 
         # Verify subprocess WAS called (once per valid domain)
         self.assertEqual(mock_subprocess.call_count, len(valid_domains))
+
 
 if __name__ == "__main__":
     unittest.main()
