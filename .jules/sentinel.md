@@ -10,3 +10,11 @@
 **Learning:** When creating reproduction scripts or tools, always check for the availability of necessary dependencies in the current environment using `pip list` or similar commands. Do not assume standard packages are present.
 
 **Prevention:** Before running scripts that depend on external libraries, verify their presence. If missing, either install them (if permitted) or adapt the approach to use available tools (e.g., `subprocess` instead of `docker-py`).
+
+## 2025-02-14 - Timing Attack in Token Comparison
+
+**Vulnerability:** The API token verification in `services/warden/warden_auth.py` used string comparison (`!=`) instead of a constant-time comparison, making it vulnerable to timing attacks where an attacker could theoretically guess the token byte-by-byte.
+
+**Learning:** Direct string comparison operations short-circuit and exit early when encountering the first mismatching character. This causes a measurable difference in processing time that correlates with the length of the correctly matched prefix.
+
+**Prevention:** Always use `secrets.compare_digest(a, b)` for comparing secrets, API keys, passwords, and tokens.
