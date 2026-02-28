@@ -46,11 +46,11 @@ from constants import (
     VALID_SECCOMP_PROFILES,
     docker_client,
 )
-from utils import calculate_container_stats
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from utils import calculate_container_stats
 
 # Path to .env file for docker-compose resource overrides
 ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
