@@ -86,10 +86,16 @@ class WipeRequest(BaseModel):
 
 
 @router.post("/commands/wipe")
-async def wipe_cell(body: Optional[WipeRequest] = None):
+def wipe_cell(body: Optional[WipeRequest] = None):
     """Wipe the cell: stop, optionally clear workspace, restart.
 
     The same container is reused — no rename or recreation needed.
+
+    ⚡ Bolt Optimization: Def instead of Async Def
+    This endpoint performs blocking Docker API calls (e.g. stop, start). By defining it
+    as a synchronous function (`def`) instead of `async def`, FastAPI automatically runs
+    it in an external thread pool. This prevents the operation from blocking the main
+    event loop, drastically improving the throughput of other async endpoints.
     """
     wipe_workspace = body.wipe_workspace if body else False
     container = _get_cell_container()
@@ -113,8 +119,15 @@ async def wipe_cell(body: Optional[WipeRequest] = None):
 
 
 @router.post("/commands/restart")
-async def restart_cell():
-    """Restart the cell container."""
+def restart_cell():
+    """Restart the cell container.
+
+    ⚡ Bolt Optimization: Def instead of Async Def
+    This endpoint performs blocking Docker API calls (e.g. restart). By defining it
+    as a synchronous function (`def`) instead of `async def`, FastAPI automatically runs
+    it in an external thread pool. This prevents the operation from blocking the main
+    event loop, drastically improving the throughput of other async endpoints.
+    """
     container = _get_cell_container()
     try:
         container.restart(timeout=30)
@@ -124,8 +137,15 @@ async def restart_cell():
 
 
 @router.post("/commands/stop")
-async def stop_cell():
-    """Stop the cell container."""
+def stop_cell():
+    """Stop the cell container.
+
+    ⚡ Bolt Optimization: Def instead of Async Def
+    This endpoint performs blocking Docker API calls (e.g. stop). By defining it
+    as a synchronous function (`def`) instead of `async def`, FastAPI automatically runs
+    it in an external thread pool. This prevents the operation from blocking the main
+    event loop, drastically improving the throughput of other async endpoints.
+    """
     container = _get_cell_container()
     try:
         container.stop(timeout=30)
@@ -135,8 +155,15 @@ async def stop_cell():
 
 
 @router.post("/commands/start")
-async def start_cell():
-    """Start the cell container."""
+def start_cell():
+    """Start the cell container.
+
+    ⚡ Bolt Optimization: Def instead of Async Def
+    This endpoint performs blocking Docker API calls (e.g. start). By defining it
+    as a synchronous function (`def`) instead of `async def`, FastAPI automatically runs
+    it in an external thread pool. This prevents the operation from blocking the main
+    event loop, drastically improving the throughput of other async endpoints.
+    """
     container = _get_cell_container()
     try:
         container.start()
