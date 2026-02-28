@@ -58,7 +58,8 @@ def dns_lookup(domain):
     try:
         subprocess.run(
             ["nslookup", domain, DNS_SERVER],
-            capture_output=True, timeout=5,
+            capture_output=True,
+            timeout=5,
         )
         return True
     except Exception:
@@ -70,7 +71,9 @@ def http_get(url):
     try:
         result = subprocess.run(
             ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", url],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         code = result.stdout.strip()
         return int(code) if code.isdigit() else 0
