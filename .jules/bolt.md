@@ -1,7 +1,3 @@
-## 2024-05-23 - FastAPI Async Anti-Pattern
-**Learning:** `async def` handlers with blocking I/O (like Docker API calls) block the entire event loop.
-**Action:** Use `def` for synchronous handlers or `run_in_threadpool` for blocking calls inside `async def`.
-
-## 2024-05-24 - Widespread Blocking I/O in Async Handlers
-**Learning:** The codebase consistently used `async def` for endpoints performing blocking operations like Docker API calls, `requests.get`, and file I/O. This defeats the purpose of `async` and degrades performance by blocking the event loop.
-**Action:** Systematically converted `async def` to `def` for handlers dominated by blocking I/O to leverage FastAPI's thread pool.
+## 2024-03-24 - [Def instead of Async Def for blocking I/O]
+**Learning:** In FastAPI, asynchronous endpoints (`async def`) that run synchronous, blocking I/O code (like `docker-py`'s API calls: `container.stop()`, `container.start()`) block the main event loop and cause massive latency for concurrent async requests.
+**Action:** Always define FastAPI endpoints that run blocking code as regular `def` functions. FastAPI will then execute them in an external thread pool automatically, preventing event loop blocking.
