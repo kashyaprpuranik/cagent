@@ -50,6 +50,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from utils import calculate_container_stats
 
 # Path to .env file for docker-compose resource overrides
 ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
@@ -434,23 +435,7 @@ def get_container_status(container) -> dict:
     if container.status == "running":
         try:
             stats = container.stats(stream=False)
-
-            # CPU calculation
-            cpu_delta = (
-                stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"]
-            )
-            system_delta = stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"]
-            num_cpus = stats["cpu_stats"].get("online_cpus", 1)
-
-            if system_delta > 0:
-                cpu_percent = round((cpu_delta / system_delta) * num_cpus * 100, 2)
-
-            # Memory calculation
-            memory_usage = stats["memory_stats"].get("usage", 0)
-            memory_limit = stats["memory_stats"].get("limit", 0)
-            memory_mb = round(memory_usage / (1024 * 1024), 2)
-            memory_limit_mb = round(memory_limit / (1024 * 1024), 2)
-
+            cpu_percent, memory_mb, memory_limit_mb = calculate_container_stats(stats)
         except Exception as e:
             logger.warning(f"Could not get container stats for {container.name}: {e}")
 
