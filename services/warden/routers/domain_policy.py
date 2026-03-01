@@ -56,6 +56,7 @@ def invalidate_cache():
 # In-memory cache for cagent.yaml to avoid redundant file I/O and YAML parsing
 _config_cache: dict = {"mtime": 0.0, "config": {}}
 
+
 def _get_cagent_config() -> dict:
     """Read and parse cagent.yaml, caching it based on file modification time."""
     config_path = Path(CAGENT_CONFIG_PATH)
@@ -69,6 +70,7 @@ def _get_cagent_config() -> dict:
         return _config_cache["config"]
     except Exception:
         return {}
+
 
 def _build_standalone_policy(domain: str) -> dict:
     """Build a policy response from cagent.yaml for standalone mode."""
