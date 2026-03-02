@@ -753,9 +753,7 @@ def sync_config() -> bool:
             policies = response.json()
             if isinstance(policies, dict):
                 policies = policies.get("items", [])
-            cp_email_entries = [
-                _cp_email_policy_to_account_entry(p) for p in policies if p.get("enabled", True)
-            ]
+            cp_email_entries = [_cp_email_policy_to_account_entry(p) for p in policies if p.get("enabled", True)]
             logger.info(f"Fetched {len(cp_email_entries)} email policies from control plane")
         else:
             logger.warning(f"Failed to fetch email policies: {response.status_code}")
