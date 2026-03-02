@@ -38,6 +38,8 @@ from constants import (
     COREDNS_COREFILE_PATH,
     DATA_PLANE_DIR,
     DATAPLANE_MODE,
+    EMAIL_CONFIG_PATH,
+    EMAIL_PROXY_CONTAINER_NAME,
     ENVOY_CONFIG_PATH,
     ENVOY_CONTAINER_NAME,
     HEARTBEAT_INTERVAL,
@@ -535,6 +537,21 @@ def reload_envoy():
         return False
 
 
+def restart_email_proxy():
+    """Restart email-proxy container to pick up new config."""
+    try:
+        container = docker_client.containers.get(EMAIL_PROXY_CONTAINER_NAME)
+        container.restart(timeout=10)
+        logger.info("Restarted email-proxy to apply new config")
+        return True
+    except docker.errors.NotFound:
+        logger.debug(f"Email-proxy container '{EMAIL_PROXY_CONTAINER_NAME}' not found (not running)")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to restart email-proxy: {e}")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Config generation (shared — same Corefile / Envoy config for all cells)
 # ---------------------------------------------------------------------------
@@ -556,18 +573,21 @@ class _ConfigState:
     def __init__(self):
         self.envoy_hash: Optional[str] = None
         self.corefile_hash: Optional[str] = None
+        self.email_hash: Optional[str] = None
         self.last_policy_version: Optional[int] = None
 
 
 _config_state = _ConfigState()
 
 
-def regenerate_configs(additional_domains: list = None) -> bool:
-    """Regenerate CoreDNS and Envoy configs from cagent.yaml.
+def regenerate_configs(additional_domains: list = None, additional_email_accounts: list = None) -> bool:
+    """Regenerate CoreDNS, Envoy, and email configs from cagent.yaml.
 
     Args:
         additional_domains: Extra domain entries to merge (e.g., from control plane sync).
             Each entry is a dict with at least 'domain' key, matching cagent.yaml format.
+        additional_email_accounts: Extra email account entries to merge (e.g., from CP sync).
+            Each entry is a dict matching cagent.yaml email account format.
 
     Returns:
         True if configs were regenerated, False otherwise.
@@ -575,17 +595,21 @@ def regenerate_configs(additional_domains: list = None) -> bool:
     try:
         config_changed = config_generator.load_config()
         config_generator.set_additional_domains(additional_domains or [])
+        config_generator.set_additional_email_accounts(additional_email_accounts or [])
 
         # Generate configs and compute stable hashes (ignoring timestamps)
         corefile_content = config_generator.generate_corefile()
         envoy_config = config_generator.generate_envoy_config()
         envoy_yaml = yaml.dump(envoy_config, default_flow_style=False, sort_keys=False)
+        email_config = config_generator.generate_email_config()
 
         corefile_hash = _stable_hash(corefile_content)
         envoy_hash = _stable_hash(envoy_yaml)
+        email_hash = _stable_hash(email_config)
 
         corefile_changed = corefile_hash != _config_state.corefile_hash
         envoy_changed = envoy_hash != _config_state.envoy_hash
+        email_changed = email_hash != _config_state.email_hash
 
         if corefile_changed:
             config_generator.write_corefile(COREDNS_COREFILE_PATH)
@@ -597,11 +621,16 @@ def regenerate_configs(additional_domains: list = None) -> bool:
             reload_envoy()
             _config_state.envoy_hash = envoy_hash
 
+        if email_changed:
+            config_generator.write_email_config(EMAIL_CONFIG_PATH)
+            restart_email_proxy()
+            _config_state.email_hash = email_hash
+
         # Always update resource env vars when config changes
         if config_changed:
             config_generator.write_resource_env(ENV_FILE_PATH)
 
-        if corefile_changed or envoy_changed:
+        if corefile_changed or envoy_changed or email_changed:
             logger.info("Regenerated configs from cagent.yaml")
             # Invalidate caches when config changes
             from routers.domain_policy import invalidate_cache
@@ -636,11 +665,47 @@ def _cp_policy_to_domain_entry(policy: dict) -> dict:
     return entry
 
 
+def _cp_email_policy_to_account_entry(policy: dict) -> dict:
+    """Convert a CP email policy response (with credentials) to a cagent.yaml email account entry."""
+    entry = {
+        "name": policy["name"],
+        "provider": policy["provider"],
+        "email": policy["email"],
+    }
+    if policy.get("imap_server"):
+        entry["imap_server"] = policy["imap_server"]
+    if policy.get("imap_port"):
+        entry["imap_port"] = policy["imap_port"]
+    if policy.get("smtp_server"):
+        entry["smtp_server"] = policy["smtp_server"]
+    if policy.get("smtp_port"):
+        entry["smtp_port"] = policy["smtp_port"]
+
+    # Include credential directly (not env var refs — CP provides actual values)
+    if policy.get("credential"):
+        entry["credential"] = policy["credential"]
+
+    # Policy settings
+    entry["policy"] = {}
+    if policy.get("allowed_recipients"):
+        entry["policy"]["allowed_recipients"] = policy["allowed_recipients"]
+    if policy.get("allowed_senders"):
+        entry["policy"]["allowed_senders"] = policy["allowed_senders"]
+    if policy.get("sends_per_hour") is not None:
+        entry["policy"]["sends_per_hour"] = policy["sends_per_hour"]
+    if policy.get("reads_per_hour") is not None:
+        entry["policy"]["reads_per_hour"] = policy["reads_per_hour"]
+    if not entry["policy"]:
+        del entry["policy"]
+
+    return entry
+
+
 def sync_config() -> bool:
-    """Sync configuration and regenerate CoreDNS + Envoy configs.
+    """Sync configuration and regenerate CoreDNS, Envoy, and email configs.
 
     In standalone mode: regenerates from cagent.yaml only
-    In connected mode: fetches domain policies from CP, merges with cagent.yaml
+    In connected mode: fetches domain + email policies from CP, merges with cagent.yaml
 
     Returns True if configs were updated, False otherwise.
     """
@@ -653,31 +718,58 @@ def sync_config() -> bool:
         logger.warning("Control plane not configured, falling back to cagent.yaml")
         return regenerate_configs()
 
+    cp_domain_entries = []
+    cp_email_entries = []
+    headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
+
     try:
         # Fetch domain policies from control plane (agent tokens are profile-scoped)
         response = requests.get(
             f"{CONTROL_PLANE_URL}/api/v1/domain-policies",
-            headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
+            headers=headers,
             timeout=10,
         )
 
-        if response.status_code != 200:
-            logger.warning(f"Failed to fetch domain policies: {response.status_code}, using cagent.yaml")
-            return regenerate_configs()
-
-        # Parse domain policies (paginated response: {items: [...], total: N})
-        data = response.json()
-        policies = data.get("items", data) if isinstance(data, dict) else data
-        cp_entries = [_cp_policy_to_domain_entry(p) for p in policies if p.get("enabled", True)]
-
-        logger.info(f"Fetched {len(cp_entries)} domain policies from control plane")
-
-        # Regenerate configs (cagent.yaml is still the primary source)
-        return regenerate_configs(additional_domains=cp_entries)
+        if response.status_code == 200:
+            data = response.json()
+            policies = data.get("items", data) if isinstance(data, dict) else data
+            cp_domain_entries = [_cp_policy_to_domain_entry(p) for p in policies if p.get("enabled", True)]
+            logger.info(f"Fetched {len(cp_domain_entries)} domain policies from control plane")
+        else:
+            logger.warning(f"Failed to fetch domain policies: {response.status_code}")
 
     except requests.exceptions.RequestException as e:
-        logger.warning(f"Could not reach control plane: {e}, using cagent.yaml")
-        return regenerate_configs()
+        logger.warning(f"Could not fetch domain policies: {e}")
+
+    try:
+        # Fetch email policies with credentials (requires agent token)
+        response = requests.get(
+            f"{CONTROL_PLANE_URL}/api/v1/email-policies?include_credentials=true",
+            headers=headers,
+            timeout=10,
+        )
+
+        if response.status_code == 200:
+            policies = response.json()
+            if isinstance(policies, dict):
+                policies = policies.get("items", [])
+            cp_email_entries = [
+                _cp_email_policy_to_account_entry(p) for p in policies if p.get("enabled", True)
+            ]
+            logger.info(f"Fetched {len(cp_email_entries)} email policies from control plane")
+        else:
+            logger.warning(f"Failed to fetch email policies: {response.status_code}")
+
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Could not fetch email policies: {e}")
+    except Exception as e:
+        logger.error(f"Error parsing email policies: {e}")
+
+    try:
+        return regenerate_configs(
+            additional_domains=cp_domain_entries,
+            additional_email_accounts=cp_email_entries,
+        )
     except Exception as e:
         logger.error(f"Error syncing config: {e}")
         return False

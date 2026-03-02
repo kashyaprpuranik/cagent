@@ -27,7 +27,8 @@ class GenericProvider(EmailProvider):
             self.account.imap_server,
             self.account.imap_port,
         )
-        imap.login(self.account.email, self.account.credential.password)
+        username = self.account.credential.smtp_username or self.account.email
+        imap.login(username, self.account.credential.password)
         logger.debug(f"Generic IMAP connected for {self.account.email}")
         return imap
 
@@ -37,6 +38,7 @@ class GenericProvider(EmailProvider):
         smtp.ehlo()
         smtp.starttls()
         smtp.ehlo()
-        smtp.login(self.account.email, self.account.credential.password)
+        username = self.account.credential.smtp_username or self.account.email
+        smtp.login(username, self.account.credential.password)
         logger.debug(f"Generic SMTP connected for {self.account.email}")
         return smtp

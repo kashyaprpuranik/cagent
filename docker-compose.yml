@@ -512,6 +512,8 @@ services:
       - ./configs/coredns:/etc/coredns
       # HTTP proxy config volume (warden writes generated config here)
       - proxy-config:/etc/envoy
+      # Email config directory (warden writes accounts.json here)
+      - ./configs/email:/etc/cagent/email
       # Seccomp profiles for container recreation
       - ./configs/seccomp/profiles:/etc/seccomp/profiles:ro
       # Data plane directory (for .env and docker-compose access)
@@ -627,6 +629,7 @@ services:
 
     environment:
       - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml
+      - EMAIL_GENERATED_CONFIG=/etc/cagent/email/accounts.json
       # Gmail OAuth (set in .env or shell)
       - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID:-}
       - GMAIL_CLIENT_SECRET=${GMAIL_CLIENT_SECRET:-}
@@ -640,6 +643,8 @@ services:
 
     volumes:
       - ./configs/cagent.yaml:/etc/cagent/cagent.yaml:ro
+      # Generated email config (written by warden from CP sync)
+      - ./configs/email:/etc/cagent/email:ro
 
     # On infra-net only - cell accesses via Envoy on cell-net
     networks:
