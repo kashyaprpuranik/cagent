@@ -64,23 +64,18 @@ READONLY_TMPFS = {
 
 VALID_RUNTIME_POLICIES = {"standard", "hardened", "permissive"}
 
+# Shared base for hardened/standard (only seccomp filter differs)
+_LOCKED_DOWN_BASE = {
+    "cap_drop": ["ALL"],
+    "cap_add": SSHD_CAPS,
+    "read_only": True,
+    "tmpfs": READONLY_TMPFS,
+    "no_new_privileges": True,
+}
+
 RUNTIME_POLICIES = {
-    "hardened": {
-        "seccomp": "hardened",
-        "cap_drop": ["ALL"],
-        "cap_add": SSHD_CAPS,
-        "read_only": True,
-        "tmpfs": READONLY_TMPFS,
-        "no_new_privileges": True,
-    },
-    "standard": {
-        "seccomp": "standard",
-        "cap_drop": ["ALL"],
-        "cap_add": SSHD_CAPS,
-        "read_only": True,
-        "tmpfs": READONLY_TMPFS,
-        "no_new_privileges": True,
-    },
+    "hardened": {"seccomp": "hardened", **_LOCKED_DOWN_BASE},
+    "standard": {"seccomp": "standard", **_LOCKED_DOWN_BASE},
     "permissive": {
         "seccomp": "permissive",
         "cap_drop": ["NET_RAW"],
