@@ -86,7 +86,7 @@ class WipeRequest(BaseModel):
 
 
 @router.post("/commands/wipe")
-async def wipe_cell(body: Optional[WipeRequest] = None):
+def wipe_cell(body: Optional[WipeRequest] = None):
     """Wipe the cell: stop, optionally clear workspace, restart.
 
     The same container is reused — no rename or recreation needed.
@@ -113,7 +113,7 @@ async def wipe_cell(body: Optional[WipeRequest] = None):
 
 
 @router.post("/commands/restart")
-async def restart_cell():
+def restart_cell():
     """Restart the cell container."""
     container = _get_cell_container()
     try:
@@ -124,7 +124,7 @@ async def restart_cell():
 
 
 @router.post("/commands/stop")
-async def stop_cell():
+def stop_cell():
     """Stop the cell container."""
     container = _get_cell_container()
     try:
@@ -135,7 +135,7 @@ async def stop_cell():
 
 
 @router.post("/commands/start")
-async def start_cell():
+def start_cell():
     """Start the cell container."""
     container = _get_cell_container()
     try:
