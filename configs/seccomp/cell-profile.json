@@ -52,7 +52,7 @@
         "setitimer", "setpgid", "setpriority", "setregid", "setresgid",
         "setresuid", "setreuid", "setsid", "setsockopt", "setuid",
         "setxattr", "shmat", "shmctl", "shmdt", "shmget", "shutdown",
-        "sigaltstack", "signalfd", "signalfd4", "splice", "stat",
+        "sigaltstack", "signalfd", "signalfd4", "socketpair", "splice", "stat",
         "statfs", "statx", "symlink", "symlinkat", "sync",
         "sync_file_range", "syncfs", "sysinfo", "syslog", "tee",
         "tgkill", "time", "timer_create", "timer_delete",
