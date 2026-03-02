@@ -10,6 +10,16 @@ USER_NAME="${USER_NAME:-cell}"
 USER_HOME="/home/$USER_NAME"
 WORKSPACE="/workspace"
 
+# Fix home directory ownership — /home/cell is a tmpfs (read-only rootfs
+# hardening) so it starts owned by root. Recreate .ssh with correct perms.
+setup_home_dir() {
+    chown "$USER_NAME:$USER_NAME" "$USER_HOME"
+    chmod 750 "$USER_HOME"
+    mkdir -p "$USER_HOME/.ssh"
+    chmod 700 "$USER_HOME/.ssh"
+    chown "$USER_NAME:$USER_NAME" "$USER_HOME/.ssh"
+}
+
 # Setup SSH authorized keys from environment or mounted file
 setup_ssh_keys() {
     local auth_keys_file="$USER_HOME/.ssh/authorized_keys"
@@ -58,6 +68,12 @@ setup_host_keys() {
     # Ensure sshd privilege-separation directory exists (needed when / is read-only
     # and /run is a tmpfs that starts empty)
     mkdir -p /var/run/sshd
+    # Restore sshd_config — /etc/ssh is a tmpfs (read-only rootfs hardening)
+    # so the baked config from the image is wiped on every start.
+    # The backup lives outside /etc/ssh to survive the tmpfs overlay.
+    if [ -f /usr/local/share/sshd_config.baked ] && [ ! -f /etc/ssh/sshd_config ]; then
+        cp /usr/local/share/sshd_config.baked /etc/ssh/sshd_config
+    fi
     if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
         echo "Generating SSH host keys..."
         ssh-keygen -A
@@ -104,6 +120,7 @@ echo "=== AI Cell Container Starting ==="
 echo "Variant: ${VARIANT:-lean}"
 echo "User: $USER_NAME"
 
+setup_home_dir
 setup_host_keys
 setup_ssh_keys
 restore_sudo_password
