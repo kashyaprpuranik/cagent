@@ -43,7 +43,7 @@ class ApplyPoliciesRequest(BaseModel):
 
 
 @router.post("/policies/apply")
-async def apply_policies(body: ApplyPoliciesRequest):
+def apply_policies(body: ApplyPoliciesRequest):
     """Apply updated domain policies.
 
     Accepts a list of domain policy objects, updates cagent.yaml,
@@ -92,7 +92,7 @@ async def apply_policies(body: ApplyPoliciesRequest):
 
 
 @router.get("/policies/active")
-async def get_active_policies():
+def get_active_policies():
     """Get currently active domain policies from cagent.yaml."""
     config_path = Path(CAGENT_CONFIG_PATH)
     try:

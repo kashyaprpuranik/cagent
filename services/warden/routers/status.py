@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.get("/status")
-async def get_status():
+def get_status():
     """Overall system status summary."""
     mem = psutil.virtual_memory()
     disk = shutil.disk_usage("/")
@@ -32,7 +32,7 @@ async def get_status():
 
 
 @router.get("/metrics")
-async def get_metrics():
+def get_metrics():
     """Detailed system metrics."""
     mem = psutil.virtual_memory()
     disk = shutil.disk_usage("/")
@@ -53,7 +53,7 @@ async def get_metrics():
 
 
 @router.get("/disk")
-async def get_disk():
+def get_disk():
     """Disk usage per mount point."""
     partitions = psutil.disk_partitions()
     result = []
@@ -77,7 +77,7 @@ async def get_disk():
 
 
 @router.get("/processes")
-async def get_processes():
+def get_processes():
     """Top processes by CPU usage."""
     procs = []
     for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "status"]):
@@ -99,7 +99,7 @@ async def get_processes():
 
 
 @router.get("/network")
-async def get_network():
+def get_network():
     """Network interface statistics."""
     counters = psutil.net_io_counters(pernic=True)
     result = []
@@ -121,7 +121,7 @@ async def get_network():
 
 
 @router.get("/containers")
-async def get_containers():
+def get_containers():
     """Docker container statuses."""
     result = []
     for name in MANAGED_CONTAINERS:

@@ -19,13 +19,13 @@ router = APIRouter()
 
 
 @router.api_route("/health", methods=["GET", "HEAD"])
-async def health():
+def health():
     """Health check. Accepts HEAD for cloudflared tunnel origin health probes."""
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
 
 @router.get("/health/detailed")
-async def detailed_health():
+def detailed_health():
     """Detailed health check for all components."""
     checks = {}
 
@@ -96,9 +96,9 @@ async def detailed_health():
 
 
 @router.get("/health/deep")
-async def deep_health():
+def deep_health():
     """Deep health check — verifies all services and local OpenObserve."""
-    result = await detailed_health()
+    result = detailed_health()
 
     # Also check local OpenObserve if configured
     try:
@@ -118,7 +118,7 @@ async def deep_health():
 
 
 @router.get("/info")
-async def info():
+def info():
     """System info."""
     return {
         "mode": DATAPLANE_MODE,
