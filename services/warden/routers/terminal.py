@@ -73,11 +73,7 @@ async def web_terminal(websocket: WebSocket, name: str, root: bool = False):
         # Create exec instance with TTY — attach to persistent tmux session
         # Uses -A flag: attach if session exists, create otherwise.
         # Shares the "main" session with SSH (via profile.d/tmux_session.sh).
-        tmux_cmd = (
-            "export TMUX_TMPDIR=/workspace/.tmux"
-            ' && mkdir -p "$TMUX_TMPDIR"'
-            " && exec tmux new-session -As main"
-        )
+        tmux_cmd = 'export TMUX_TMPDIR=/workspace/.tmux && mkdir -p "$TMUX_TMPDIR" && exec tmux new-session -As main'
         exec_id = docker_client.api.exec_create(
             container.id,
             cmd=["/bin/bash", "-lc", tmux_cmd],
