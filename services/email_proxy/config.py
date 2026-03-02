@@ -1,9 +1,14 @@
 """
-Config loader - loads email configuration from cagent.yaml.
+Config loader - loads email configuration from cagent.yaml and generated config.
 
-Resolves credential env var references to actual values.
+Sources (in priority order):
+  1. cagent.yaml email.accounts[] — env var credential refs, wins by name
+  2. Generated accounts.json — direct credential values from CP sync (via warden)
+
+Resolves credential env var references to actual values for yaml accounts.
 """
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -14,6 +19,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 CAGENT_CONFIG_PATH = os.environ.get("CAGENT_CONFIG_PATH", "/etc/cagent/cagent.yaml")
+EMAIL_GENERATED_CONFIG = os.environ.get("EMAIL_GENERATED_CONFIG", "/etc/cagent/email/accounts.json")
 
 
 @dataclass
@@ -32,6 +38,8 @@ class EmailCredential:
     refresh_token: str = ""
     # Password field (generic)
     password: str = ""
+    # SMTP username override (defaults to email if not set)
+    smtp_username: str = ""
 
 
 @dataclass
@@ -113,30 +121,100 @@ def _parse_account(acct_dict: dict) -> EmailAccount:
     )
 
 
-def load_email_config(config_path: str = None) -> list[EmailAccount]:
-    """Load email accounts from cagent.yaml."""
-    path = Path(config_path or CAGENT_CONFIG_PATH)
+def _parse_direct_credential(cred_dict: dict) -> EmailCredential:
+    """Parse credential section with direct values (no env var resolution)."""
+    if not cred_dict:
+        return EmailCredential()
+    return EmailCredential(
+        client_id=cred_dict.get("client_id", ""),
+        client_secret=cred_dict.get("client_secret", ""),
+        refresh_token=cred_dict.get("refresh_token", ""),
+        password=cred_dict.get("password", ""),
+        smtp_username=cred_dict.get("smtp_username", ""),
+    )
+
+
+def _parse_generated_account(acct_dict: dict) -> EmailAccount:
+    """Parse an account entry from generated config (direct credential values)."""
+    provider = acct_dict.get("provider", "generic")
+    defaults = PROVIDER_DEFAULTS.get(provider, {})
+
+    return EmailAccount(
+        name=acct_dict["name"],
+        provider=provider,
+        email=acct_dict["email"],
+        imap_server=acct_dict.get("imap_server", defaults.get("imap_server", "")),
+        imap_port=acct_dict.get("imap_port", defaults.get("imap_port", 993)),
+        smtp_server=acct_dict.get("smtp_server", defaults.get("smtp_server", "")),
+        smtp_port=acct_dict.get("smtp_port", defaults.get("smtp_port", 587)),
+        credential=_parse_direct_credential(acct_dict.get("credential", {})),
+        policy=_parse_policy(acct_dict.get("policy", {})),
+    )
+
+
+def load_generated_config(config_path: str = None) -> list[EmailAccount]:
+    """Load email accounts from generated accounts.json (CP-synced config)."""
+    path = Path(config_path or EMAIL_GENERATED_CONFIG)
     if not path.exists():
-        logger.warning(f"Config file not found: {path}")
         return []
 
-    with open(path) as f:
-        config = yaml.safe_load(f)
-
-    email_section = config.get("email", {})
-    accounts_raw = email_section.get("accounts", [])
+    try:
+        with open(path) as f:
+            accounts_raw = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Failed to read generated email config: {e}")
+        return []
 
     accounts = []
     for acct_dict in accounts_raw:
         try:
-            acct = _parse_account(acct_dict)
+            acct = _parse_generated_account(acct_dict)
             _validate_account(acct)
             accounts.append(acct)
-            logger.info(f"Loaded email account: {acct.name} ({acct.provider})")
+            logger.info(f"Loaded generated email account: {acct.name} ({acct.provider})")
         except Exception as e:
-            logger.error(f"Failed to load email account: {e}")
+            logger.error(f"Failed to load generated email account: {e}")
 
     return accounts
+
+
+def load_email_config(config_path: str = None, generated_path: str = None) -> list[EmailAccount]:
+    """Load email accounts from cagent.yaml, merged with generated config.
+
+    cagent.yaml accounts take precedence over generated accounts by name.
+    """
+    # Load yaml accounts (primary source)
+    yaml_accounts = []
+    path = Path(config_path or CAGENT_CONFIG_PATH)
+    if path.exists():
+        with open(path) as f:
+            config = yaml.safe_load(f)
+
+        email_section = config.get("email", {})
+        accounts_raw = email_section.get("accounts", [])
+
+        for acct_dict in accounts_raw:
+            try:
+                acct = _parse_account(acct_dict)
+                _validate_account(acct)
+                yaml_accounts.append(acct)
+                logger.info(f"Loaded email account: {acct.name} ({acct.provider})")
+            except Exception as e:
+                logger.error(f"Failed to load email account: {e}")
+    else:
+        logger.warning(f"Config file not found: {path}")
+
+    # Load generated accounts (from CP sync via warden)
+    generated_accounts = load_generated_config(generated_path)
+
+    # Merge: yaml wins by name
+    yaml_names = {a.name.lower() for a in yaml_accounts}
+    merged = list(yaml_accounts)
+    for acct in generated_accounts:
+        if acct.name.lower() not in yaml_names:
+            merged.append(acct)
+
+    return merged
 
 
 def _validate_account(account: EmailAccount):

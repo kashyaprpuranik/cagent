@@ -26,12 +26,14 @@ Config Sources (standalone vs connected mode):
     - security.seccomp_profile — pushed via heartbeat response
     - resources (cpu/memory limits) — pushed via heartbeat response
 
-  Gap (CP endpoint exists but warden doesn't sync):
-    - email.accounts[] — CP has /api/v1/email-policies but warden
-      does not yet sync them (same pattern as domains before this fix)
+  CP-synced (connected mode merges with yaml):
+    - email.accounts[] — synced via GET /api/v1/email-policies?include_credentials=true,
+      merged here via set_additional_email_accounts(). Includes credentials
+      directly (unlike domains, which use ext_authz per-request injection).
 """
 
 import hashlib
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -49,10 +51,15 @@ class ConfigGenerator:
         self.config = {}
         self.last_hash = None
         self._additional_domains = []  # CP-provided domain entries
+        self._additional_email_accounts = []  # CP-provided email account entries
 
     def set_additional_domains(self, domains: list):
         """Set additional domain entries (e.g., from control plane policies)."""
         self._additional_domains = domains
+
+    def set_additional_email_accounts(self, accounts: list):
+        """Set additional email account entries (e.g., from control plane email policies)."""
+        self._additional_email_accounts = accounts
 
     def load_config(self) -> bool:
         """Load cagent.yaml config. Returns True if config changed."""
@@ -89,8 +96,17 @@ class ConfigGenerator:
         return self.config.get("internal_services", [])
 
     def get_email_accounts(self) -> list:
-        """Get list of email account configs."""
-        return self.config.get("email", {}).get("accounts", [])
+        """Get list of email account configs, merged with any additional accounts."""
+        yaml_accounts = self.config.get("email", {}).get("accounts", [])
+        if not self._additional_email_accounts:
+            return yaml_accounts
+        # Merge: cagent.yaml takes precedence, additional fills in new accounts
+        yaml_names = {a.get("name", "").lower() for a in yaml_accounts}
+        merged = list(yaml_accounts)
+        for entry in self._additional_email_accounts:
+            if entry.get("name", "").lower() not in yaml_names:
+                merged.append(entry)
+        return merged
 
     def get_dns_config(self) -> dict:
         """Get DNS configuration."""
@@ -751,6 +767,30 @@ class ConfigGenerator:
             "tokens_per_fill": tokens_per_fill,
             "fill_interval": fill_interval,
         }
+
+    # =========================================================================
+    # Email Config Generation
+    # =========================================================================
+
+    def generate_email_config(self) -> str:
+        """Generate email accounts JSON config from merged accounts.
+
+        Returns a JSON string of the account list. Each entry includes
+        connection details, credentials, and policy settings.
+        """
+        return json.dumps(self.get_email_accounts(), indent=2, default=str)
+
+    def write_email_config(self, output_path: str) -> bool:
+        """Write generated email accounts config as JSON."""
+        try:
+            content = self.generate_email_config()
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_path).write_text(content)
+            logger.info(f"Wrote email config to {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write email config: {e}")
+            return False
 
     # =========================================================================
     # Output Methods
