@@ -37,6 +37,56 @@ SECCOMP_PROFILES_DIR = os.environ.get("SECCOMP_PROFILES_DIR", "/etc/seccomp/prof
 VALID_SECCOMP_PROFILES = {"standard", "hardened", "permissive"}
 
 # ---------------------------------------------------------------------------
+# Runtime policies — full container security postures
+# ---------------------------------------------------------------------------
+# Capabilities required by sshd/entrypoint (same as docker-compose cap_add)
+SSHD_CAPS = [
+    "CHOWN",            # entrypoint: chown on SSH keys, tmux dirs
+    "DAC_OVERRIDE",     # read/write files across users during setup
+    "FOWNER",           # entrypoint: chmod on SSH authorized_keys
+    "SETUID",           # gosu + sshd privilege separation
+    "SETGID",           # gosu + sshd privilege separation
+    "NET_BIND_SERVICE", # sshd binds port 22
+    "SYS_CHROOT",       # sshd privilege separation (ChrootDirectory)
+    "AUDIT_WRITE",      # sshd/PAM audit logging
+    "KILL",             # sshd manages child processes
+]
+
+# tmpfs mounts for read-only root (same as docker-compose tmpfs)
+READONLY_TMPFS = {
+    "/tmp": "size=100M",
+    "/run": "size=10M",
+    "/var/log": "size=50M",
+    "/etc/ssh": "size=1M",
+    "/home/cell": "size=10M",
+    "/etc/profile.d": "size=1M",
+}
+
+VALID_RUNTIME_POLICIES = {"standard", "hardened", "permissive"}
+
+# Shared base for hardened/standard (only seccomp filter differs)
+_LOCKED_DOWN_BASE = {
+    "cap_drop": ["ALL"],
+    "cap_add": SSHD_CAPS,
+    "read_only": True,
+    "tmpfs": READONLY_TMPFS,
+    "no_new_privileges": True,
+}
+
+RUNTIME_POLICIES = {
+    "hardened": {"seccomp": "hardened", **_LOCKED_DOWN_BASE},
+    "standard": {"seccomp": "standard", **_LOCKED_DOWN_BASE},
+    "permissive": {
+        "seccomp": "permissive",
+        "cap_drop": ["NET_RAW"],
+        "cap_add": [],
+        "read_only": False,
+        "tmpfs": {},
+        "no_new_privileges": True,
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Mode & connectivity
 # ---------------------------------------------------------------------------
 DATAPLANE_MODE = os.environ.get("DATAPLANE_MODE", "standalone")
