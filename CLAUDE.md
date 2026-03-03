@@ -13,6 +13,7 @@ The control plane (centralized multi-tenant management) lives in a separate priv
 This repo contains the **data plane** — the secure agent execution environment:
 
 - **Cell**: Network-isolated sandbox where AI agents run
+- **MITM Proxy** (mitmproxy): TLS-terminating proxy for HTTPS egress — decrypts HTTPS so Envoy can apply security controls
 - **HTTP Proxy** (Envoy): Egress gateway with domain allowlist, rate limiting, path filtering, and credential injection
 - **DNS Filter** (CoreDNS): Domain allowlist enforcement at DNS level
 - **Warden**: Config sync daemon + local admin UI (FastAPI + React)
@@ -42,6 +43,7 @@ This repo contains the **data plane** — the secure agent execution environment
 │   ├── coredns/Corefile            # DNS filter config (generated from cagent.yaml)
 │   ├── envoy/                      # HTTP proxy config (generated from cagent.yaml)
 │   ├── vector/                     # Log collection (sources/transforms + mode-specific sinks)
+│   ├── mitm/                       # MITM proxy CA cert+key (generated, gitignored)
 │   ├── seccomp/                    # Seccomp profile for cell container
 │   └── gvisor/runsc.toml           # gVisor runtime config
 ├── services/
@@ -51,6 +53,7 @@ This repo contains the **data plane** — the secure agent execution environment
 ├── tests/                          # Unit and E2E tests
 ├── scripts/
 │   ├── local.sh                    # Dev environment orchestration
+│   ├── gen_mitm_ca.sh              # MITM proxy CA certificate generation
 │   ├── test.sh                # Test runner
 │   └── seed_traffic.py             # Traffic seeding utility
 ├── docs/                           # Configuration guide
@@ -154,21 +157,23 @@ npm run lint
 ### Docker / Infrastructure
 
 - **Networks**: `cell-net` (10.200.1.0/24, internal, no external access) and `infra-net` (10.200.2.0/24, can reach external). IPv6 disabled to prevent bypass
-- **Static IPs**: dns-filter=10.200.1.5, http-proxy=10.200.1.10, cell=10.200.1.20
-- **Profiles**: `dev` (runc), `standard` (gVisor), `admin` (admin UI via warden), `managed` (warden without UI), `auditing` (log shipping), `email` (email proxy - beta)
+- **Static IPs**: dns-filter=10.200.1.5, http-proxy=10.200.1.10, mitm-proxy=10.200.1.15, cell=10.200.1.20
+- **Profiles**: `dev` (runc), `standard` (gVisor), `admin` (admin UI via warden), `managed` (warden without UI), `mitm` (MITM proxy for HTTPS), `auditing` (log shipping), `email` (email proxy - beta)
 - **Config generation**: `cagent.yaml` is the primary source. In connected mode, warden merges CP domain policies into config generation (see Config Sources below)
-- **Security layers**: Seccomp profile blocks raw sockets, gVisor intercepts syscalls, Envoy enforces domain allowlist/rate limits/path filtering, CoreDNS blocks unauthorized DNS
+- **Security layers**: Seccomp profile blocks raw sockets, gVisor intercepts syscalls, mitmproxy decrypts HTTPS for inspection, Envoy enforces domain allowlist/rate limits/path filtering, CoreDNS blocks unauthorized DNS
 - **Vector sinks**: `configs/vector/sinks/standalone.yaml` (file backup + optional S3/ES) or `sinks/connected.yaml` (CP API + file backup), selected via `DATAPLANE_MODE` env var
 
 ## Data Flow
 
 1. Cell makes HTTP request via `HTTP_PROXY` (Envoy at 10.200.1.10:8443)
-2. Envoy ext_authz calls warden for credential injection (returns credential headers if configured)
-3. Envoy local_ratelimit enforces per-domain rate limits (global default + per-route overrides)
-4. Envoy router matches domain (virtual host) and path (route rules), forwards to upstream or returns 403
-5. DNS queries go through CoreDNS (10.200.1.5) which only resolves allowed domains
-6. Vector collects logs from Docker/Envoy/CoreDNS and writes to file (standalone) or ships to CP (connected)
-7. In connected mode, warden polls CP for policy updates and regenerates configs
+1b. Cell makes HTTPS request via `HTTPS_PROXY` (mitmproxy at 10.200.1.15:8080, when `--profile mitm` active)
+2. mitmproxy terminates TLS and forwards decrypted HTTP to Envoy (HTTPS path only)
+3. Envoy ext_authz calls warden for credential injection (returns credential headers if configured)
+4. Envoy local_ratelimit enforces per-domain rate limits (global default + per-route overrides)
+5. Envoy router matches domain (virtual host) and path (route rules), forwards to upstream or returns 403
+6. DNS queries go through CoreDNS (10.200.1.5) which only resolves allowed domains
+7. Vector collects logs from Docker/Envoy/CoreDNS and writes to file (standalone) or ships to CP (connected)
+8. In connected mode, warden polls CP for policy updates and regenerates configs
 
 ## Config Sources (Standalone vs Connected)
 
@@ -196,6 +201,7 @@ In standalone mode, `cagent.yaml` is the sole config source. In connected mode, 
 | `services/warden/routers/ext_authz.py` | ext_authz endpoint for Envoy credential injection |
 | `docker-compose.yml` | Service definitions |
 | `scripts/local.sh` | Dev environment orchestration |
+| `scripts/gen_mitm_ca.sh` | MITM proxy CA certificate generation |
 | `scripts/test.sh` | Test runner |
 
 ## Gotchas

@@ -115,6 +115,22 @@ recover_tmux_sessions() {
     fi
 }
 
+# Build combined CA bundle with MITM CA if present
+setup_mitm_ca() {
+    local system_ca="/etc/ssl/certs/ca-certificates.crt"
+    local combined_ca="/tmp/ca-certificates.crt"
+    local mitm_ca="/tmp/mitm-ca.pem"
+
+    if [ -f "$mitm_ca" ] && [ -s "$mitm_ca" ]; then
+        echo "MITM CA detected, building combined CA bundle..."
+        cat "$system_ca" "$mitm_ca" > "$combined_ca"
+    else
+        echo "No MITM CA, copying system CA bundle..."
+        cp "$system_ca" "$combined_ca"
+    fi
+    chmod 644 "$combined_ca"
+}
+
 # Main
 echo "=== AI Cell Container Starting ==="
 echo "Variant: ${VARIANT:-lean}"
@@ -128,6 +144,7 @@ chown "$USER_NAME:$USER_NAME" "$WORKSPACE"
 setup_host_keys
 setup_ssh_keys
 restore_sudo_password
+setup_mitm_ca
 setup_tmux
 recover_tmux_sessions
 

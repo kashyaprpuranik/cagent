@@ -40,16 +40,18 @@ BLOCKED_DOMAINS = [
 ]
 
 HTTP_REQUESTS = [
-    # Use http:// — envoy acts as a forward proxy upgrading to HTTPS on backend.
-    # HTTPS URLs would send CONNECT which envoy's HCM doesn't handle.
+    # HTTP: goes directly to Envoy (forward proxy, upgrades to HTTPS on backend)
     # (url, description)
-    ("http://api.github.com/", "GitHub API root"),
-    ("http://api.github.com/repos/torvalds/linux", "GitHub repo lookup"),
-    ("http://api.github.com/rate_limit", "GitHub rate limit check"),
-    ("http://api.openai.com/v1/models", "OpenAI models (expect 401)"),
-    ("http://api.anthropic.com/v1/messages", "Anthropic messages (expect 401)"),
-    ("http://pypi.org/simple/requests/", "PyPI package index"),
-    ("http://registry.npmjs.org/express", "npm registry (expect 403 - not in allowlist)"),
+    ("http://api.github.com/", "GitHub API root (HTTP)"),
+    ("http://api.github.com/repos/torvalds/linux", "GitHub repo lookup (HTTP)"),
+    ("http://api.github.com/rate_limit", "GitHub rate limit check (HTTP)"),
+    ("http://api.openai.com/v1/models", "OpenAI models (HTTP, expect 401)"),
+    ("http://pypi.org/simple/requests/", "PyPI package index (HTTP)"),
+    # HTTPS: goes through mitmproxy -> Envoy (when MITM proxy is active)
+    ("https://api.github.com/", "GitHub API root (HTTPS)"),
+    ("https://api.github.com/rate_limit", "GitHub rate limit check (HTTPS)"),
+    ("https://api.openai.com/v1/models", "OpenAI models (HTTPS, expect 401)"),
+    ("https://api.anthropic.com/v1/messages", "Anthropic messages (HTTPS, expect 401)"),
 ]
 
 

@@ -3,6 +3,10 @@ Tests for credential injection logic (now handled by Envoy ext_authz via warden)
 
 These tests verify the domain matching and header formatting logic used
 by the ext_authz endpoint for credential injection.
+
+With the MITM proxy enabled (--profile mitm), credential injection works for
+both HTTP and HTTPS requests. mitmproxy decrypts HTTPS traffic and forwards it
+as plain HTTP to Envoy, where ext_authz injects credentials as usual.
 """
 
 
@@ -187,10 +191,11 @@ class TestDevboxLocalMapping:
         assert not is_devbox_local("devbox.local")  # No subdomain
 
     def test_https_domains_not_rewritten(self):
-        """HTTPS requests to real domains should NOT be mapped.
+        """Real domains should NOT be mapped to devbox.local aliases.
 
-        Only *.devbox.local HTTP requests get credential injection.
-        Direct HTTPS to api.openai.com goes through CONNECT tunnel.
+        The devbox.local alias system provides an HTTP shortcut for credential
+        injection. With MITM proxy enabled, direct HTTPS to api.openai.com
+        also gets credential injection (mitmproxy decrypts -> Envoy ext_authz).
         """
         import re
 
@@ -226,7 +231,11 @@ class TestDevboxLocalMapping:
         assert is_local
 
     def test_credential_injection_only_for_devbox_local(self):
-        """Credentials should only be looked up for mapped devbox.local domains."""
+        """Without MITM, credentials are only looked up for mapped devbox.local domains.
+
+        With MITM proxy enabled, Envoy sees all HTTPS traffic as plain HTTP,
+        so credential injection works for real domains too (e.g., api.openai.com).
+        """
         import re
 
         def should_inject_credentials(host, mappings):
@@ -240,9 +249,9 @@ class TestDevboxLocalMapping:
                     return True, real_domain
                 return False, None  # Unknown alias
 
-            # For HTTPS direct requests (CONNECT tunnel), we CAN'T inject
-            # But for HTTP direct requests to allowed domains, we could
-            # In practice, all real APIs use HTTPS, so this is moot
+            # Without MITM: HTTPS creates CONNECT tunnel, can't inject
+            # With MITM: mitmproxy decrypts HTTPS -> Envoy sees HTTP -> can inject
+            # This logic tests the non-MITM path
             return False, None
 
         mappings = {"openai.devbox.local": "api.openai.com"}
@@ -256,6 +265,6 @@ class TestDevboxLocalMapping:
         inject, domain = should_inject_credentials("unknown.devbox.local", mappings)
         assert not inject
 
-        # Direct HTTPS domain -> can't inject (CONNECT tunnel)
+        # Direct HTTPS domain -> can't inject without MITM (CONNECT tunnel)
         inject, domain = should_inject_credentials("api.openai.com", mappings)
         assert not inject

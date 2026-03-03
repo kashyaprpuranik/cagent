@@ -28,7 +28,7 @@ Cagent assumes the AI agent is **untrusted by default**. The agent may be:
 
 | Principle | Description |
 |-----------|-------------|
-| **Network Isolation** | Cell can only reach Envoy (proxy) and CoreDNS (DNS filter) - no direct internet access |
+| **Network Isolation** | Cell can only reach proxy (Envoy or mitmproxy) and CoreDNS (DNS filter) - no direct internet access |
 | **Credential Hiding** | Cell never sees API keys; credentials injected by proxy at egress |
 | **Defense in Depth** | Multiple layers: network, container, optional kernel (gVisor) isolation |
 | **Least Privilege** | Minimal capabilities, read-only filesystem, resource limits |
@@ -49,13 +49,13 @@ Cagent assumes the AI agent is **untrusted by default**. The agent may be:
 | Control | Implementation |
 |---------|----------------|
 | Internal network | `cell-net` marked as `internal: true` (no default gateway) |
-| Protocol restriction | Cell can ONLY reach Envoy (HTTP) and CoreDNS (DNS) |
+| Protocol restriction | Cell can ONLY reach Envoy (HTTP), mitmproxy (HTTPS, optional), and CoreDNS (DNS) |
 | IPv6 disabled | Prevents bypass of IPv4 egress controls |
 | Allowlist enforcement | CoreDNS blocks resolution of non-allowed domains |
-| Egress proxy | All HTTP(S) routed through Envoy |
+| Egress proxy | All HTTP routed through Envoy; HTTPS through mitmproxy → Envoy (optional) |
 | Raw socket blocked | Seccomp profile prevents packet crafting |
 
-**Protocol Smuggling Prevention**: Raw TCP/UDP to external hosts is impossible. The cell can only reach two IPs on the internal network: Envoy (port 8443, HTTP only) and CoreDNS (port 53, DNS only). Seccomp blocks raw socket creation (AF_PACKET), preventing packet crafting.
+**Protocol Smuggling Prevention**: Raw TCP/UDP to external hosts is impossible. The cell can only reach a few IPs on the internal network: Envoy (port 8443, HTTP), mitmproxy (port 8080, HTTPS — optional), and CoreDNS (port 53, DNS). Seccomp blocks raw socket creation (AF_PACKET), preventing packet crafting.
 
 **Residual Exfiltration Channels**: Small amounts of data could theoretically be exfiltrated via DNS queries or HTTPS traffic to allowlisted domains. Mitigations: DNS tunneling detection (blocks long subdomains) and audit logging.
 
@@ -274,7 +274,8 @@ docker compose --profile dev --profile managed --profile auditing up -d
 | Feature | Description |
 |---------|-------------|
 | **Domain Allowlist** | Only approved domains can be accessed (enforced by CoreDNS and Envoy) |
-| **Credential Injection** | API keys injected by proxy, never exposed to cell |
+| **HTTPS Interception** | MITM proxy decrypts HTTPS so all controls apply to encrypted traffic |
+| **Credential Injection** | API keys injected by proxy, never exposed to cell (works for both HTTP and HTTPS) |
 | **Rate Limiting** | Per-domain rate limits to control API usage |
 | **Traffic Analytics** | Requests/sec, top domains, error rates in log viewer |
 | **Web Terminal** | Browser-based shell access to cells (xterm.js) |

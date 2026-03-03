@@ -5,12 +5,16 @@ This guide covers local development setup, testing, and Docker workflows for the
 ## Quick Start
 
 ```bash
-# Standalone with admin UI
+# Standalone with admin UI (includes MITM proxy for HTTPS support)
 ./scripts/local.sh
 
 # After startup:
 # - Admin UI: http://localhost:8081
 # - Cell shell: docker exec -it cell bash
+# - Test HTTPS: docker exec -it cell curl https://api.github.com/
+
+# Without MITM proxy (HTTP only)
+./scripts/local.sh --no-mitm
 ```
 
 ## Directory Structure
@@ -29,6 +33,7 @@ This guide covers local development setup, testing, and Docker workflows for the
 │   │   └── sinks/                  # Mode-specific sinks
 │   │       ├── standalone.yaml     # File backup + optional S3/ES
 │   │       └── connected.yaml      # CP API + file backup
+│   ├── mitm/                       # MITM proxy CA cert (generated, gitignored)
 │   ├── seccomp/                    # Cell container seccomp profile
 │   └── gvisor/runsc.toml           # gVisor config
 ├── services/
@@ -91,6 +96,7 @@ Tests include:
 | `standard` | Cell with gVisor runtime (production) |
 | `admin` | Warden with admin UI |
 | `managed` | Warden without admin UI (connected mode) |
+| `mitm` | MITM proxy for HTTPS interception |
 | `auditing` | Log shipper (Vector) |
 | `email` | Email proxy (beta) |
 
@@ -130,6 +136,22 @@ The warden watches `cagent.yaml` and generates:
 - `envoy/envoy-enhanced.yaml` — Envoy config with ext_authz + local_ratelimit filters
 
 Changes to `cagent.yaml` trigger automatic regeneration and service restart.
+
+## MITM CA Certificate
+
+The MITM proxy requires a CA certificate for TLS interception. `local.sh` generates this automatically via `scripts/gen_mitm_ca.sh`. The generated files are in `configs/mitm/` (gitignored):
+
+- `mitmproxy-ca.pem` — Combined key+cert (used by mitmproxy)
+- `mitmproxy-ca-cert.pem` — Cert only (mounted into cell as trusted CA)
+
+The script is idempotent — it skips generation if a valid cert already exists (checked via `openssl x509 -checkend`).
+
+To regenerate manually:
+
+```bash
+rm -rf configs/mitm/
+./scripts/gen_mitm_ca.sh
+```
 
 ## Control Plane Integration
 

@@ -9,6 +9,7 @@
 #   ./scripts/local.sh                     # Standalone with admin UI (default)
 #   ./scripts/local.sh --minimal           # Minimal (no warden, static config)
 #   ./scripts/local.sh --gvisor            # Use gVisor runtime
+#   ./scripts/local.sh --no-mitm           # Disable MITM proxy (no HTTPS interception)
 #   ./scripts/local.sh --beta              # Enable beta features (email proxy)
 #   ./scripts/local.sh down                # Stop everything
 #
@@ -27,6 +28,7 @@ DP_PROFILES="--profile admin"
 DP_AGENT_PROFILE="dev"
 ACTION="up"
 MINIMAL=false
+USE_MITM=true
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
             DP_AGENT_PROFILE="standard"
             shift
             ;;
+        --no-mitm)
+            USE_MITM=false
+            shift
+            ;;
         --beta)
             export BETA_FEATURES="email"
             DP_PROFILES="$DP_PROFILES --profile email"
@@ -59,6 +65,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --minimal       Minimal mode (no warden, static config)"
             echo "  --gvisor        Use gVisor runtime (default: runc)"
+            echo "  --no-mitm       Disable MITM proxy (no HTTPS interception)"
             echo "  --beta          Enable beta features (email proxy)"
             echo ""
             echo "Actions:"
@@ -93,7 +100,7 @@ cd "$ROOT_DIR"
 # --- Handle 'down' action ---
 if [ "$ACTION" = "down" ]; then
     echo "Stopping Data Plane..."
-    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email down --remove-orphans 2>/dev/null || true
+    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email --profile mitm down --remove-orphans 2>/dev/null || true
     echo ""
     echo "=== All services stopped ==="
     exit 0
@@ -103,6 +110,15 @@ fi
 if [ -z "${OPENOBSERVE_PASSWORD:-}" ]; then
     export OPENOBSERVE_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 32)"
     echo "Generated OpenObserve password (set OPENOBSERVE_PASSWORD to override)"
+fi
+
+# --- MITM proxy setup ---
+if [ "$USE_MITM" = true ] && [ "$MINIMAL" = false ]; then
+    echo "Generating MITM CA certificate..."
+    "$ROOT_DIR/scripts/gen_mitm_ca.sh"
+    DP_PROFILES="$DP_PROFILES --profile mitm"
+    export HTTPS_PROXY="http://10.200.1.15:8080"
+    echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
 fi
 
 # --- Start services ---
@@ -143,6 +159,21 @@ until docker exec "$CELL_CONTAINER" curl -sf -x http://10.200.1.10:8443 --connec
     sleep 2
 done
 echo "  HTTP proxy: OK"
+
+# Wait for MITM proxy (if enabled)
+if [ "$USE_MITM" = true ] && [ "$MINIMAL" = false ]; then
+    echo "Waiting for MITM proxy..."
+    RETRIES=15
+    until docker exec "$CELL_CONTAINER" curl -sf -x http://10.200.1.15:8080 --connect-timeout 2 https://api.github.com/ -o /dev/null 2>/dev/null; do
+        RETRIES=$((RETRIES - 1))
+        if [ $RETRIES -le 0 ]; then
+            echo "  WARNING: MITM proxy health check timed out (continuing anyway)"
+            break
+        fi
+        sleep 2
+    done
+    echo "  MITM proxy: OK"
+fi
 
 echo ""
 echo "=== Data Plane ready (standalone) ==="
