@@ -1,0 +1,8 @@
+```json
+[
+  {
+    "key": "cagent.yaml parsing caching",
+    "value": "Parsing cagent.yaml on every request without checking file modification time can be a significant performance bottleneck due to continuous file IO and YAML parsing. By caching the parsed dictionary and only re-parsing when the file st_mtime changes, performance is vastly improved while avoiding circular dependency issues with central config managers."
+  }
+]
+```
