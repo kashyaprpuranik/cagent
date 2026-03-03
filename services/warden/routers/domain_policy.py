@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 _policy_cache: dict = {}
 _CACHE_TTL = 300  # 5 minutes
 
+# In-memory cache for cagent.yaml parsing, relies on mtime to invalidate
+_config_cache: dict = {"mtime": 0, "data": {}}
+
 
 def _cache_get(domain: str):
     """Return cached policy if still valid, else None."""
@@ -60,7 +63,11 @@ def _build_standalone_policy(domain: str) -> dict:
         return {"matched": False, "domain": domain}
 
     try:
-        config = yaml.safe_load(config_path.read_text()) or {}
+        mtime = config_path.stat().st_mtime
+        if _config_cache["mtime"] != mtime:
+            _config_cache["data"] = yaml.safe_load(config_path.read_text()) or {}
+            _config_cache["mtime"] = mtime
+        config = _config_cache["data"]
     except Exception:
         return {"matched": False, "domain": domain}
 
