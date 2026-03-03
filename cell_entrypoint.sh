@@ -121,6 +121,10 @@ echo "Variant: ${VARIANT:-lean}"
 echo "User: $USER_NAME"
 
 setup_home_dir
+# Fix workspace ownership — bind mounts (managed DPs) inherit root:root
+# from the host directory created by cloud-init. Named volumes are fine
+# (Docker copies ownership from the image), but chown is idempotent.
+chown "$USER_NAME:$USER_NAME" "$WORKSPACE"
 setup_host_keys
 setup_ssh_keys
 restore_sudo_password
