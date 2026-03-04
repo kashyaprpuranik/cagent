@@ -30,7 +30,6 @@ rate_limits:
 
 domains:
   - domain: api.openai.com
-    alias: openai              # Creates openai.devbox.local
     timeout: 120s
     rate_limit:
       requests_per_minute: 60
@@ -58,7 +57,6 @@ For connected mode (centralized management via control plane), see the [cagent-c
 | Field | Type | Description |
 |-------|------|-------------|
 | `domain` | string | Domain pattern (e.g., `api.openai.com`, `*.github.com`) |
-| `alias` | string | Creates `{alias}.devbox.local` shortcut |
 | `description` | string | Human-readable description |
 | `allowed_paths` | list | Path patterns to allow (default: all) |
 | `requests_per_minute` | int | Rate limit (requests per minute) |
@@ -84,24 +82,18 @@ By default, all paths are allowed for a domain. You can restrict access to speci
 
 Credentials are stored on domain policies and injected by Envoy at the proxy layer. The cell never sees API keys.
 
-With the MITM proxy enabled (default in `local.sh`), credential injection works for both HTTP and HTTPS requests. The cell can use `curl https://api.openai.com/v1/models` directly and credentials are injected transparently.
-
-**Domain aliases**: Setting `alias: "openai"` also creates an `openai.devbox.local` shortcut as an alternative. The cell can use either:
-- `curl https://api.openai.com/v1/models` (HTTPS via MITM proxy)
-- `curl http://openai.devbox.local/v1/models` (HTTP alias)
+With the MITM proxy enabled, credential injection works for both HTTP and HTTPS requests. The cell can use `curl https://api.openai.com/v1/models` directly and credentials are injected transparently.
 
 ```bash
 # In cagent.yaml:
 # - domain: api.openai.com
-#   alias: openai
 #   credential:
 #     header: Authorization
 #     format: "Bearer {value}"
 #     env: OPENAI_API_KEY
 #
 # Cell can use:
-#   curl https://api.openai.com/v1/models   (HTTPS, via MITM proxy)
-#   curl http://openai.devbox.local/v1/models (HTTP alias)
+#   curl https://api.openai.com/v1/models
 ```
 
 ## HTTPS Support (MITM Proxy)

@@ -74,13 +74,7 @@ def _get_policy(domain: str) -> dict:
         return cached
 
     # Import here to avoid circular imports at module level
-    from routers.domain_policy import _build_standalone_policy, _is_devbox_local
-
-    # devbox.local always resolved locally
-    if _is_devbox_local(domain_lower):
-        policy = _build_standalone_policy(domain_lower)
-        _cache_set(domain_lower, policy)
-        return policy
+    from routers.domain_policy import _build_standalone_policy
 
     # Connected mode: try CP first
     if DATAPLANE_MODE == "connected" and CONTROL_PLANE_URL and CONTROL_PLANE_TOKEN:

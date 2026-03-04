@@ -53,7 +53,6 @@ export const createTerminal = (containerName: string): WebSocket => {
 // Config
 export interface DomainEntry {
   domain: string;
-  alias?: string;
   timeout?: string;
   read_only?: boolean;
   rate_limit?: { requests_per_minute: number; burst_size: number };
@@ -93,7 +92,6 @@ export interface Config {
   security?: { seccomp_profile?: string };
   domains?: DomainEntry[];
   email?: { accounts?: EmailAccount[] };
-  internal_services?: string[];
 }
 
 export interface ConfigResponse {

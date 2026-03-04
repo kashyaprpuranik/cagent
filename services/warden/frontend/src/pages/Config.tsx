@@ -39,15 +39,6 @@ function validateDomain(domain: string): string | null {
   return null;
 }
 
-function validateAlias(alias: string): string | null {
-  if (!alias) return null; // Optional
-  const pattern = /^[a-zA-Z0-9-]+$/;
-  if (!pattern.test(alias)) {
-    return 'Alias must be alphanumeric with hyphens only';
-  }
-  return null;
-}
-
 function validateTimeout(timeout: string): string | null {
   if (!timeout) return null; // Optional
   const pattern = /^\d+[smh]?$/;
@@ -97,9 +88,6 @@ function DomainModal({
       }
     }
 
-    const aliasErr = validateAlias(form.alias || '');
-    if (aliasErr) newErrors.push({ field: 'alias', message: aliasErr });
-
     const timeoutErr = validateTimeout(form.timeout || '');
     if (timeoutErr) newErrors.push({ field: 'timeout', message: timeoutErr });
 
@@ -129,7 +117,6 @@ function DomainModal({
 
     const cleanedForm: DomainEntry = { domain: form.domain };
 
-    if (form.alias) cleanedForm.alias = form.alias;
     if (form.timeout) cleanedForm.timeout = form.timeout;
     if (form.read_only) cleanedForm.read_only = form.read_only;
 
@@ -164,28 +151,6 @@ function DomainModal({
           placeholder="api.example.com or *.example.com"
           error={getError('domain')}
         />
-
-        {/* Alias */}
-        <div className="space-y-1">
-          <label className="block text-sm font-medium text-surface-300">
-            Alias <span className="text-surface-500">(optional)</span>
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={form.alias || ''}
-              onChange={(e) => setForm({ ...form, alias: e.target.value || undefined })}
-              placeholder="shortname"
-              className={`flex-1 px-3 py-2 bg-surface-900 border rounded-lg text-surface-100 focus:outline-none ${
-                getError('alias') ? 'border-red-500' : 'border-surface-600 focus:border-blue-500'
-              }`}
-            />
-            <span className="text-surface-500 text-sm">.devbox.local</span>
-          </div>
-          {getError('alias') && (
-            <p className="text-sm text-red-500">{getError('alias')}</p>
-          )}
-        </div>
 
         {/* Timeout */}
         <Input
@@ -773,7 +738,6 @@ export default function ConfigPage() {
 
     for (const domain of cfg.domains || []) {
       lines.push(`  - domain: ${domain.domain}`);
-      if (domain.alias) lines.push(`    alias: ${domain.alias}`);
       if (domain.timeout) lines.push(`    timeout: ${domain.timeout}`);
       if (domain.read_only) lines.push(`    read_only: true`);
       if (domain.rate_limit) {
@@ -821,14 +785,6 @@ export default function ConfigPage() {
           if (acct.policy.sends_per_hour) lines.push(`        sends_per_hour: ${acct.policy.sends_per_hour}`);
           if (acct.policy.reads_per_hour) lines.push(`        reads_per_hour: ${acct.policy.reads_per_hour}`);
         }
-      }
-    }
-
-    if (cfg.internal_services?.length) {
-      lines.push('');
-      lines.push('internal_services:');
-      for (const svc of cfg.internal_services) {
-        lines.push(`  - ${svc}`);
       }
     }
 
@@ -1047,7 +1003,6 @@ export default function ConfigPage() {
                 <thead>
                   <tr className="border-b border-gray-700 text-left text-sm text-gray-400">
                     <th className="px-4 py-3">Domain</th>
-                    <th className="px-4 py-3">Alias</th>
                     <th className="px-4 py-3">Options</th>
                     {!isReadOnly && <th className="px-4 py-3 w-24">Actions</th>}
                   </tr>
@@ -1060,13 +1015,6 @@ export default function ConfigPage() {
                     >
                       <td className="px-4 py-3">
                         <span className="text-white font-mono text-sm">{domain.domain}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {domain.alias && (
-                          <span className="text-blue-400 text-sm">
-                            {domain.alias}.devbox.local
-                          </span>
-                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2 flex-wrap">
