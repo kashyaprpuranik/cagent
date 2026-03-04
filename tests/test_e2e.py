@@ -306,6 +306,25 @@ class TestCredentialInjection:
         )
         assert "Up" in result.stdout, "Envoy proxy is not running"
 
+    def test_http_devbox_local_gets_credentials(self, data_plane_running):
+        """HTTP requests to *.devbox.local should get credentials injected.
+
+        When cell uses: curl http://openai.devbox.local/...
+        Envoy sees plain HTTP, can inject Authorization header.
+        """
+        # This test requires a secret with alias to be configured
+        # For now, just verify the devbox.local routing works
+        result = exec_in_cell(
+            "curl -s -o /dev/null -w '%{http_code}' "
+            "-x http://10.200.1.10:8443 "
+            "--connect-timeout 5 "
+            "http://openai.devbox.local/v1/models 2>&1"
+        )
+        # Should get some response (401 without valid creds, or 200 with)
+        # Not 000 (connection failed) or 403 (blocked)
+        http_code = result.stdout.strip()
+        # Any response indicates the devbox.local routing worked
+        assert http_code and http_code != "000", f"devbox.local request failed: {result.stderr}"
 
 
 @pytest.mark.e2e

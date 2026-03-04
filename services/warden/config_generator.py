@@ -12,6 +12,7 @@ Config Sources (standalone vs connected mode):
 
   Yaml-only (no CP equivalent):
     - dns (upstream servers, cache_ttl)
+    - internal_services[] (devbox.local, etc.)
     - circuit_breakers (max_connections, max_requests, etc.)
     - rate_limits.default (global fallback rate limit)
 
@@ -90,6 +91,10 @@ class ConfigGenerator:
                 merged.append(entry)
         return merged
 
+    def get_internal_services(self) -> list:
+        """Get list of internal service names."""
+        return self.config.get("internal_services", [])
+
     def get_email_accounts(self) -> list:
         """Get list of email account configs, merged with any additional accounts."""
         yaml_accounts = self.config.get("email", {}).get("accounts", [])
@@ -144,6 +149,17 @@ class ConfigGenerator:
             "# DO NOT EDIT - changes will be overwritten",
             "# =============================================================================",
             "",
+            "# Devbox.local aliases -> Envoy proxy (10.200.1.10)",
+            "devbox.local {",
+            "    template IN A {",
+            '        answer "{{ .Name }} 60 IN A 10.200.1.10"',
+            "    }",
+            "    template IN AAAA {",
+            "        rcode NOERROR",
+            "    }",
+            "    log",
+            "}",
+            "",
         ]
 
         # Collect unique domains (expand wildcards for CoreDNS)
@@ -167,6 +183,19 @@ class ConfigGenerator:
                     f"{domain} {{",
                     f"    forward . {upstream}",
                     f"    cache {cache_ttl}",
+                    "    log",
+                    "}",
+                    "",
+                ]
+            )
+
+        # Internal services (Docker DNS)
+        lines.append("# Internal services (Docker DNS)")
+        for service in self.get_internal_services():
+            lines.extend(
+                [
+                    f"{service} {{",
+                    "    forward . 127.0.0.11",
                     "    log",
                     "}",
                     "",
@@ -237,6 +266,7 @@ class ConfigGenerator:
             if not domain:
                 continue
 
+            alias = entry.get("alias")
             timeout = entry.get("timeout", "30s")
             read_only = entry.get("read_only", False)
             allowed_paths = entry.get("allowed_paths", [])
@@ -326,6 +356,34 @@ class ConfigGenerator:
 
             # Add virtual host for real domain
             virtual_hosts.append({"name": cluster_name, "domains": domain_patterns, "routes": routes})
+
+            # Add virtual host for devbox.local alias if present
+            if alias:
+                alias_domains = [
+                    f"{alias}.devbox.local",
+                    f"{alias}.devbox.local:*",
+                ]
+                alias_route = {
+                    "match": {"prefix": "/"},
+                    "route": {"cluster": cluster_name, "timeout": timeout, "auto_host_rewrite": True},
+                    "request_headers_to_add": [
+                        {
+                            "header": {"key": "X-Real-Domain", "value": actual_domain},
+                            "append_action": "OVERWRITE_IF_EXISTS_OR_ADD",
+                        },
+                    ],
+                }
+                # Per-route rate limit for alias too
+                if domain_rl:
+                    alias_route["typed_per_filter_config"] = {
+                        "envoy.filters.http.local_ratelimit": self._build_per_route_ratelimit(
+                            cluster_name,
+                            domain_rl,
+                            default_rpm,
+                            default_burst,
+                        )
+                    }
+                virtual_hosts.append({"name": f"devbox_{alias}", "domains": alias_domains, "routes": [alias_route]})
 
             # Generate cluster if not already added
             if cluster_name not in cluster_names:
@@ -443,8 +501,8 @@ class ConfigGenerator:
             return None, None
 
         virtual_host = {
-            "name": "email_proxy",
-            "domains": ["email-proxy", "email-proxy:*"],
+            "name": "devbox_email",
+            "domains": ["email.devbox.local", "email.devbox.local:*"],
             "routes": [
                 {
                     "match": {"prefix": "/"},

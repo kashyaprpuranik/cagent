@@ -183,6 +183,7 @@ In standalone mode, `cagent.yaml` is the sole config source. In connected mode, 
 |----------------|--------|-------|
 | `domains[]` | yaml + CP (merged) | CP domains synced via `GET /api/v1/domain-policies`; yaml entries take precedence. Credentials are NOT in config — ext_authz resolves them per-request. |
 | `dns` (upstream, cache_ttl) | yaml only | No CP equivalent |
+| `internal_services[]` | yaml only | devbox.local, etc. |
 | `circuit_breakers` | yaml only | No CP equivalent |
 | `rate_limits.default` | yaml only | Global fallback; per-domain overrides come from domains[] |
 | `security.seccomp_profile` | CP via heartbeat | Pushed in heartbeat response, not config generation |

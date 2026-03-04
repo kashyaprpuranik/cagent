@@ -53,6 +53,11 @@ domains:
 - domain: oauth2.googleapis.com
 - domain: www.googleapis.com
 - domain: login.microsoftonline.com
+internal_services:
+- backend
+- envoy
+- dns-filter
+- vector
 mode: standalone
 rate_limits:
   default:
