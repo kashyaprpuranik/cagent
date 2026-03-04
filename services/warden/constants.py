@@ -19,6 +19,7 @@ CELL_CONTAINER_FALLBACK = "cell"
 # ---------------------------------------------------------------------------
 COREDNS_CONTAINER_NAME = "dns-filter"
 ENVOY_CONTAINER_NAME = "http-proxy"
+MITM_PROXY_CONTAINER_NAME = "mitm-proxy"
 EMAIL_PROXY_CONTAINER_NAME = "email-proxy"
 WARDEN_CONTAINER_NAME = "warden"
 
@@ -165,7 +166,7 @@ def get_managed_containers() -> List[str]:
     only when they actually exist.
     """
     names = discover_cell_container_names()
-    names.extend([COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME])
+    names.extend([COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, MITM_PROXY_CONTAINER_NAME])
     if _container_exists(WARDEN_CONTAINER_NAME):
         names.append(WARDEN_CONTAINER_NAME)
     if "email" in BETA_FEATURES:

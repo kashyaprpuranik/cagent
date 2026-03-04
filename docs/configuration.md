@@ -84,7 +84,11 @@ By default, all paths are allowed for a domain. You can restrict access to speci
 
 Credentials are stored on domain policies and injected by Envoy at the proxy layer. The cell never sees API keys.
 
-**Domain aliases**: Setting `alias: "openai"` creates an `openai.devbox.local` shortcut. The cell can use `http://openai.devbox.local/v1/models` and Envoy resolves it to `api.openai.com` with credentials injected.
+With the MITM proxy enabled (default in `local.sh`), credential injection works for both HTTP and HTTPS requests. The cell can use `curl https://api.openai.com/v1/models` directly and credentials are injected transparently.
+
+**Domain aliases**: Setting `alias: "openai"` also creates an `openai.devbox.local` shortcut as an alternative. The cell can use either:
+- `curl https://api.openai.com/v1/models` (HTTPS via MITM proxy)
+- `curl http://openai.devbox.local/v1/models` (HTTP alias)
 
 ```bash
 # In cagent.yaml:
@@ -95,8 +99,33 @@ Credentials are stored on domain policies and injected by Envoy at the proxy lay
 #     format: "Bearer {value}"
 #     env: OPENAI_API_KEY
 #
-# Cell can use: curl http://openai.devbox.local/v1/models
+# Cell can use:
+#   curl https://api.openai.com/v1/models   (HTTPS, via MITM proxy)
+#   curl http://openai.devbox.local/v1/models (HTTP alias)
 ```
+
+## HTTPS Support (MITM Proxy)
+
+By default, `local.sh` starts a MITM proxy (`mitmproxy`) that enables full HTTPS egress support. This allows all Envoy security controls (domain allowlist, rate limiting, credential injection, path filtering) to work for HTTPS requests.
+
+### How it works
+
+```
+Cell ──HTTPS──> mitmproxy:8080 (TLS termination) ──HTTP──> Envoy:8443 (security controls) ──> upstream
+Cell ──HTTP───> Envoy:8443 (direct, no extra hop) ──> upstream
+```
+
+1. The cell's `HTTPS_PROXY` points to mitmproxy (`10.200.1.15:8080`)
+2. mitmproxy terminates TLS using a locally-generated CA certificate
+3. The decrypted HTTP request is forwarded to Envoy, where all security controls apply
+4. Envoy forwards the request to the upstream server over HTTPS
+
+The MITM CA certificate is automatically trusted by the cell container (combined into the system CA bundle at startup).
+
+### Limitations
+
+- **Certificate pinning**: Applications that pin specific certificates will fail through the MITM proxy (inherent limitation of TLS interception)
+- **Latency**: HTTPS requests have ~1-2ms additional latency from the extra network hop
 
 ## SSH Access
 

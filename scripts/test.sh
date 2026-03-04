@@ -105,6 +105,10 @@ if [ "$RUN_E2E" = true ]; then
         fi
     fi
 
+    # Generate MITM CA cert (needed for cell volume mount)
+    "$REPO_ROOT/scripts/gen_mitm_ca.sh"
+    export HTTPS_PROXY="http://10.200.1.15:8080"
+
     # Snapshot tracked config files that containers modify at runtime
     cp configs/cagent.yaml configs/.cagent.yaml.bak
     cp configs/coredns/Corefile configs/coredns/.Corefile.bak

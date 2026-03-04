@@ -27,6 +27,9 @@ dist/
 # Logs
 *.log
 
+# MITM proxy CA (contains private key) — addon script is tracked
+configs/mitm/*.pem
+
 # OS
 .DS_Store
 Thumbs.db

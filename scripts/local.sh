@@ -105,6 +105,14 @@ if [ -z "${OPENOBSERVE_PASSWORD:-}" ]; then
     echo "Generated OpenObserve password (set OPENOBSERVE_PASSWORD to override)"
 fi
 
+# --- MITM proxy setup ---
+if [ "$MINIMAL" = false ]; then
+    echo "Generating MITM CA certificate..."
+    "$ROOT_DIR/scripts/gen_mitm_ca.sh"
+    export HTTPS_PROXY="http://10.200.1.15:8080"
+    echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
+fi
+
 # --- Start services ---
 export DATAPLANE_MODE="standalone"
 
@@ -143,6 +151,21 @@ until docker exec "$CELL_CONTAINER" curl -sf -x http://10.200.1.10:8443 --connec
     sleep 2
 done
 echo "  HTTP proxy: OK"
+
+# Wait for MITM proxy
+if [ "$MINIMAL" = false ]; then
+    echo "Waiting for MITM proxy..."
+    RETRIES=15
+    until docker exec "$CELL_CONTAINER" curl -sf -x http://10.200.1.15:8080 --connect-timeout 2 https://api.github.com/ -o /dev/null 2>/dev/null; do
+        RETRIES=$((RETRIES - 1))
+        if [ $RETRIES -le 0 ]; then
+            echo "  WARNING: MITM proxy health check timed out (continuing anyway)"
+            break
+        fi
+        sleep 2
+    done
+    echo "  MITM proxy: OK"
+fi
 
 echo ""
 echo "=== Data Plane ready (standalone) ==="
