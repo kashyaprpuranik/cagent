@@ -49,13 +49,13 @@ Cagent assumes the AI agent is **untrusted by default**. The agent may be:
 | Control | Implementation |
 |---------|----------------|
 | Internal network | `cell-net` marked as `internal: true` (no default gateway) |
-| Protocol restriction | Cell can ONLY reach Envoy (HTTP), mitmproxy (HTTPS, optional), and CoreDNS (DNS) |
+| Protocol restriction | Cell can ONLY reach Envoy (HTTP), mitmproxy (HTTPS), and CoreDNS (DNS) |
 | IPv6 disabled | Prevents bypass of IPv4 egress controls |
 | Allowlist enforcement | CoreDNS blocks resolution of non-allowed domains |
-| Egress proxy | All HTTP routed through Envoy; HTTPS through mitmproxy → Envoy (optional) |
+| Egress proxy | All HTTP routed through Envoy; HTTPS through mitmproxy → Envoy |
 | Raw socket blocked | Seccomp profile prevents packet crafting |
 
-**Protocol Smuggling Prevention**: Raw TCP/UDP to external hosts is impossible. The cell can only reach a few IPs on the internal network: Envoy (port 8443, HTTP), mitmproxy (port 8080, HTTPS — optional), and CoreDNS (port 53, DNS). Seccomp blocks raw socket creation (AF_PACKET), preventing packet crafting.
+**Protocol Smuggling Prevention**: Raw TCP/UDP to external hosts is impossible. The cell can only reach a few IPs on the internal network: Envoy (port 8443, HTTP), mitmproxy (port 8080, HTTPS), and CoreDNS (port 53, DNS). Seccomp blocks raw socket creation (AF_PACKET), preventing packet crafting.
 
 **Residual Exfiltration Channels**: Small amounts of data could theoretically be exfiltrated via DNS queries or HTTPS traffic to allowlisted domains. Mitigations: DNS tunneling detection (blocks long subdomains) and audit logging.
 
@@ -133,10 +133,11 @@ Adds warden (watches `cagent.yaml`) and local admin UI for browser-based managem
 │  │    ┌─────────┴────────────────────────────────────┐     │  │
 │  │    │                    Cell                       │     │  │
 │  │    └──────────────────────────────────────────────┘     │  │
-│  │                │                       │                 │  │
-│  │         ┌──────┴──────┐         ┌──────┴──────┐         │  │
-│  │         │ HTTP Proxy  │         │ DNS Filter  │         │  │
-│  │         └─────────────┘         └─────────────┘         │  │
+│  │          │             │                │               │  │
+│  │   ┌──────┴──────┐ ┌───┴────────┐ ┌─────┴───────┐      │  │
+│  │   │ MITM Proxy  │ │ HTTP Proxy │ │ DNS Filter  │      │  │
+│  │   │ (HTTPS TLS) │ │ (controls) │ │ (allowlist) │      │  │
+│  │   └─────────────┘ └────────────┘ └─────────────┘      │  │
 │  └─────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────────┘
 ```
@@ -175,10 +176,10 @@ Adds log collection and a local log store for standalone deployments. Vector col
 │  │    ┌─────────┴────────────────────────────────────┐         │  │
 │  │    │                    Cell                       │         │  │
 │  │    └──────────────────────────────────────────────┘         │  │
-│  │                │                       │                     │  │
-│  │         ┌──────┴──────┐         ┌──────┴──────┐             │  │
-│  │         │ HTTP Proxy  │         │ DNS Filter  │             │  │
-│  │         └─────────────┘         └─────────────┘             │  │
+│  │          │             │                │                    │  │
+│  │   ┌──────┴──────┐ ┌───┴────────┐ ┌─────┴───────┐          │  │
+│  │   │ MITM Proxy  │ │ HTTP Proxy │ │ DNS Filter  │          │  │
+│  │   └─────────────┘ └────────────┘ └─────────────┘          │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 │  Optional:                                                         │
@@ -253,10 +254,10 @@ For centralized management of multiple data planes, connect to a [control plane]
 │  │    ┌─────────┴────────────────────────────────────┐             │
 │  │    │                    Cell                       │             │
 │  │    └──────────────────────────────────────────────┘             │
-│  │                │                       │                         │
-│  │         ┌──────┴──────┐         ┌──────┴──────┐                 │
-│  │         │ HTTP Proxy  │         │ DNS Filter  │                 │
-│  │         └─────────────┘         └─────────────┘                 │
+│  │          │             │                │                        │
+│  │   ┌──────┴──────┐ ┌───┴────────┐ ┌─────┴───────┐              │
+│  │   │ MITM Proxy  │ │ HTTP Proxy │ │ DNS Filter  │              │
+│  │   └─────────────┘ └────────────┘ └─────────────┘              │
 │  └─────────────────────────────────────────────────────────────────┘
 └────────────────────────────────────────────────────────────────────┘
 ```
