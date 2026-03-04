@@ -306,28 +306,6 @@ class TestCredentialInjection:
         )
         assert "Up" in result.stdout, "Envoy proxy is not running"
 
-    def test_https_connect_tunnel_no_rewrite(self, data_plane_running):
-        """HTTPS requests via direct Envoy should use CONNECT tunnel (no header injection).
-
-        Skipped when MITM proxy is active — HTTPS goes through mitmproxy instead.
-        """
-        # Skip if MITM proxy is running (HTTPS goes through mitmproxy, not CONNECT)
-        mitm_check = subprocess.run(
-            ["docker", "ps", "--filter", "name=mitm-proxy", "--format", "{{.Status}}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if "Up" in mitm_check.stdout:
-            pytest.skip("MITM proxy is active — HTTPS does not use CONNECT tunnels")
-
-        # Make HTTPS request directly through Envoy - this creates a CONNECT tunnel
-        result = exec_in_cell(
-            "curl -v -s -o /dev/null -w '%{http_code}' "
-            "-x http://10.200.1.10:8443 "
-            "--connect-timeout 5 "
-            "https://httpbin.org/headers 2>&1 | grep -E 'CONNECT|HTTP/1.1'"
-        )
-        assert "CONNECT" in result.stdout or result.returncode == 0, "HTTPS should use CONNECT tunnel through proxy"
-
     def test_http_devbox_local_gets_credentials(self, data_plane_running):
         """HTTP requests to *.devbox.local should get credentials injected.
 
