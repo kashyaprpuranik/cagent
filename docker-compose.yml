@@ -115,7 +115,7 @@ services:
       - no_proxy=localhost,127.0.0.1
       - SSL_CERT_FILE=/tmp/ca-certificates.crt
       - REQUESTS_CA_BUNDLE=/tmp/ca-certificates.crt
-      - NODE_EXTRA_CA_CERTS=/tmp/mitm-ca.pem
+      - NODE_EXTRA_CA_CERTS=/tmp/ca-certificates.crt
       - CURL_CA_BUNDLE=/tmp/ca-certificates.crt
       - USER_NAME=cell
       # SSH public keys (paste your public key here or mount file)
@@ -237,7 +237,7 @@ services:
       - no_proxy=localhost,127.0.0.1
       - SSL_CERT_FILE=/tmp/ca-certificates.crt
       - REQUESTS_CA_BUNDLE=/tmp/ca-certificates.crt
-      - NODE_EXTRA_CA_CERTS=/tmp/mitm-ca.pem
+      - NODE_EXTRA_CA_CERTS=/tmp/ca-certificates.crt
       - CURL_CA_BUNDLE=/tmp/ca-certificates.crt
       - USER_NAME=cell
       - SSH_AUTHORIZED_KEYS=${SSH_AUTHORIZED_KEYS:-}

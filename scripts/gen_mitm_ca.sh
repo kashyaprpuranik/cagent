@@ -39,8 +39,7 @@ openssl req -x509 -newkey rsa:2048 \
     -out "$CA_CERT" \
     -days 365 \
     -nodes \
-    -subj "/CN=cagent-mitm-ca/O=Cagent MITM Proxy" \
-    2>/dev/null
+    -subj "/CN=cagent-mitm-ca/O=Cagent MITM Proxy"
 
 # Combine key+cert into single file (mitmproxy confdir format)
 cat "$MITM_DIR/mitmproxy-ca-key.pem" "$CA_CERT" > "$CA_PEM"
