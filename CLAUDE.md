@@ -158,7 +158,7 @@ npm run lint
 
 - **Networks**: `cell-net` (10.200.1.0/24, internal, no external access) and `infra-net` (10.200.2.0/24, can reach external). IPv6 disabled to prevent bypass
 - **Static IPs**: dns-filter=10.200.1.5, http-proxy=10.200.1.10, mitm-proxy=10.200.1.15, cell=10.200.1.20
-- **Profiles**: `dev` (runc), `standard` (gVisor), `admin` (admin UI via warden), `managed` (warden without UI), `mitm` (MITM proxy for HTTPS), `auditing` (log shipping), `email` (email proxy - beta)
+- **Profiles**: `dev` (runc), `standard` (gVisor), `admin` (admin UI via warden), `managed` (warden without UI), `auditing` (log shipping), `email` (email proxy - beta)
 - **Config generation**: `cagent.yaml` is the primary source. In connected mode, warden merges CP domain policies into config generation (see Config Sources below)
 - **Security layers**: Seccomp profile blocks raw sockets, gVisor intercepts syscalls, mitmproxy decrypts HTTPS for inspection, Envoy enforces domain allowlist/rate limits/path filtering, CoreDNS blocks unauthorized DNS
 - **Vector sinks**: `configs/vector/sinks/standalone.yaml` (file backup + optional S3/ES) or `sinks/connected.yaml` (CP API + file backup), selected via `DATAPLANE_MODE` env var
@@ -166,7 +166,7 @@ npm run lint
 ## Data Flow
 
 1. Cell makes HTTP request via `HTTP_PROXY` (Envoy at 10.200.1.10:8443)
-1b. Cell makes HTTPS request via `HTTPS_PROXY` (mitmproxy at 10.200.1.15:8080, when `--profile mitm` active)
+1b. Cell makes HTTPS request via `HTTPS_PROXY` (mitmproxy at 10.200.1.15:8080)
 2. mitmproxy terminates TLS and forwards decrypted HTTP to Envoy (HTTPS path only)
 3. Envoy ext_authz calls warden for credential injection (returns credential headers if configured)
 4. Envoy local_ratelimit enforces per-domain rate limits (global default + per-route overrides)

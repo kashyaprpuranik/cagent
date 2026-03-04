@@ -39,7 +39,7 @@
 #
 # Security Controls:
 #   - Cell has no direct internet/CP access (IP bypass prevention)
-#   - MITM proxy decrypts HTTPS so Envoy can enforce controls (--profile mitm)
+#   - MITM proxy decrypts HTTPS so Envoy can enforce controls
 #   - Credential injection handled by HTTP proxy ext_authz filter (warden)
 #   - Only HTTP proxy and log shipper can reach control plane
 #   - Cloud metadata (169.254.169.254) blocked at two layers:
@@ -423,15 +423,12 @@ services:
   # MITM Proxy - TLS termination for HTTPS egress
   # Decrypts HTTPS traffic and forwards as HTTP to Envoy, enabling
   # credential injection, rate limiting, and path filtering for HTTPS.
-  # Optional: Only runs with --profile mitm
   # ===========================================================================
   mitm-proxy:
     image: ghcr.io/kashyaprpuranik/mitmproxy:10.4.2
     container_name: mitm-proxy
     labels:
       - "cagent.log-collect=true"
-    profiles:
-      - mitm
     security_opt:
       - no-new-privileges:true
 

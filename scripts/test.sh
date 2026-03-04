@@ -78,7 +78,7 @@ if [ "$RUN_E2E" = true ]; then
         CELL_SERVICE=$(docker inspect "$CELL_CID" --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null || true)
         if [ "$CELL_SERVICE" = "cell" ]; then
             echo "Cell is running with standard profile (gVisor), tearing down to restart with dev profile..."
-            docker compose --profile standard --profile admin --profile email --profile auditing --profile mitm down 2>/dev/null || true
+            docker compose --profile standard --profile admin --profile email --profile auditing down 2>/dev/null || true
             NEED_RESTART=true
         fi
     else
@@ -100,12 +100,12 @@ if [ "$RUN_E2E" = true ]; then
         ADMIN_MODE=$(curl -sf http://localhost:8081/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
         if [ "$ADMIN_MODE" = "connected" ]; then
             echo "Data plane is running in connected mode, restarting in standalone mode..."
-            docker compose --profile dev --profile admin --profile email --profile auditing --profile mitm down 2>/dev/null || true
+            docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
             NEED_RESTART=true
         fi
     fi
 
-    # Generate MITM CA cert (needed for cell volume mount even if mitm profile skipped)
+    # Generate MITM CA cert (needed for cell volume mount)
     "$REPO_ROOT/scripts/gen_mitm_ca.sh"
     export HTTPS_PROXY="http://10.200.1.15:8080"
 
@@ -118,8 +118,8 @@ if [ "$RUN_E2E" = true ]; then
         # Use -v to remove volumes (proxy-config may have stale envoy config from
         # a prior connected-mode run, e.g. CP+DP e2e) and --remove-orphans to catch
         # containers started with a different compose file (e.g. e2e override).
-        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing --profile mitm down -v --remove-orphans 2>/dev/null || true
-        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing --profile mitm down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
 
         # Clean up stale networks (may have wrong labels or orphan endpoints)
         for net in cagent-infra-net cagent-cell-net; do
@@ -136,14 +136,14 @@ if [ "$RUN_E2E" = true ]; then
         # Also clean up e2e-bridge network left by CP+DP e2e
         docker network rm e2e-bridge 2>/dev/null || true
 
-        echo "Starting data plane (standalone, --profile dev --profile admin --profile auditing --profile mitm, 2 cells)..."
-        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing --profile mitm up -d --build --remove-orphans --scale cell-dev=2
+        echo "Starting data plane (standalone, --profile dev --profile admin --profile auditing, 2 cells)..."
+        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --remove-orphans --scale cell-dev=2
         CONTAINERS_STARTED=true
         echo "Waiting for containers to stabilize..."
         sleep 10
     else
         echo "Data plane already running, rebuilding images in case code changed..."
-        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing --profile mitm up -d --build --scale cell-dev=2
+        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --scale cell-dev=2
         echo "Waiting for containers to stabilize..."
         sleep 5
     fi
@@ -157,7 +157,7 @@ if [ "$RUN_E2E" = true ]; then
     if [ "$CONTAINERS_STARTED" = true ] && [ "$NO_TEARDOWN" = false ]; then
         echo ""
         echo "Stopping containers started by this script..."
-        docker compose --profile dev --profile admin --profile email --profile auditing --profile mitm down 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
     elif [ "$NO_TEARDOWN" = true ]; then
         echo ""
         echo "Keeping containers running (--no-teardown)"

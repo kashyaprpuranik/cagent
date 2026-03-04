@@ -100,7 +100,7 @@ cd "$ROOT_DIR"
 # --- Handle 'down' action ---
 if [ "$ACTION" = "down" ]; then
     echo "Stopping Data Plane..."
-    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email --profile mitm down --remove-orphans 2>/dev/null || true
+    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email down --remove-orphans 2>/dev/null || true
     echo ""
     echo "=== All services stopped ==="
     exit 0
@@ -116,7 +116,6 @@ fi
 if [ "$USE_MITM" = true ] && [ "$MINIMAL" = false ]; then
     echo "Generating MITM CA certificate..."
     "$ROOT_DIR/scripts/gen_mitm_ca.sh"
-    DP_PROFILES="$DP_PROFILES --profile mitm"
     export HTTPS_PROXY="http://10.200.1.15:8080"
     echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
 fi

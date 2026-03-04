@@ -96,7 +96,6 @@ Tests include:
 | `standard` | Cell with gVisor runtime (production) |
 | `admin` | Warden with admin UI |
 | `managed` | Warden without admin UI (connected mode) |
-| `mitm` | MITM proxy for HTTPS interception |
 | `auditing` | Log shipper (Vector) |
 | `email` | Email proxy (beta) |
 

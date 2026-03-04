@@ -4,7 +4,7 @@ Tests for credential injection logic (now handled by Envoy ext_authz via warden)
 These tests verify the domain matching and header formatting logic used
 by the ext_authz endpoint for credential injection.
 
-With the MITM proxy enabled (--profile mitm), credential injection works for
+With the MITM proxy enabled, credential injection works for
 both HTTP and HTTPS requests. mitmproxy decrypts HTTPS traffic and forwards it
 as plain HTTP to Envoy, where ext_authz injects credentials as usual.
 """

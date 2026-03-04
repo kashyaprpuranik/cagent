@@ -1457,12 +1457,12 @@ def _is_mitm_proxy_running():
 
 @pytest.mark.e2e
 class TestMITMProxyHTTPS:
-    """Test HTTPS egress through MITM proxy (requires --profile mitm)."""
+    """Test HTTPS egress through MITM proxy."""
 
     @pytest.fixture(autouse=True)
     def _require_mitm(self, data_plane_running):
         if not _is_mitm_proxy_running():
-            pytest.skip("MITM proxy not running (start with --profile mitm)")
+            pytest.skip("MITM proxy not running")
         # Wait for mitmproxy to be reachable from cell (may need time after cell restart)
         deadline = time.time() + 30
         while time.time() < deadline:
