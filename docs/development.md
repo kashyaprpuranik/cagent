@@ -12,9 +12,6 @@ This guide covers local development setup, testing, and Docker workflows for the
 # - Admin UI: http://localhost:8081
 # - Cell shell: docker exec -it cell bash
 # - Test HTTPS: docker exec -it cell curl https://api.github.com/
-
-# Without MITM proxy (HTTP only)
-./scripts/local.sh --no-mitm
 ```
 
 ## Directory Structure

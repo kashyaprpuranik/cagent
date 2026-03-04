@@ -12,7 +12,6 @@ from constants import (
     ENVOY_CONTAINER_NAME,
     MANAGED_CONTAINERS,
     MITM_PROXY_CONTAINER_NAME,
-    _container_exists,
     docker_client,
 )
 from fastapi import APIRouter
@@ -87,21 +86,20 @@ def detailed_health():
     except Exception as e:
         checks["envoy_ready"] = {"status": "error", "error": str(e)}
 
-    # Test MITM proxy readiness (only if running)
-    if _container_exists(MITM_PROXY_CONTAINER_NAME):
-        try:
-            container = docker_client.containers.get(MITM_PROXY_CONTAINER_NAME)
-            if container.status == "running":
-                result = container.exec_run(
-                    ["python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8080)); s.close()"],
-                )
-                checks["mitm_proxy_ready"] = {
-                    "status": "healthy" if result.exit_code == 0 else "unhealthy",
-                }
-            else:
-                checks["mitm_proxy_ready"] = {"status": "unhealthy", "reason": "container not running"}
-        except Exception as e:
-            checks["mitm_proxy_ready"] = {"status": "error", "error": str(e)}
+    # Test MITM proxy readiness
+    try:
+        container = docker_client.containers.get(MITM_PROXY_CONTAINER_NAME)
+        if container.status == "running":
+            result = container.exec_run(
+                ["python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8080)); s.close()"],
+            )
+            checks["mitm_proxy_ready"] = {
+                "status": "healthy" if result.exit_code == 0 else "unhealthy",
+            }
+        else:
+            checks["mitm_proxy_ready"] = {"status": "unhealthy", "reason": "container not running"}
+    except Exception as e:
+        checks["mitm_proxy_ready"] = {"status": "error", "error": str(e)}
 
     # Overall status
     all_healthy = all(c.get("status") == "healthy" for c in checks.values())
@@ -142,9 +140,8 @@ def info():
         "cell": CELL_CONTAINER_NAME,
         "dns": COREDNS_CONTAINER_NAME,
         "http_proxy": ENVOY_CONTAINER_NAME,
+        "mitm_proxy": MITM_PROXY_CONTAINER_NAME,
     }
-    if _container_exists(MITM_PROXY_CONTAINER_NAME):
-        containers["mitm_proxy"] = MITM_PROXY_CONTAINER_NAME
     return {
         "mode": DATAPLANE_MODE,
         "config_path": CAGENT_CONFIG_PATH,

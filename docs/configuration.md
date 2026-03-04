@@ -122,14 +122,6 @@ Cell ──HTTP───> Envoy:8443 (direct, no extra hop) ──> upstream
 
 The MITM CA certificate is automatically trusted by the cell container (combined into the system CA bundle at startup).
 
-### Disabling MITM proxy
-
-```bash
-./scripts/local.sh --no-mitm
-```
-
-Without the MITM proxy, HTTPS requests create opaque CONNECT tunnels through Envoy. Credential injection, rate limiting, and path filtering do not apply to CONNECT tunnels.
-
 ### Limitations
 
 - **Certificate pinning**: Applications that pin specific certificates will fail through the MITM proxy (inherent limitation of TLS interception)

@@ -1421,27 +1421,13 @@ class TestWardenAuthE2E:
             assert r.status_code == 200, f"{path} returned {r.status_code}"
 
 
-def _is_mitm_proxy_running():
-    """Check if the MITM proxy container is running."""
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "--filter", "name=mitm-proxy", "--format", "{{.Status}}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return "Up" in result.stdout
-    except Exception:
-        return False
-
-
 @pytest.mark.e2e
 class TestMITMProxyHTTPS:
     """Test HTTPS egress through MITM proxy."""
 
     @pytest.fixture(autouse=True)
-    def _require_mitm(self, data_plane_running):
-        if not _is_mitm_proxy_running():
-            pytest.skip("MITM proxy not running")
-        # Wait for mitmproxy to be reachable from cell (may need time after cell restart)
+    def _wait_for_mitm(self, data_plane_running):
+        """Wait for mitmproxy to be reachable from cell."""
         deadline = time.time() + 30
         while time.time() < deadline:
             probe = exec_in_cell(
