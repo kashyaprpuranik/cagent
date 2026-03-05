@@ -166,6 +166,38 @@ else:
 # ---------------------------------------------------------------------------
 
 
+def discover_cell_containers() -> List:
+    """Discover cell containers by the ``cagent.role=cell`` label.
+
+    Falls back to looking up a container named ``cell`` when no labelled
+    containers are found (backward compat with unlabelled setups).
+
+    Returns full Docker container objects.
+    """
+    import logging
+
+    _logger = logging.getLogger(__name__)
+    try:
+        containers = docker_client.containers.list(
+            all=True,
+            filters={"label": CELL_LABEL},
+        )
+        if containers:
+            return containers
+    except docker.errors.APIError as e:
+        _logger.warning(f"Label-based discovery failed: {e}")
+
+    # Fallback: try the fixed name
+    try:
+        container = docker_client.containers.get(CELL_CONTAINER_FALLBACK)
+        return [container]
+    except docker.errors.NotFound:
+        return []
+    except docker.errors.APIError as e:
+        _logger.error(f"Docker API error during fallback discovery: {e}")
+        return []
+
+
 def discover_cell_container_names() -> List[str]:
     """Return names of cell containers discovered by label.
 

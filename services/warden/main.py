@@ -29,7 +29,6 @@ from config_generator import ConfigGenerator
 from constants import (
     ALLOWED_CORS_ORIGINS,
     CAGENT_CONFIG_PATH,
-    CELL_CONTAINER_FALLBACK,
     CELL_LABEL,
     CONFIG_SYNC_INTERVAL,
     CONTROL_PLANE_TOKEN,
@@ -53,6 +52,7 @@ from constants import (
     SECCOMP_PROFILES_DIR,
     VALID_RUNTIME_POLICIES,
     VALID_SECCOMP_PROFILES,
+    discover_cell_containers,
     docker_client,
 )
 from fastapi import Depends, FastAPI, HTTPException
@@ -80,38 +80,6 @@ _last_command_results: dict = {}
 # so we can restore them when the profile is unassigned.
 # Maps container name → dict of original Docker API field values.
 _container_original_resources: dict = {}
-
-
-# ---------------------------------------------------------------------------
-# Container discovery
-# ---------------------------------------------------------------------------
-
-
-def discover_cell_containers() -> List:
-    """Discover cell containers by the ``cagent.role=cell`` label.
-
-    Falls back to looking up a container named ``cell`` when no labelled
-    containers are found (backward compat with unlabelled setups).
-    """
-    try:
-        containers = docker_client.containers.list(
-            all=True,
-            filters={"label": CELL_LABEL},
-        )
-        if containers:
-            return containers
-    except docker.errors.APIError as e:
-        logger.warning(f"Label-based discovery failed: {e}")
-
-    # Fallback: try the fixed name
-    try:
-        container = docker_client.containers.get(CELL_CONTAINER_FALLBACK)
-        return [container]
-    except docker.errors.NotFound:
-        return []
-    except docker.errors.APIError as e:
-        logger.error(f"Docker API error during fallback discovery: {e}")
-        return []
 
 
 # ---------------------------------------------------------------------------

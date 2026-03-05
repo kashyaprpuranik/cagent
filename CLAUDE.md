@@ -44,6 +44,7 @@ This repo contains the **data plane** — the secure agent execution environment
 │   ├── envoy/                      # HTTP proxy config (generated from cagent.yaml)
 │   ├── vector/                     # Log collection (sources/transforms + mode-specific sinks)
 │   ├── mitm/                       # MITM proxy CA cert+key (generated, gitignored)
+│   ├── mtls/                       # mTLS certs for warden (generated, gitignored)
 │   ├── seccomp/                    # Seccomp profile for cell container
 │   └── gvisor/runsc.toml           # gVisor runtime config
 ├── services/
@@ -82,6 +83,9 @@ This repo contains the **data plane** — the secure agent execution environment
 
 # Minimal (no warden, static config)
 ./scripts/local.sh --minimal
+
+# Disable warden mTLS listener (enabled by default)
+./scripts/local.sh --no-mtls
 
 # Stop everything
 ./scripts/local.sh down
