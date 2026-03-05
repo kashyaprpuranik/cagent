@@ -27,9 +27,29 @@ from fastapi import APIRouter, Header, Query
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
 # In-memory cache: domain -> {response, expires_at}
 _policy_cache: dict = {}
 _CACHE_TTL = 300  # 5 minutes
+
+# In-memory config cache to avoid repeated disk I/O and YAML parsing
+_config_cache = {"mtime": 0.0, "data": {}}
+
+def _get_yaml_config() -> dict:
+    """Load cagent.yaml, using mtime to cache the parsed dictionary."""
+    config_path = Path(CAGENT_CONFIG_PATH)
+    if not config_path.exists():
+        return {}
+
+    try:
+        current_mtime = config_path.stat().st_mtime
+        if current_mtime > _config_cache["mtime"]:
+            _config_cache["data"] = yaml.safe_load(config_path.read_text()) or {}
+            _config_cache["mtime"] = current_mtime
+        return _config_cache["data"]
+    except Exception as e:
+        logger.warning(f"Failed to load config for standalone policy: {e}")
+        return {}
 
 
 def _cache_get(domain: str):
@@ -55,13 +75,8 @@ def invalidate_cache():
 
 def _build_standalone_policy(domain: str) -> dict:
     """Build a policy response from cagent.yaml for standalone mode."""
-    config_path = Path(CAGENT_CONFIG_PATH)
-    if not config_path.exists():
-        return {"matched": False, "domain": domain}
-
-    try:
-        config = yaml.safe_load(config_path.read_text()) or {}
-    except Exception:
+    config = _get_yaml_config()
+    if not config:
         return {"matched": False, "domain": domain}
 
     domains = config.get("domains", [])
