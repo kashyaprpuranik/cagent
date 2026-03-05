@@ -44,6 +44,11 @@ from constants import (
     ENVOY_CONTAINER_NAME,
     HEARTBEAT_INTERVAL,
     MAX_HEARTBEAT_WORKERS,
+    MTLS_CA_CERT_PATH,
+    MTLS_CERT_PATH,
+    MTLS_ENABLED,
+    MTLS_KEY_PATH,
+    MTLS_PORT,
     RUNTIME_POLICIES,
     SECCOMP_PROFILES_DIR,
     VALID_RUNTIME_POLICIES,
@@ -1314,6 +1319,9 @@ if FRONTEND_DIR.exists():
 
 
 if __name__ == "__main__":
+    import asyncio
+    import ssl
+
     import uvicorn
 
     try:
@@ -1324,4 +1332,27 @@ if __name__ == "__main__":
         logger.error(f"Cannot connect to Docker: {e}")
         sys.exit(1)
 
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    if MTLS_ENABLED:
+        logger.info("mTLS enabled — starting HTTP (8080) + HTTPS+mTLS (%d)", MTLS_PORT)
+
+        http_config = uvicorn.Config(app, host="0.0.0.0", port=8080)
+        https_config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=MTLS_PORT,
+            ssl_certfile=MTLS_CERT_PATH,
+            ssl_keyfile=MTLS_KEY_PATH,
+            ssl_ca_certs=MTLS_CA_CERT_PATH,
+            ssl_cert_reqs=ssl.CERT_REQUIRED,
+        )
+
+        http_server = uvicorn.Server(http_config)
+        https_server = uvicorn.Server(https_config)
+
+        async def _serve_both():
+            await asyncio.gather(http_server.serve(), https_server.serve())
+
+        asyncio.run(_serve_both())
+    else:
+        logger.info("mTLS not configured — HTTP-only on 8080")
+        uvicorn.run(app, host="0.0.0.0", port=8080)

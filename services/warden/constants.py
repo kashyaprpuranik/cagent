@@ -126,6 +126,40 @@ _default_origins = ["http://localhost:3000", "http://localhost:5173", "http://12
 _env_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 ALLOWED_CORS_ORIGINS = list(set(_default_origins + _env_origins))
 
+# ---------------------------------------------------------------------------
+# mTLS (CP-to-DP mutual TLS)
+# ---------------------------------------------------------------------------
+# The control plane provisions these as base64-encoded PEM via cloud-init.
+_WARDEN_TLS_CERT_B64 = os.environ.get("WARDEN_TLS_CERT", "").strip()
+_WARDEN_TLS_KEY_B64 = os.environ.get("WARDEN_TLS_KEY", "").strip()
+_WARDEN_MTLS_CA_CERT_B64 = os.environ.get("WARDEN_MTLS_CA_CERT", "").strip()
+
+MTLS_ENABLED = bool(_WARDEN_TLS_CERT_B64 and _WARDEN_TLS_KEY_B64 and _WARDEN_MTLS_CA_CERT_B64)
+MTLS_PORT = 8443
+
+
+def _write_temp_pem(data_b64: str, suffix: str = ".pem") -> str:
+    """Base64-decode *data_b64* and write to a temp file. Returns the path."""
+    import base64
+    import tempfile
+
+    raw = base64.b64decode(data_b64)
+    f = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    f.write(raw)
+    f.close()
+    return f.name
+
+
+# Materialize cert files only when mTLS is enabled.
+if MTLS_ENABLED:
+    MTLS_CERT_PATH = _write_temp_pem(_WARDEN_TLS_CERT_B64, suffix="-cert.pem")
+    MTLS_KEY_PATH = _write_temp_pem(_WARDEN_TLS_KEY_B64, suffix="-key.pem")
+    MTLS_CA_CERT_PATH = _write_temp_pem(_WARDEN_MTLS_CA_CERT_B64, suffix="-ca.pem")
+else:
+    MTLS_CERT_PATH = ""
+    MTLS_KEY_PATH = ""
+    MTLS_CA_CERT_PATH = ""
+
 
 # ---------------------------------------------------------------------------
 # Container discovery helpers
