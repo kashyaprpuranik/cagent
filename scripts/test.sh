@@ -109,6 +109,13 @@ if [ "$RUN_E2E" = true ]; then
     "$REPO_ROOT/scripts/gen_mitm_ca.sh"
     export HTTPS_PROXY="http://10.200.1.15:8080"
 
+    # Generate mTLS certs for warden's TLS listener
+    "$REPO_ROOT/scripts/gen_mtls_certs.sh"
+    export WARDEN_TLS_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-cert.pem")"
+    export WARDEN_TLS_KEY="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-key.pem")"
+    export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/ca-cert.pem")"
+    export WARDEN_MTLS_PORT=9444
+
     # Snapshot tracked config files that containers modify at runtime
     cp configs/cagent.yaml configs/.cagent.yaml.bak
     cp configs/coredns/Corefile configs/coredns/.Corefile.bak
