@@ -10,7 +10,7 @@ from typing import Optional
 import docker
 from constants import docker_client
 from fastapi import APIRouter, HTTPException
-from main import discover_cell_containers
+from constants import discover_cell_containers
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

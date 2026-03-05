@@ -29,7 +29,6 @@ from config_generator import ConfigGenerator
 from constants import (
     ALLOWED_CORS_ORIGINS,
     CAGENT_CONFIG_PATH,
-    CELL_CONTAINER_FALLBACK,
     CELL_LABEL,
     CONFIG_SYNC_INTERVAL,
     CONTROL_PLANE_TOKEN,
@@ -44,10 +43,16 @@ from constants import (
     ENVOY_CONTAINER_NAME,
     HEARTBEAT_INTERVAL,
     MAX_HEARTBEAT_WORKERS,
+    MTLS_CA_CERT_PATH,
+    MTLS_CERT_PATH,
+    MTLS_ENABLED,
+    MTLS_KEY_PATH,
+    MTLS_PORT,
     RUNTIME_POLICIES,
     SECCOMP_PROFILES_DIR,
     VALID_RUNTIME_POLICIES,
     VALID_SECCOMP_PROFILES,
+    discover_cell_containers,
     docker_client,
 )
 from fastapi import Depends, FastAPI, HTTPException
@@ -75,38 +80,6 @@ _last_command_results: dict = {}
 # so we can restore them when the profile is unassigned.
 # Maps container name → dict of original Docker API field values.
 _container_original_resources: dict = {}
-
-
-# ---------------------------------------------------------------------------
-# Container discovery
-# ---------------------------------------------------------------------------
-
-
-def discover_cell_containers() -> List:
-    """Discover cell containers by the ``cagent.role=cell`` label.
-
-    Falls back to looking up a container named ``cell`` when no labelled
-    containers are found (backward compat with unlabelled setups).
-    """
-    try:
-        containers = docker_client.containers.list(
-            all=True,
-            filters={"label": CELL_LABEL},
-        )
-        if containers:
-            return containers
-    except docker.errors.APIError as e:
-        logger.warning(f"Label-based discovery failed: {e}")
-
-    # Fallback: try the fixed name
-    try:
-        container = docker_client.containers.get(CELL_CONTAINER_FALLBACK)
-        return [container]
-    except docker.errors.NotFound:
-        return []
-    except docker.errors.APIError as e:
-        logger.error(f"Docker API error during fallback discovery: {e}")
-        return []
 
 
 # ---------------------------------------------------------------------------
@@ -1314,6 +1287,9 @@ if FRONTEND_DIR.exists():
 
 
 if __name__ == "__main__":
+    import asyncio
+    import ssl
+
     import uvicorn
 
     try:
@@ -1324,4 +1300,29 @@ if __name__ == "__main__":
         logger.error(f"Cannot connect to Docker: {e}")
         sys.exit(1)
 
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    if MTLS_ENABLED:
+        logger.info("mTLS enabled — starting HTTP (8080) + HTTPS+mTLS (%d)", MTLS_PORT)
+
+        http_config = uvicorn.Config(app, host="0.0.0.0", port=8080, lifespan="off")
+        https_config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=MTLS_PORT,
+            ssl_certfile=MTLS_CERT_PATH,
+            ssl_keyfile=MTLS_KEY_PATH,
+            ssl_ca_certs=MTLS_CA_CERT_PATH,
+            ssl_cert_reqs=ssl.CERT_REQUIRED,
+            lifespan="off",
+        )
+
+        http_server = uvicorn.Server(http_config)
+        https_server = uvicorn.Server(https_config)
+
+        async def _serve_both():
+            async with lifespan(app):
+                await asyncio.gather(http_server.serve(), https_server.serve())
+
+        asyncio.run(_serve_both())
+    else:
+        logger.info("mTLS not configured — HTTP-only on 8080")
+        uvicorn.run(app, host="0.0.0.0", port=8080)

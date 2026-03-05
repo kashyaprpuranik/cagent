@@ -44,6 +44,7 @@ This repo contains the **data plane** — the secure agent execution environment
 │   ├── envoy/                      # HTTP proxy config (generated from cagent.yaml)
 │   ├── vector/                     # Log collection (sources/transforms + mode-specific sinks)
 │   ├── mitm/                       # MITM proxy CA cert+key (generated, gitignored)
+│   ├── mtls/                       # mTLS certs for warden (generated, gitignored)
 │   ├── seccomp/                    # Seccomp profile for cell container
 │   └── gvisor/runsc.toml           # gVisor runtime config
 ├── services/
@@ -82,6 +83,9 @@ This repo contains the **data plane** — the secure agent execution environment
 
 # Minimal (no warden, static config)
 ./scripts/local.sh --minimal
+
+# Disable warden mTLS listener (enabled by default)
+./scripts/local.sh --no-mtls
 
 # Stop everything
 ./scripts/local.sh down
@@ -138,6 +142,7 @@ npm run lint
 - **ext_authz endpoint**: Implements Envoy ext_authz HTTP protocol for credential injection (connected: proxy to CP, standalone: resolve from cagent.yaml)
 - **Domain policy API**: Serves domain policy lookups (connected: proxy to CP, standalone: resolve from cagent.yaml)
 - **Beta features**: Gated by `BETA_FEATURES` env var (comma-separated). Currently: `email`
+- **mTLS**: When `WARDEN_TLS_CERT`, `WARDEN_TLS_KEY`, and `WARDEN_MTLS_CA_CERT` env vars are all set (base64-encoded PEM), warden starts a second listener on port 8443 with mutual TLS. Port 8080 HTTP remains unchanged. Used by CP-to-DP communication.
 
 ### Testing
 

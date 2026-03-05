@@ -10,6 +10,7 @@
 #   ./scripts/local.sh --minimal           # Minimal (no warden, static config)
 #   ./scripts/local.sh --gvisor            # Use gVisor runtime
 #   ./scripts/local.sh --beta              # Enable beta features (email proxy)
+#   ./scripts/local.sh --no-mtls           # Disable warden mTLS listener
 #   ./scripts/local.sh down                # Stop everything
 #
 # For full stack (CP + DP), use the cagent-control repo:
@@ -27,6 +28,7 @@ DP_PROFILES="--profile admin"
 DP_AGENT_PROFILE="dev"
 ACTION="up"
 MINIMAL=false
+MTLS=true
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -49,6 +51,10 @@ while [[ $# -gt 0 ]]; do
             DP_PROFILES="$DP_PROFILES --profile email"
             shift
             ;;
+        --no-mtls)
+            MTLS=false
+            shift
+            ;;
         down)
             ACTION="down"
             shift
@@ -60,6 +66,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --minimal       Minimal mode (no warden, static config)"
             echo "  --gvisor        Use gVisor runtime (default: runc)"
             echo "  --beta          Enable beta features (email proxy)"
+            echo "  --no-mtls       Disable warden mTLS listener (enabled by default)"
             echo ""
             echo "Actions:"
             echo "  down            Stop all services"
@@ -111,6 +118,16 @@ if [ "$MINIMAL" = false ]; then
     "$ROOT_DIR/scripts/gen_mitm_ca.sh"
     export HTTPS_PROXY="http://10.200.1.15:8080"
     echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
+fi
+
+# --- mTLS setup ---
+if [ "${MTLS:-false}" = true ]; then
+    echo "Generating mTLS certificates..."
+    "$ROOT_DIR/scripts/gen_mtls_certs.sh"
+    export WARDEN_TLS_CERT="$(base64 -w0 "$ROOT_DIR/configs/mtls/server-cert.pem")"
+    export WARDEN_TLS_KEY="$(base64 -w0 "$ROOT_DIR/configs/mtls/server-key.pem")"
+    export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$ROOT_DIR/configs/mtls/ca-cert.pem")"
+    echo "mTLS enabled (warden will listen on port 8443)"
 fi
 
 # --- Start services ---
@@ -173,4 +190,7 @@ echo ""
 echo "Cell container: docker exec -it $CELL_CONTAINER bash"
 if echo "$DP_PROFILES" | grep -q "admin"; then
     echo "Admin UI: http://localhost:${LOCAL_ADMIN_PORT:-8081}"
+fi
+if [ "${MTLS:-false}" = true ]; then
+    echo "mTLS test: curl --cert configs/mtls/client-cert.pem --key configs/mtls/client-key.pem --cacert configs/mtls/ca-cert.pem https://localhost:8443/api/health"
 fi
