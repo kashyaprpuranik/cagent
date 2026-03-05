@@ -138,6 +138,9 @@ MTLS_ENABLED = bool(_WARDEN_TLS_CERT_B64 and _WARDEN_TLS_KEY_B64 and _WARDEN_MTL
 MTLS_PORT = 8443
 
 
+_temp_pem_files: List[str] = []
+
+
 def _write_temp_pem(data_b64: str, suffix: str = ".pem") -> str:
     """Base64-decode *data_b64* and write to a temp file. Returns the path."""
     import base64
@@ -147,14 +150,27 @@ def _write_temp_pem(data_b64: str, suffix: str = ".pem") -> str:
     f = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     f.write(raw)
     f.close()
+    _temp_pem_files.append(f.name)
     return f.name
+
+
+def _cleanup_temp_pem_files():
+    """Remove temporary PEM files (especially private keys)."""
+    for path in _temp_pem_files:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 # Materialize cert files only when mTLS is enabled.
 if MTLS_ENABLED:
+    import atexit
+
     MTLS_CERT_PATH = _write_temp_pem(_WARDEN_TLS_CERT_B64, suffix="-cert.pem")
     MTLS_KEY_PATH = _write_temp_pem(_WARDEN_TLS_KEY_B64, suffix="-key.pem")
     MTLS_CA_CERT_PATH = _write_temp_pem(_WARDEN_MTLS_CA_CERT_B64, suffix="-ca.pem")
+    atexit.register(_cleanup_temp_pem_files)
 else:
     MTLS_CERT_PATH = ""
     MTLS_KEY_PATH = ""

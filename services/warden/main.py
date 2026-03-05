@@ -1303,7 +1303,7 @@ if __name__ == "__main__":
     if MTLS_ENABLED:
         logger.info("mTLS enabled — starting HTTP (8080) + HTTPS+mTLS (%d)", MTLS_PORT)
 
-        http_config = uvicorn.Config(app, host="0.0.0.0", port=8080)
+        http_config = uvicorn.Config(app, host="0.0.0.0", port=8080, lifespan="off")
         https_config = uvicorn.Config(
             app,
             host="0.0.0.0",
@@ -1312,13 +1312,15 @@ if __name__ == "__main__":
             ssl_keyfile=MTLS_KEY_PATH,
             ssl_ca_certs=MTLS_CA_CERT_PATH,
             ssl_cert_reqs=ssl.CERT_REQUIRED,
+            lifespan="off",
         )
 
         http_server = uvicorn.Server(http_config)
         https_server = uvicorn.Server(https_config)
 
         async def _serve_both():
-            await asyncio.gather(http_server.serve(), https_server.serve())
+            async with lifespan(app):
+                await asyncio.gather(http_server.serve(), https_server.serve())
 
         asyncio.run(_serve_both())
     else:
