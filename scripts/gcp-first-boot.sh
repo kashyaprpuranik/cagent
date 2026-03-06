@@ -9,7 +9,7 @@ METADATA_HEADER="Metadata-Flavor: Google"
 
 get_metadata() {
     local key="$1"
-    curl -sf -H "$METADATA_HEADER" "${METADATA_URL}/${key}" 2>/dev/null || echo ""
+    curl -sf -H "$METADATA_HEADER" "${METADATA_URL}/${key}" || echo ""
 }
 
 echo "=== Cagent first-boot: reading GCE metadata ==="
