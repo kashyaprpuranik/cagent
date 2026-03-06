@@ -23,6 +23,11 @@ done
 FAILED=()
 declare -A TIMINGS
 
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
 # ── DP Unit / Config Tests ──────────────────────────────────────────────────
 echo "=== DP Unit / Config Tests ==="
 echo ""
@@ -31,10 +36,10 @@ start=$SECONDS
 pip install -q -r requirements-test.txt
 if pytest tests/ -v --ignore=tests/test_e2e.py; then
     echo ""
-    echo "DP unit/config tests: PASSED"
+    echo -e "${GREEN}DP unit/config tests: PASSED${NC}"
 else
     echo ""
-    echo "DP unit/config tests: FAILED"
+    echo -e "${RED}DP unit/config tests: FAILED${NC}"
     FAILED+=("DP unit/config")
 fi
 TIMINGS["DP unit"]=$(( SECONDS - start ))
@@ -51,9 +56,9 @@ npm install --workspaces --include-workspace-root --silent 2>/dev/null || true
 echo "--- DP local admin UI (tsc) ---"
 start=$SECONDS
 if (cd "$REPO_ROOT/services/warden/frontend" && npx tsc --noEmit 2>&1); then
-    echo "  DP local admin frontend: OK"
+    echo -e "  ${GREEN}DP local admin frontend: OK${NC}"
 else
-    echo "  DP local admin frontend: FAILED"
+    echo -e "  ${RED}DP local admin frontend: FAILED${NC}"
     FAILED+=("Frontend type-check")
 fi
 TIMINGS["DP frontend"]=$(( SECONDS - start ))
@@ -178,7 +183,7 @@ if [ "$RUN_E2E" = true ]; then
         FAILED+=("DP e2e")
     else
         echo ""
-        echo "DP e2e tests: PASSED"
+        echo -e "${GREEN}DP e2e tests: PASSED${NC}"
     fi
     TIMINGS["DP e2e"]=$(( SECONDS - start ))
     echo ""
@@ -187,9 +192,9 @@ fi
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo "==========================================="
 if [ ${#FAILED[@]} -eq 0 ]; then
-    echo "All DP test suites passed."
+    echo -e "${GREEN}All DP test suites passed.${NC}"
 else
-    echo "FAILED suites: ${FAILED[*]}"
+    echo -e "${RED}FAILED suites: ${FAILED[*]}${NC}"
 fi
 echo ""
 echo "Timings:"
