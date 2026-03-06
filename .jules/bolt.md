@@ -1,0 +1,3 @@
+## 2025-02-13 - Cached parsed cagent.yaml in domain_policy.py
+**Learning:** In backend operations that require repeated loading of configuration files (e.g. `domain_policy.py` building policies per request), continuously reading and running text parsing like `yaml.safe_load` on the disk file is a major performance bottleneck. Since the config rarely changes, reading from the disk every request is heavily inefficient.
+**Action:** Implemented an in-memory `st_mtime` based cache so that the file is only read and parsed when its modified timestamp indicates a change. This drastically reduces file I/O and text parsing latency per request.

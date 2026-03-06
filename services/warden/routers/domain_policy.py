@@ -31,6 +31,27 @@ logger = logging.getLogger(__name__)
 _policy_cache: dict = {}
 _CACHE_TTL = 300  # 5 minutes
 
+# In-memory cache: parsed cagent.yaml -> {mtime, config}
+# Avoids repeated file I/O and text parsing on every policy buildup.
+_config_cache: dict = {"mtime": 0.0, "config": {}}
+
+
+def _get_cached_config() -> dict:
+    """Read and cache cagent.yaml, updating only if the file was modified."""
+    config_path = Path(CAGENT_CONFIG_PATH)
+    if not config_path.exists():
+        return {}
+
+    try:
+        current_mtime = config_path.stat().st_mtime
+        if current_mtime > _config_cache["mtime"]:
+            _config_cache["config"] = yaml.safe_load(config_path.read_text()) or {}
+            _config_cache["mtime"] = current_mtime
+        return _config_cache["config"]
+    except Exception as e:
+        logger.warning(f"Failed to read/parse cagent.yaml: {e}")
+        return {}
+
 
 def _cache_get(domain: str):
     """Return cached policy if still valid, else None."""
@@ -55,13 +76,8 @@ def invalidate_cache():
 
 def _build_standalone_policy(domain: str) -> dict:
     """Build a policy response from cagent.yaml for standalone mode."""
-    config_path = Path(CAGENT_CONFIG_PATH)
-    if not config_path.exists():
-        return {"matched": False, "domain": domain}
-
-    try:
-        config = yaml.safe_load(config_path.read_text()) or {}
-    except Exception:
+    config = _get_cached_config()
+    if not config:
         return {"matched": False, "domain": domain}
 
     domains = config.get("domains", [])
