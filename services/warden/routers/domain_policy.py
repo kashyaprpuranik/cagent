@@ -61,7 +61,8 @@ def _build_standalone_policy(domain: str) -> dict:
 
     try:
         config = yaml.safe_load(config_path.read_text()) or {}
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to parse cagent.yaml for domain policy lookup: %s", e)
         return {"matched": False, "domain": domain}
 
     domains = config.get("domains", [])

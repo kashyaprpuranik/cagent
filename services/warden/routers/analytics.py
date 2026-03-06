@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import subprocess
 import time
@@ -10,6 +11,8 @@ import docker
 import yaml
 from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, docker_client
 from fastapi import APIRouter, HTTPException, Query
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -215,8 +218,8 @@ def diagnose_domain(
             config = yaml.safe_load(config_path.read_text()) or {}
             allowed_domains = [d.get("domain", "") for d in config.get("domains", [])]
             in_allowlist = domain in allowed_domains
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to parse allowlist from cagent.yaml: %s", e)
 
     # Check DNS resolution via CoreDNS
     dns_result = None
@@ -266,8 +269,8 @@ def diagnose_domain(
             )
         # Keep only last 5, most recent first
         recent_requests = recent_requests[-5:][::-1]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to parse recent requests: %s", e)
 
     # Build human-readable diagnosis
     parts = []

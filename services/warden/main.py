@@ -414,8 +414,8 @@ def get_container_status(container) -> dict:
         try:
             start_time = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
             uptime_seconds = int((datetime.now(start_time.tzinfo) - start_time).total_seconds())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to parse container uptime from %r: %s", started_at, e)
 
     # Get resource stats
     cpu_percent = None
