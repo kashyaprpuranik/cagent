@@ -31,6 +31,7 @@ fi
 # --- Write .env file ---
 cat > /opt/cagent/.env <<EOF
 DATAPLANE_MODE=connected
+CLOUD_PROVIDER=gce
 CONTROL_PLANE_URL=${CP_URL}
 CONTROL_PLANE_TOKEN=${TOKEN}
 WARDEN_API_TOKEN=${WARDEN_API_TOKEN}
