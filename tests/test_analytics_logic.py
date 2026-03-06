@@ -131,21 +131,18 @@ def test_get_bandwidth(mock_docker_client, sample_logs):
     assert allowed["bytes_received"] == 100
 
 
-@patch("routers.analytics.subprocess.run")
 @patch("routers.analytics.Path")  # Mock Path to avoid reading real file
-def test_diagnose_domain(mock_path, mock_subprocess, mock_docker_client, sample_logs):
+def test_diagnose_domain(mock_path, mock_docker_client, sample_logs):
     # Setup logs mock
     mock_container = MagicMock()
     mock_container.logs.return_value = sample_logs.encode("utf-8")
+
+    # Setup exec_run mock for DNS
+    mock_container.exec_run.return_value = (0, b"Address: 1.2.3.4")
+
     mock_docker_client.containers.get.side_effect = lambda name: (
         mock_container
-    )  # Returns same mock for both ENVOY and COREDNS lookup if needed, but diagnose uses subprocess for DNS
-
-    # Setup subprocess mock for DNS
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = "Address: 1.2.3.4"
-    mock_subprocess.return_value = mock_proc
+    )  # Returns same mock for both ENVOY and COREDNS lookup
 
     # Setup Path mock
     mock_path_instance = MagicMock()
