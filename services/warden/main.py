@@ -1036,29 +1036,36 @@ def _check_standalone_resources(agents):
 
 
 def _detect_public_ip() -> Optional[str]:
-    """Detect public IPv4 address via cloud metadata services (Hetzner, GCE)."""
-    # Try Hetzner metadata
-    try:
-        resp = requests.get("http://169.254.169.254/hetzner/v1/metadata/public-ipv4", timeout=3)
-        if resp.status_code == 200:
-            text = resp.text.strip()
-            if "." in text and len(text) <= 15:
-                return text
-    except Exception as e:
-        logger.debug("Hetzner metadata unavailable: %s", e)
-    # Try GCE metadata
-    try:
-        resp = requests.get(
-            "http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip",
-            headers={"Metadata-Flavor": "Google"},
-            timeout=3,
-        )
-        if resp.status_code == 200:
-            text = resp.text.strip()
-            if "." in text and len(text) <= 15:
-                return text
-    except Exception as e:
-        logger.debug("GCE metadata unavailable: %s", e)
+    """Detect public IPv4 address via cloud metadata service.
+
+    Uses CLOUD_PROVIDER env var to determine which metadata endpoint to query:
+    - "hetzner" -> Hetzner metadata
+    - "gce"     -> GCE metadata (with Metadata-Flavor header)
+    - unset     -> returns None (unknown cloud)
+    """
+    cloud = os.environ.get("CLOUD_PROVIDER", "").lower()
+    if cloud == "hetzner":
+        try:
+            resp = requests.get("http://169.254.169.254/hetzner/v1/metadata/public-ipv4", timeout=3)
+            if resp.status_code == 200:
+                text = resp.text.strip()
+                if "." in text and len(text) <= 15:
+                    return text
+        except Exception as e:
+            logger.debug("Failed to detect public IP from Hetzner metadata: %s", e)
+    elif cloud == "gce":
+        try:
+            resp = requests.get(
+                "http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip",
+                headers={"Metadata-Flavor": "Google"},
+                timeout=3,
+            )
+            if resp.status_code == 200:
+                text = resp.text.strip()
+                if "." in text and len(text) <= 15:
+                    return text
+        except Exception as e:
+            logger.debug("Failed to detect public IP from GCE metadata: %s", e)
     return None
 
 
