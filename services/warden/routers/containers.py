@@ -1,8 +1,11 @@
 import concurrent.futures
+import logging
 
 import docker
 from constants import MANAGED_CONTAINERS, READ_ONLY, discover_cell_container_names, docker_client
 from fastapi import APIRouter, HTTPException
+
+logger = logging.getLogger(__name__)
 from models import ContainerAction
 from utils import calculate_container_stats
 
@@ -36,8 +39,8 @@ def get_container_info(name: str) -> dict:
                 info["cpu_percent"] = cpu_percent
                 info["memory_mb"] = memory_mb
                 info["memory_limit_mb"] = memory_limit_mb
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to get stats for container %s: %s", name, e)
 
         return info
 
