@@ -226,8 +226,9 @@ def discover_cell_container_names() -> List[str]:
         )
         if containers:
             return [c.name for c in containers]
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Label-based cell name discovery failed: %s", e)
     return [CELL_CONTAINER_FALLBACK]
 
 
