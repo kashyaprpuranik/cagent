@@ -1036,23 +1036,15 @@ def _check_standalone_resources(agents):
 
 
 def _detect_public_ip() -> Optional[str]:
-    """Detect public IPv4 address via Hetzner metadata or httpbin fallback."""
-    for url in [
-        "http://169.254.169.254/hetzner/v1/metadata/public-ipv4",
-        "https://httpbin.org/ip",
-    ]:
-        try:
-            resp = requests.get(url, timeout=3)
-            if resp.status_code == 200:
-                text = resp.text.strip()
-                # Hetzner metadata returns plain IP
-                if "." in text and len(text) <= 15:
-                    return text
-                # httpbin returns {"origin": "1.2.3.4"}
-                if "{" in text:
-                    return resp.json().get("origin", "").split(",")[0].strip()
-        except Exception:
-            continue
+    """Detect public IPv4 address via Hetzner metadata service."""
+    try:
+        resp = requests.get("http://169.254.169.254/hetzner/v1/metadata/public-ipv4", timeout=3)
+        if resp.status_code == 200:
+            text = resp.text.strip()
+            if "." in text and len(text) <= 15:
+                return text
+    except Exception:
+        pass
     return None
 
 
