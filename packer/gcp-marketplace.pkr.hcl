@@ -8,8 +8,9 @@ packer {
 }
 
 variable "project_id" {
-  type    = string
-  default = "cagent-control-prod"
+  type        = string
+  description = "GCP project ID to build the image in"
+  # No default — must be provided at build time
 }
 
 variable "zone" {

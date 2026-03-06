@@ -1051,8 +1051,8 @@ def _detect_public_ip() -> Optional[str]:
                 text = resp.text.strip()
                 if "." in text and len(text) <= 15:
                     return text
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to detect public IP from Hetzner metadata: %s", e)
     elif cloud == "gce":
         try:
             resp = requests.get(
@@ -1064,8 +1064,8 @@ def _detect_public_ip() -> Optional[str]:
                 text = resp.text.strip()
                 if "." in text and len(text) <= 15:
                     return text
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to detect public IP from GCE metadata: %s", e)
     return None
 
 

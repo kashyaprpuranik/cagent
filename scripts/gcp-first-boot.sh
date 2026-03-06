@@ -28,6 +28,15 @@ if [ -z "$CP_URL" ] || [ -z "$TOKEN" ]; then
     exit 1
 fi
 
+# Validate metadata values don't contain newlines (prevent env injection)
+for var_name in CP_URL TOKEN WARDEN_API_TOKEN; do
+    val="${!var_name}"
+    if [[ "$val" == *$'\n'* ]] || [[ "$val" == *$'\r'* ]]; then
+        echo "ERROR: Metadata value for ${var_name} contains newlines — rejecting."
+        exit 1
+    fi
+done
+
 # --- Write .env file ---
 cat > /opt/cagent/.env <<EOF
 DATAPLANE_MODE=connected
