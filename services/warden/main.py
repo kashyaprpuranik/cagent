@@ -1035,7 +1035,28 @@ def _check_standalone_resources(agents):
         logger.error(f"Error checking standalone resource limits: {e}")
 
 
-def send_online_ping():
+def _detect_public_ip() -> Optional[str]:
+    """Detect public IPv4 address via Hetzner metadata or httpbin fallback."""
+    for url in [
+        "http://169.254.169.254/hetzner/v1/metadata/public-ipv4",
+        "https://httpbin.org/ip",
+    ]:
+        try:
+            resp = requests.get(url, timeout=3)
+            if resp.status_code == 200:
+                text = resp.text.strip()
+                # Hetzner metadata returns plain IP
+                if "." in text and len(text) <= 15:
+                    return text
+                # httpbin returns {"origin": "1.2.3.4"}
+                if "{" in text:
+                    return resp.json().get("origin", "").split(",")[0].strip()
+        except Exception:
+            continue
+    return None
+
+
+def send_online_ping(public_ip: Optional[str] = None):
     """Notify the control plane that this data plane is online.
 
     POSTs to /api/v1/cell/online with retry logic:
@@ -1046,12 +1067,13 @@ def send_online_ping():
     """
     url = f"{CONTROL_PLANE_URL}/api/v1/cell/online"
     headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
+    body = {"public_ip": public_ip} if public_ip else None
     deadline = time.time() + 15 * 60  # 15 minutes
 
-    logger.info("Sending online ping to %s", url)
+    logger.info("Sending online ping to %s (public_ip=%s)", url, public_ip)
     while time.time() < deadline:
         try:
-            resp = requests.post(url, headers=headers, timeout=10)
+            resp = requests.post(url, json=body, headers=headers, timeout=10)
             if resp.status_code == 200:
                 logger.info("Online ping accepted — provisioning complete")
                 return
@@ -1108,7 +1130,10 @@ def main_loop(stop_event: Optional[threading.Event] = None):
 
     # Notify CP that this DP is online (completes provisioning)
     if DATAPLANE_MODE == "connected" and CONTROL_PLANE_TOKEN:
-        send_online_ping()
+        public_ip = _detect_public_ip()
+        if public_ip:
+            logger.info("Detected public IP: %s", public_ip)
+        send_online_ping(public_ip=public_ip)
 
     # Use wall-clock monotonic time for config sync scheduling so that
     # slow heartbeat cycles (e.g. Docker stats across many containers)
