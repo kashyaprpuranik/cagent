@@ -1,6 +1,5 @@
 import json
 import re
-import subprocess
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -221,20 +220,19 @@ def diagnose_domain(
     # Check DNS resolution via CoreDNS
     dns_result = None
     try:
-        docker_client.containers.get(COREDNS_CONTAINER_NAME)
+        container = docker_client.containers.get(COREDNS_CONTAINER_NAME)
         # Get CoreDNS IP from container networks
         dns_ip = "10.200.1.5"
-        result = subprocess.run(
-            ["docker", "exec", COREDNS_CONTAINER_NAME, "nslookup", domain, dns_ip],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if "NXDOMAIN" in result.stdout or "NXDOMAIN" in result.stderr:
+        # Run nslookup inside the CoreDNS container via docker-py sdk instead of subprocess
+        # This prevents flag/command injection risks and avoids missing 'docker' CLI issues
+        exit_code, output = container.exec_run(["nslookup", domain, dns_ip])
+        output_str = output.decode("utf-8")
+
+        if "NXDOMAIN" in output_str:
             dns_result = "NXDOMAIN"
-        elif result.returncode == 0:
+        elif exit_code == 0:
             # Extract first resolved address
-            for line in result.stdout.split("\n"):
+            for line in output_str.split("\n"):
                 line = line.strip()
                 if line.startswith("Address") and ":" in line and dns_ip not in line:
                     dns_result = line.split(":")[-1].strip()
