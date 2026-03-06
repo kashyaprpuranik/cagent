@@ -35,7 +35,7 @@ sudo chown -R root:root /opt/cagent
 
 # --- Pre-pull Docker images ---
 cd /opt/cagent
-sudo docker compose --profile dev --profile managed --profile auditing --profile interactive pull || true
+sudo docker compose --profile dev --profile managed --profile auditing --profile interactive pull
 
 # --- Install first-boot systemd service ---
 sudo cp /tmp/gcp-first-boot.sh /opt/cagent/scripts/gcp-first-boot.sh
