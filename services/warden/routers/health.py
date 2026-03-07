@@ -91,7 +91,11 @@ def detailed_health():
         container = docker_client.containers.get(MITM_PROXY_CONTAINER_NAME)
         if container.status == "running":
             result = container.exec_run(
-                ["python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8080)); s.close()"],
+                [
+                    "python3",
+                    "-c",
+                    "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8080)); s.close()",
+                ],
             )
             checks["mitm_proxy_ready"] = {
                 "status": "healthy" if result.exit_code == 0 else "unhealthy",
