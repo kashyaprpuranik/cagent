@@ -559,6 +559,8 @@ services:
       - CONFIG_SYNC_INTERVAL=${CONFIG_SYNC_INTERVAL:-300}
       # Interactive mode (CP pushes commands via Cloudflare Tunnel)
       - WARDEN_API_TOKEN=${WARDEN_API_TOKEN:-}
+      # Cloud provider (for public IP detection in heartbeat)
+      - CLOUD_PROVIDER=${CLOUD_PROVIDER:-}
       # mTLS (base64-encoded PEM, provisioned by CP via cloud-init)
       - WARDEN_TLS_CERT=${WARDEN_TLS_CERT:-}
       - WARDEN_TLS_KEY=${WARDEN_TLS_KEY:-}
