@@ -43,15 +43,15 @@ VALID_SECCOMP_PROFILES = {"standard", "hardened", "permissive"}
 # ---------------------------------------------------------------------------
 # Capabilities required by sshd/entrypoint (same as docker-compose cap_add)
 SSHD_CAPS = [
-    "CHOWN",            # entrypoint: chown on SSH keys, tmux dirs
-    "DAC_OVERRIDE",     # read/write files across users during setup
-    "FOWNER",           # entrypoint: chmod on SSH authorized_keys
-    "SETUID",           # gosu + sshd privilege separation
-    "SETGID",           # gosu + sshd privilege separation
-    "NET_BIND_SERVICE", # sshd binds port 22
-    "SYS_CHROOT",       # sshd privilege separation (ChrootDirectory)
-    "AUDIT_WRITE",      # sshd/PAM audit logging
-    "KILL",             # sshd manages child processes
+    "CHOWN",  # entrypoint: chown on SSH keys, tmux dirs
+    "DAC_OVERRIDE",  # read/write files across users during setup
+    "FOWNER",  # entrypoint: chmod on SSH authorized_keys
+    "SETUID",  # gosu + sshd privilege separation
+    "SETGID",  # gosu + sshd privilege separation
+    "NET_BIND_SERVICE",  # sshd binds port 22
+    "SYS_CHROOT",  # sshd privilege separation (ChrootDirectory)
+    "AUDIT_WRITE",  # sshd/PAM audit logging
+    "KILL",  # sshd manages child processes
 ]
 
 # tmpfs mounts for read-only root (same as docker-compose tmpfs)
@@ -228,6 +228,7 @@ def discover_cell_container_names() -> List[str]:
             return [c.name for c in containers]
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning("Label-based cell name discovery failed: %s", e)
     return [CELL_CONTAINER_FALLBACK]
 

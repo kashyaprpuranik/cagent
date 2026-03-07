@@ -8,9 +8,8 @@ import logging
 from typing import Optional
 
 import docker
-from constants import docker_client
+from constants import discover_cell_containers, docker_client
 from fastapi import APIRouter, HTTPException
-from constants import discover_cell_containers
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
