@@ -1,0 +1,3 @@
+## 2024-03-07 - Python YAML parsing bottleneck
+**Learning:** Repeatedly parsing YAML configuration files (like `cagent.yaml`) on every incoming request without checking file modification time can be a significant performance bottleneck due to continuous file I/O and text parsing. In high-throughput paths, this wastes CPU cycles.
+**Action:** When reading configurations from disk, cache the parsed dictionary in memory and use `os.stat().st_mtime` to invalidate the cache. This drastically reduces file reads and CPU-heavy text parsing overhead while avoiding complex file watchers or circular dependency issues.
