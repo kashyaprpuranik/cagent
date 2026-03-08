@@ -36,7 +36,7 @@ variable "cagent_branch" {
 source "googlecompute" "cagent" {
   project_id          = var.project_id
   zone                = var.zone
-  machine_type        = "e2-standard-4"
+  machine_type        = "e2-medium"
   source_image_family = "ubuntu-2404-lts-amd64"
   source_image_project_id = ["ubuntu-os-cloud"]
   ssh_username        = "packer"
