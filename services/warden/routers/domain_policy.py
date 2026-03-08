@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 _policy_cache: dict = {}
 _CACHE_TTL = 300  # 5 minutes
 
+# File cache for cagent.yaml: {"mtime": 0.0, "data": {}}
+_config_file_cache = {"mtime": 0.0, "data": {}}
+
 
 def _cache_get(domain: str):
     """Return cached policy if still valid, else None."""
@@ -60,11 +63,19 @@ def _build_standalone_policy(domain: str) -> dict:
         return {"matched": False, "domain": domain}
 
     try:
-        config = yaml.safe_load(config_path.read_text()) or {}
+        # Check file modification time to invalidate cache
+        current_mtime = config_path.stat().st_mtime
+        if current_mtime > _config_file_cache["mtime"]:
+            config_data = yaml.safe_load(config_path.read_text()) or {}
+            _config_file_cache["data"] = config_data
+            _config_file_cache["mtime"] = current_mtime
     except Exception as e:
-        logger.warning("Failed to parse cagent.yaml for domain policy lookup: %s", e)
+        logger.warning("Failed to parse or read cagent.yaml for domain policy lookup: %s", e)
+        # Reset cache on error so we can retry on next file change
+        _config_file_cache["mtime"] = 0.0
         return {"matched": False, "domain": domain}
 
+    config = _config_file_cache.get("data", {})
     domains = config.get("domains", [])
     default_rl = config.get("rate_limits", {}).get("default", {})
     default_rpm = default_rl.get("requests_per_minute", 120)
