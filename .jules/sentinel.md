@@ -1,0 +1,4 @@
+## 2024-05-24 - Timing Attack in Token Verification
+**Vulnerability:** The authentication check in `services/warden/warden_auth.py` used a standard string equality operator (`!=`) to verify the `WARDEN_API_TOKEN`. This allows an attacker to perform a timing attack because the standard string comparison returns as soon as a mismatch is found, meaning longer execution times correspond to more correct characters.
+**Learning:** Standard string comparisons should never be used for validating secrets or tokens. Python's `secrets` module provides `compare_digest()`, which compares strings in constant time regardless of where the mismatch occurs, protecting against timing attacks.
+**Prevention:** Always use `secrets.compare_digest(a, b)` for comparing security-sensitive strings such as authentication tokens, passwords, API keys, and cryptographic hashes.

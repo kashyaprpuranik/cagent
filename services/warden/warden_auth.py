@@ -7,6 +7,8 @@ Localhost requests (SSH users on the host) bypass auth for convenience.
 When WARDEN_API_TOKEN is empty (standard mode), all requests are allowed.
 """
 
+import secrets
+
 from constants import WARDEN_API_TOKEN
 from fastapi import HTTPException, Request, WebSocket
 
@@ -33,5 +35,5 @@ async def verify_warden_token(request: Request = None, websocket: WebSocket = No
 
     # Check Authorization header (works for both HTTP and WebSocket upgrade)
     auth = conn.headers.get("Authorization", "") if conn else ""
-    if not auth.startswith("Bearer ") or auth[7:] != WARDEN_API_TOKEN:
+    if not auth.startswith("Bearer ") or not secrets.compare_digest(auth[7:], WARDEN_API_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid warden API token")
