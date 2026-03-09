@@ -20,9 +20,8 @@ from routers import analytics
 
 
 class TestAnalyticsSecurity(unittest.TestCase):
-    @patch("routers.analytics.subprocess.run")
     @patch("routers.analytics.docker_client")
-    def test_diagnose_domain_argument_injection(self, mock_docker_client, mock_subprocess):
+    def test_diagnose_domain_argument_injection(self, mock_docker_client):
         """Test that domains starting with '-' are rejected to prevent argument injection."""
 
         # Mock container logs
@@ -44,12 +43,11 @@ class TestAnalyticsSecurity(unittest.TestCase):
             self.assertEqual(cm.exception.status_code, 400)
             self.assertIn("Invalid domain format", cm.exception.detail)
 
-        # Verify subprocess was NOT called
-        mock_subprocess.assert_not_called()
+        # Verify exec_run was NOT called
+        mock_container.exec_run.assert_not_called()
 
-    @patch("routers.analytics.subprocess.run")
     @patch("routers.analytics.docker_client")
-    def test_diagnose_domain_valid(self, mock_docker_client, mock_subprocess):
+    def test_diagnose_domain_valid(self, mock_docker_client):
         """Test that valid domains are accepted."""
 
         # Mock container logs
@@ -57,11 +55,11 @@ class TestAnalyticsSecurity(unittest.TestCase):
         mock_container.logs.return_value = b""
         mock_docker_client.containers.get.return_value = mock_container
 
-        # Mock subprocess (dns lookup)
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "Address: 1.2.3.4"
-        mock_subprocess.return_value = mock_proc
+        # Mock exec_run (dns lookup)
+        mock_exec_result = MagicMock()
+        mock_exec_result.exit_code = 0
+        mock_exec_result.output = b"Address: 1.2.3.4"
+        mock_container.exec_run.return_value = mock_exec_result
 
         valid_domains = [
             "example.com",
@@ -73,8 +71,8 @@ class TestAnalyticsSecurity(unittest.TestCase):
         for domain in valid_domains:
             analytics.diagnose_domain(domain=domain)
 
-        # Verify subprocess WAS called (once per valid domain)
-        self.assertEqual(mock_subprocess.call_count, len(valid_domains))
+        # Verify exec_run WAS called (once per valid domain)
+        self.assertEqual(mock_container.exec_run.call_count, len(valid_domains))
 
 
 if __name__ == "__main__":

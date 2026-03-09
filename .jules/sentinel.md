@@ -1,0 +1,4 @@
+## 2025-02-17 - Subprocess Execution to Docker Binary Risk
+**Vulnerability:** In `services/warden/routers/analytics.py`, `subprocess.run` was used to call the `docker exec` CLI binary to run `nslookup` inside the `coredns` container. Using raw shell/subprocess execution introduces a risk of command injection, and relies on the host having the `docker` binary installed, which is not available in the Warden slim Python container.
+**Learning:** Raw subprocess calls executing system commands, especially `docker` operations, can introduce injection risks and may fail in containerized environments where the CLI tools are absent.
+**Prevention:** Always use the Python SDK `docker-py` (e.g., `container.exec_run()`) for interacting with Docker containers from within Python code, rather than executing shell commands via `subprocess`.

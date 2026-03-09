@@ -224,20 +224,20 @@ def diagnose_domain(
     # Check DNS resolution via CoreDNS
     dns_result = None
     try:
-        docker_client.containers.get(COREDNS_CONTAINER_NAME)
+        container = docker_client.containers.get(COREDNS_CONTAINER_NAME)
         # Get CoreDNS IP from container networks
         dns_ip = "10.200.1.5"
-        result = subprocess.run(
-            ["docker", "exec", COREDNS_CONTAINER_NAME, "nslookup", domain, dns_ip],
-            capture_output=True,
-            text=True,
-            timeout=5,
+        result = container.exec_run(
+            ["nslookup", "-timeout=5", domain, dns_ip]
         )
-        if "NXDOMAIN" in result.stdout or "NXDOMAIN" in result.stderr:
+
+        output = result.output.decode("utf-8", errors="replace")
+
+        if "NXDOMAIN" in output:
             dns_result = "NXDOMAIN"
-        elif result.returncode == 0:
+        elif result.exit_code == 0:
             # Extract first resolved address
-            for line in result.stdout.split("\n"):
+            for line in output.split("\n"):
                 line = line.strip()
                 if line.startswith("Address") and ":" in line and dns_ip not in line:
                     dns_result = line.split(":")[-1].strip()
