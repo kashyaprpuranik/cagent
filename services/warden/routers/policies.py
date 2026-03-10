@@ -45,7 +45,7 @@ class ApplyPoliciesRequest(BaseModel):
 @router.post("/config/sync")
 def trigger_sync():
     """Trigger config sync (called by CP after policy mutations)."""
-    from main import sync_config
+    from config_sync import sync_config
 
     updated = sync_config()
     return {"status": "synced", "updated": updated}
