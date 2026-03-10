@@ -555,6 +555,7 @@ services:
       # Control plane connection (for connected mode)
       - CONTROL_PLANE_URL=${CONTROL_PLANE_URL:-}
       - CONTROL_PLANE_TOKEN=${CONTROL_PLANE_TOKEN:-}
+      - HEARTBEAT_URL=${HEARTBEAT_URL:-}
       - HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30}
       - CONFIG_SYNC_INTERVAL=${CONFIG_SYNC_INTERVAL:-300}
       # Interactive mode (CP pushes commands via Cloudflare Tunnel)
