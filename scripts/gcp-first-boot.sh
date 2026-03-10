@@ -73,11 +73,10 @@ if [ -n "$SSH_PUBLIC_KEY" ]; then
     chown -R cagent:cagent /home/cagent/.ssh
 fi
 
-# --- Generate MITM CA if not present ---
+# --- Generate certs (MITM CA + mTLS if not provided by CP) ---
 cd /opt/cagent
-if [ ! -f configs/mitm/ca.pem ]; then
-    bash scripts/gen_mitm_ca.sh
-fi
+[ -n "$TLS_CERT_B64" ] && export WARDEN_TLS_CERT="$TLS_CERT_B64"
+bash scripts/setup.sh
 
 # --- Start Docker Compose ---
 echo "=== Starting Cagent services ==="

@@ -112,18 +112,15 @@ if [ -z "${OPENOBSERVE_PASSWORD:-}" ]; then
     echo "Generated OpenObserve password (set OPENOBSERVE_PASSWORD to override)"
 fi
 
-# --- MITM proxy setup ---
+# --- Cert generation (MITM CA + mTLS) ---
+bash "$ROOT_DIR/scripts/setup.sh"
+
 if [ "$MINIMAL" = false ]; then
-    echo "Generating MITM CA certificate..."
-    "$ROOT_DIR/scripts/gen_mitm_ca.sh"
     export HTTPS_PROXY="http://10.200.1.15:8080"
     echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
 fi
 
-# --- mTLS setup ---
 if [ "${MTLS:-false}" = true ]; then
-    echo "Generating mTLS certificates..."
-    "$ROOT_DIR/scripts/gen_mtls_certs.sh"
     export WARDEN_TLS_CERT="$(base64 -w0 "$ROOT_DIR/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$ROOT_DIR/configs/mtls/server-key.pem")"
     export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$ROOT_DIR/configs/mtls/ca-cert.pem")"

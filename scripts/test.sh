@@ -110,12 +110,9 @@ if [ "$RUN_E2E" = true ]; then
         fi
     fi
 
-    # Generate MITM CA cert (needed for cell volume mount)
-    "$REPO_ROOT/scripts/gen_mitm_ca.sh"
+    # Generate certs (MITM CA + mTLS)
+    bash "$REPO_ROOT/scripts/setup.sh"
     export HTTPS_PROXY="http://10.200.1.15:8080"
-
-    # Generate mTLS certs for warden's TLS listener
-    "$REPO_ROOT/scripts/gen_mtls_certs.sh"
     export WARDEN_TLS_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-key.pem")"
     export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/ca-cert.pem")"
