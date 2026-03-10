@@ -1,6 +1,6 @@
-"""Policy push/query endpoints for interactive mode.
+"""Policy push/query endpoints for connected mode.
 
-The CP pushes updated domain policies via Cloudflare Tunnel.
+The CP pushes updated domain policies via mTLS.
 Warden applies them by regenerating Envoy + CoreDNS configs.
 """
 

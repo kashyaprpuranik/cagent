@@ -1,7 +1,7 @@
-"""System status endpoints for interactive mode.
+"""System status endpoints for connected mode.
 
 Exposes real-time metrics, disk usage, processes, network stats,
-and container statuses — queried by the CP via Cloudflare Tunnel.
+and container statuses — queried by the CP via mTLS.
 """
 
 import os

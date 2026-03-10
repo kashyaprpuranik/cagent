@@ -236,7 +236,7 @@ For centralized management of multiple data planes, connect to a [control plane]
                                   └───────────────┼───────────────┘
                                                   │
                           heartbeat/poll (outbound)│log queries (inbound
-                          config sync              │  via Cloudflare Tunnel)
+                          config sync              │  via mTLS)
                                                   │
 ┌─────────────────────────────────────────────────┼──────────────────┐
 │                         DATA PLANE              │                   │
@@ -262,7 +262,7 @@ For centralized management of multiple data planes, connect to a [control plane]
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-All connections from DP to CP are outbound — no inbound ports needed on the data plane. Log queries from the CP to warden use a Cloudflare Tunnel (interactive tenants only).
+All connections from DP to CP are outbound — no inbound ports needed on the data plane. Log queries from the CP to warden use mTLS.
 
 ```bash
 # Connected mode

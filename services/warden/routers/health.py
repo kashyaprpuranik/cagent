@@ -21,7 +21,7 @@ router = APIRouter()
 
 @router.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    """Health check. Accepts HEAD for cloudflared tunnel origin health probes."""
+    """Health check. Accepts HEAD for load balancer and mTLS health probes."""
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
 
