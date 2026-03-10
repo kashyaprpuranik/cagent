@@ -869,6 +869,7 @@ def main_loop(stop_event: Optional[threading.Event] = None):
     config_state.envoy_hash = _stable_hash(
         yaml.dump(config_generator.generate_envoy_config(), default_flow_style=False, sort_keys=False)
     )
+    config_state.email_hash = _stable_hash(config_generator.generate_email_config())
     logger.info("Initial config generation complete")
 
     # Notify CP that this DP is online (completes provisioning)
