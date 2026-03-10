@@ -94,6 +94,10 @@ RUNTIME_POLICIES = {
 DATAPLANE_MODE = os.environ.get("DATAPLANE_MODE", "standalone")
 CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://backend:8000")
 CONTROL_PLANE_TOKEN = os.environ.get("CONTROL_PLANE_TOKEN", "")
+# Separate heartbeat URL — allows routing heartbeats to a lightweight Cloud Run
+# service without --no-cpu-throttling, while critical DP traffic (policy sync,
+# credential injection) stays on the main backend.  Falls back to CONTROL_PLANE_URL.
+HEARTBEAT_URL = os.environ.get("HEARTBEAT_URL", "") or CONTROL_PLANE_URL
 
 # Read-only mode: when connected to control plane, local admin should not modify config
 READ_ONLY = DATAPLANE_MODE == "connected"

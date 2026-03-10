@@ -42,6 +42,7 @@ from constants import (
     ENVOY_CONFIG_PATH,
     ENVOY_CONTAINER_NAME,
     HEARTBEAT_INTERVAL,
+    HEARTBEAT_URL,
     MAX_HEARTBEAT_WORKERS,
     MTLS_CA_CERT_PATH,
     MTLS_CERT_PATH,
@@ -772,7 +773,7 @@ def _send_bare_heartbeat(cell_name: str, command: str, result: str, message: str
     Used to report command results immediately without waiting for the next
     heartbeat cycle.
     """
-    if not CONTROL_PLANE_URL or not CONTROL_PLANE_TOKEN:
+    if not HEARTBEAT_URL or not CONTROL_PLANE_TOKEN:
         return
     heartbeat = {
         "status": status,
@@ -782,7 +783,7 @@ def _send_bare_heartbeat(cell_name: str, command: str, result: str, message: str
     }
     try:
         requests.post(
-            f"{CONTROL_PLANE_URL}/api/v1/cell/heartbeat",
+            f"{HEARTBEAT_URL}/api/v1/cell/heartbeat",
             json=heartbeat,
             headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
             timeout=10,
@@ -796,8 +797,8 @@ def send_heartbeat(container) -> Optional[dict]:
 
     Returns the parsed response (may contain a pending command), or None.
     """
-    if not CONTROL_PLANE_URL or not CONTROL_PLANE_TOKEN:
-        logger.warning("Control plane URL or token not configured, skipping heartbeat")
+    if not HEARTBEAT_URL or not CONTROL_PLANE_TOKEN:
+        logger.warning("Heartbeat URL or token not configured, skipping heartbeat")
         return None
 
     name = container.name
@@ -824,7 +825,7 @@ def send_heartbeat(container) -> Optional[dict]:
 
     try:
         response = requests.post(
-            f"{CONTROL_PLANE_URL}/api/v1/cell/heartbeat",
+            f"{HEARTBEAT_URL}/api/v1/cell/heartbeat",
             json=heartbeat,
             headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
             timeout=10,
@@ -1116,6 +1117,8 @@ def main_loop(stop_event: Optional[threading.Event] = None):
 
     if DATAPLANE_MODE == "connected":
         logger.info(f"  Control plane: {CONTROL_PLANE_URL}")
+        if HEARTBEAT_URL != CONTROL_PLANE_URL:
+            logger.info(f"  Heartbeat URL: {HEARTBEAT_URL}")
         logger.info(f"  Heartbeat interval: {HEARTBEAT_INTERVAL}s")
         if not CONTROL_PLANE_TOKEN:
             logger.warning("CONTROL_PLANE_TOKEN not set - heartbeats will fail")
