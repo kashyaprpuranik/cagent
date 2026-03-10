@@ -42,6 +42,15 @@ class ApplyPoliciesRequest(BaseModel):
     policies: list[PolicyEntry]
 
 
+@router.post("/config/sync")
+def trigger_sync():
+    """Trigger config sync (called by CP after policy mutations)."""
+    from config_sync import sync_config
+
+    updated = sync_config()
+    return {"status": "synced", "updated": updated}
+
+
 @router.post("/policies/apply")
 def apply_policies(body: ApplyPoliciesRequest):
     """Apply updated domain policies.
