@@ -102,7 +102,7 @@ HEARTBEAT_URL = os.environ.get("HEARTBEAT_URL", "") or CONTROL_PLANE_URL
 # Read-only mode: when connected to control plane, local admin should not modify config
 READ_ONLY = DATAPLANE_MODE == "connected"
 
-# Warden API auth (interactive mode — CP proxies requests via Cloudflare Tunnel)
+# Warden API auth (connected mode — CP sends requests via mTLS)
 WARDEN_API_TOKEN = os.environ.get("WARDEN_API_TOKEN", "").strip()
 
 # Local OpenObserve (per-DP log store)

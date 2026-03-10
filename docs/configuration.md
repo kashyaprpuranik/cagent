@@ -194,4 +194,4 @@ Enabled with `--profile auditing`. Vector collects logs from all containers (cel
 
 **OpenObserve** runs as the `log-store` container on `infra-net` (not exposed externally). Warden queries it for the admin UI analytics dashboard (top blocked domains, bandwidth, error rates). Default retention is 30 days (`LOG_RETENTION_DAYS` env var).
 
-In connected mode, the control plane queries logs by proxying requests through warden (via Cloudflare Tunnel for interactive tenants).
+In connected mode, the control plane queries logs by proxying requests through warden (via mTLS).

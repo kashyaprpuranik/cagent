@@ -1,10 +1,10 @@
 """Bearer token authentication for warden API.
 
-Interactive-mode DPs receive a WARDEN_API_TOKEN during provisioning.
-The CP proxies requests via Cloudflare Tunnel with this token.
+Connected-mode DPs receive a WARDEN_API_TOKEN during provisioning.
+The CP sends requests via mTLS with this token.
 
 Localhost requests (SSH users on the host) bypass auth for convenience.
-When WARDEN_API_TOKEN is empty (standard mode), all requests are allowed.
+When WARDEN_API_TOKEN is empty (standalone mode), all requests are allowed.
 """
 
 from constants import WARDEN_API_TOKEN

@@ -1,6 +1,6 @@
-"""Unit tests for warden interactive-mode API endpoints.
+"""Unit tests for warden connected-mode API endpoints.
 
-Tests the new endpoints added for interactive mode:
+Tests the endpoints used by the CP in connected mode:
 - /api/commands/* (cell restart, stop, start, wipe)
 - /api/status, /api/metrics, /api/disk, /api/processes, /api/network
 - /api/policies/apply, /api/policies/active

@@ -1,6 +1,6 @@
-"""Command execution endpoints for interactive mode.
+"""Command execution endpoints for connected mode.
 
-The CP pushes commands via Cloudflare Tunnel instead of queuing them
+The CP pushes commands via mTLS instead of queuing them
 in the DB for the next heartbeat poll.
 """
 

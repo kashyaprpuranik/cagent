@@ -84,7 +84,6 @@ docker compose \
     --profile dev \
     --profile managed \
     --profile auditing \
-    --profile interactive \
     up -d
 
 echo "=== Cagent first-boot complete ==="
