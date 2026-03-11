@@ -690,6 +690,7 @@ class ConfigGenerator:
                         "user_agent": "%REQ(USER-AGENT)%",
                         "credential_injected": "%REQ(X-CREDENTIAL-INJECTED)%",
                         "rate_limited": "%REQ(X-RATE-LIMITED)%",
+                        "request_id": "%REQ(X-REQUEST-ID)%",
                     }
                 },
             },

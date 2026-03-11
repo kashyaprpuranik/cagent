@@ -202,6 +202,18 @@ class TestEnvoyNativeFilters:
 
         assert found_tracking, "Should have X-Real-Domain tracking header on at least one route"
 
+    def test_envoy_config_access_log_has_request_id(self, configs_dir):
+        """Generated config should include request_id in access log JSON format."""
+        config = self._generate_config(configs_dir)
+        listeners = config["static_resources"]["listeners"]
+        hcm = listeners[0]["filter_chains"][0]["filters"][0]["typed_config"]
+        access_logs = hcm["access_log"]
+        assert len(access_logs) > 0, "Should have at least one access log"
+
+        json_format = access_logs[0]["typed_config"]["log_format"]["json_format"]
+        assert "request_id" in json_format, "Access log JSON format should include request_id"
+        assert json_format["request_id"] == "%REQ(X-REQUEST-ID)%"
+
     def test_rpm_to_token_bucket(self, configs_dir):
         """_rpm_to_token_bucket should correctly convert RPM to token bucket config."""
         import sys
