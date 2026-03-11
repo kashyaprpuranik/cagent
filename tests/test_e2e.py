@@ -1432,7 +1432,7 @@ class TestMITMProxyHTTPS:
         while time.time() < deadline:
             probe = exec_in_cell(
                 "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 "
-                "https://api.github.com/ 2>&1"
+                "https://pypi.org/ 2>&1"
             )
             if probe.stdout.strip() not in ("", "000"):
                 break
@@ -1443,12 +1443,10 @@ class TestMITMProxyHTTPS:
         result = exec_in_cell(
             "curl -s -o /dev/null -w '%{http_code}' "
             "--connect-timeout 10 "
-            "https://api.github.com/ 2>&1"
+            "https://pypi.org/ 2>&1"
         )
         http_code = result.stdout.strip()
-        # 403 is acceptable — GitHub returns it for unauthenticated rate-limited
-        # requests, but it still proves HTTPS egress works through mitmproxy.
-        assert http_code in ("200", "301", "302", "403"), (
+        assert http_code in ("200", "301", "302"), (
             f"HTTPS to allowed domain failed with {http_code}: {result.stderr}"
         )
 
