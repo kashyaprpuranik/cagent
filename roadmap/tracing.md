@@ -25,15 +25,11 @@ Distributed tracing solves this by assigning a single trace ID to each request a
            (traceparent) │    │              │                   │
                          │    │  trace_id    │  trace_id in      │
                          │    │  in logs     │  job metadata     │
-                         └────┼──────────────┼──────────────────┘
-                              │
-                              │   OTel SDK exports spans
-                              ▼
-                         ┌──────────────────┐
-                         │  Jaeger (CP-only) │
-                         │  OTLP/gRPC :4317  │
-                         │  UI on :16686     │
-                         └──────────────────┘
+                         │    │              │                   │
+                         │    │  OTel SDK exports spans           │
+                         │    ▼                                  │
+                         │  Google Cloud Trace (serverless)      │
+                         └──────────────────────────────────────┘
 
 
                          ┌──────────────────────────────────────┐
@@ -51,7 +47,7 @@ Distributed tracing solves this by assigning a single trace ID to each request a
                          └──────────────────────────────────────┘
 ```
 
-Each plane stores traces locally. The CP exports spans to Jaeger. The DP exports spans to the existing OpenObserve instance (`log-store` container, already running under the `auditing` profile) — no new infrastructure needed on the DP side.
+Each plane stores traces in its own backend. The CP exports spans to **Google Cloud Trace** — a serverless GCP service, no infrastructure to manage. The DP exports spans to the existing **OpenObserve** instance (`log-store` container, already running under the `auditing` profile) — no new containers needed.
 
 Trace context propagation uses the W3C `traceparent` header standard. When CP calls DP (via `proxy_to_warden()`), the traceparent header is forwarded so the DP can log the same trace ID — but spans stay local to each plane. Envoy generates `x-request-id` for access log correlation.
 
@@ -77,17 +73,18 @@ opentelemetry-api
 opentelemetry-sdk
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
-opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-exporter-otlp-proto-http
 ```
 
 ### CP-specific
 
-- `tracing.py` module: OTel SDK init, Jaeger exporter config, helper to inject trace_id into structured logs
+- `tracing.py` module: OTel SDK init, Google Cloud Trace exporter, helper to inject trace_id into structured logs
+- `opentelemetry-exporter-gcp-trace` package for Cloud Trace export
 - FastAPI auto-instrumentation (all routes get spans automatically)
 - httpx auto-instrumentation (`proxy_to_warden()` propagates `traceparent` to DP)
 - ARQ job trace propagation: `trace_id` stored in job metadata, linked as child span in worker
 - Background task trace propagation: capture span context before `asyncio.create_task`, restore in task
-- Jaeger all-in-one container in CP docker-compose (dev) or standalone (staging/prod)
+- No new containers — Cloud Trace is a serverless GCP service, uses existing service account credentials
 
 ### DP-specific
 
@@ -123,27 +120,24 @@ Vector already parses this field — `.request_id = parsed.request_id` in `vecto
 ### FastAPI auto-instrumentation
 
 ```python
-# tracing.py (same pattern in CP and DP)
+# tracing.py (same pattern in CP and DP, different exporter)
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-def init_tracing(app, service_name: str):
+def init_tracing(app, service_name: str, exporter):
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
-    provider.add_span_processor(BatchSpanProcessor(
-        OTLPSpanExporter(endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "..."))
-    ))
+    provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
     FastAPIInstrumentor.instrument_app(app)
 ```
 
 One call in `app.py` (CP) and `main.py` (DP). All routes get spans automatically.
 
-Default endpoints differ per plane:
-- **CP**: `http://jaeger:4317` (gRPC) — Jaeger all-in-one
-- **DP**: `http://log-store:5081/api/default/v1/traces` (HTTP) — OpenObserve OTLP ingestion (uses `opentelemetry-exporter-otlp-proto-http` instead of gRPC)
+Exporters differ per plane:
+- **CP**: `opentelemetry-exporter-gcp-trace` — exports to Google Cloud Trace using existing GCP service account credentials. Serverless, no endpoint to configure.
+- **DP**: `opentelemetry-exporter-otlp-proto-http` → `http://log-store:5081/api/default/v1/traces` — exports to local OpenObserve via OTLP/HTTP
 
 ### httpx propagation (CP → DP)
 
@@ -194,15 +188,15 @@ class TraceIdFilter(logging.Filter):
 - Add request_id to warden ext_authz logs
 - **Result**: all Envoy access logs and ext_authz logs share a request ID per request
 
-### Phase 2: OTel in CP + Jaeger (3-4 days)
+### Phase 2: OTel in CP + Google Cloud Trace (3-4 days)
 
-- Add OTel packages to CP requirements
-- Init tracing in CP `app.py`
+- Add OTel packages + `opentelemetry-exporter-gcp-trace` to CP requirements
+- Init tracing in CP `app.py` with Cloud Trace exporter
 - FastAPI auto-instrumentation on all CP routes
 - httpx auto-instrumentation (CP→DP calls get traceparent)
-- Add Jaeger all-in-one to CP docker-compose (dev)
 - Enrich CP structured logs with trace_id
-- **Result**: CP requests visible in Jaeger UI; CP→DP calls carry traceparent
+- No new containers — Cloud Trace is serverless, uses existing GCP service account
+- **Result**: CP requests visible in GCP Console → Trace; CP→DP calls carry traceparent
 
 ### Phase 3: OTel in DP + OpenObserve traces (2-3 days)
 
@@ -221,12 +215,12 @@ class TraceIdFilter(logging.Filter):
 - Worker extracts context and creates linked spans
 - **Result**: async operations (provisioning, config sync) appear as children of the originating request
 
-### Phase 5: Production backend (1 week, optional)
+### Phase 5: Production tuning (3-4 days, optional)
 
-- Evaluate Grafana Cloud free tier (50GB traces/mo) vs self-hosted Jaeger with Elasticsearch
 - Sampling configuration (head-based: sample N% of traces; tail-based: keep all error traces)
-- Retention policies
-- Dashboard/alerting on trace data (p99 latency, error rates per service)
+- Cloud Trace alerting policies (latency thresholds, error rate spikes)
+- OpenObserve retention tuning for DP trace data
+- Dashboard for trace-derived metrics (p99 latency, error rates per service)
 
 ## Costs
 
@@ -234,51 +228,49 @@ class TraceIdFilter(logging.Filter):
 
 | Item | Cost |
 |------|------|
-| Jaeger all-in-one (CP, dev) | ~100-200MB RAM, single container, $0 |
+| Google Cloud Trace (CP) | $0.20/million spans; first 2.5M spans/mo free. Serverless — no container, no RAM |
 | OpenObserve trace ingestion (DP) | Already running — trace data shares existing OO resource budget |
 | OTel SDK per request | <1ms latency overhead (OTel project benchmarks) |
-| Python packages | 6 packages, ~5MB installed |
+| Python packages | 6 packages + gcp-trace exporter, ~5MB installed |
 | Span storage | ~1KB/span, ~5 spans/request → ~5KB/request |
 
-### Storage estimates
+### CP cost estimate (Google Cloud Trace)
 
-| Scale | Daily storage | Monthly |
-|-------|--------------|---------|
-| 100 req/hr (dev) | ~12MB | ~360MB |
-| 1,000 req/hr (staging) | ~120MB | ~3.6GB |
-| 10,000 req/hr (prod) | ~1.2GB | ~36GB |
+| Scale | Spans/month | Monthly cost |
+|-------|------------|-------------|
+| 100 req/hr (dev) | ~360K | $0 (free tier) |
+| 1,000 req/hr (staging) | ~3.6M | $0.22 |
+| 10,000 req/hr (prod) | ~36M | $6.70 |
+
+### DP storage estimate (OpenObserve)
+
+| Scale | Daily | Monthly |
+|-------|-------|---------|
+| 100 req/hr | ~12MB | ~360MB |
+| 1,000 req/hr | ~120MB | ~3.6GB |
 
 DP trace storage is governed by OpenObserve's existing `ZO_COMPACT_DATA_RETENTION_DAYS` setting (default 30 days), same as logs.
 
-### Backend options by plane
+### Backend summary
 
-**DP**: OpenObserve (already deployed). No new infrastructure. Traces are stored alongside logs and queryable via the same OO SQL API. Retention controlled by existing `LOG_RETENTION_DAYS` env var.
-
-**CP**:
-
-| Option | Cost | Persistence | Notes |
-|--------|------|------------|-------|
-| Jaeger all-in-one (in-memory) | $0 | None (restart loses data) | Good for dev |
-| Jaeger + Badger (local disk) | $0 + disk | Days | Good for staging |
-| Jaeger + Elasticsearch | ES cluster cost | Weeks/months | Good for prod |
-| Grafana Cloud free tier | $0 | 50GB traces/mo | Easiest prod option |
-| Grafana Cloud paid | $5/GB after free tier | Configurable | If free tier exceeded |
+- **CP**: Google Cloud Trace — serverless, uses existing GCP service account, viewable in GCP Console. No new infrastructure.
+- **DP**: OpenObserve (already deployed) — traces stored alongside logs, queryable via same OO SQL API. No new containers.
 
 ## Effort Estimate
 
 - Phase 1: 2-3 days (Envoy request IDs)
-- Phase 2: 3-4 days (CP OTel + Jaeger)
-- Phase 3: 2-3 days (DP OTel + cross-plane)
+- Phase 2: 3-4 days (CP OTel + Cloud Trace)
+- Phase 3: 2-3 days (DP OTel + OpenObserve)
 - Phase 4: 2-3 days (background/ARQ propagation)
-- Phase 5: 1 week (production backend, optional)
-- **Total: ~2-3 weeks** (phases 1-4), +1 week for production backend
+- Phase 5: 3-4 days (production tuning, optional)
+- **Total: ~2-3 weeks** (phases 1-4), +3-4 days for production tuning
 
 ## Risks
 
 | Risk | Mitigation |
 |------|------------|
 | OTel SDK overhead on hot paths | <1ms per span; auto-instrumentation is battle-tested; disable in benchmarks if needed |
-| Trace backend unavailable | Tracing is observability-only — if Jaeger/OpenObserve is down, requests still work, spans are dropped |
+| Trace backend unavailable | Tracing is observability-only — if Cloud Trace/OpenObserve is down, requests still work, spans are dropped |
 | DP trace volume bloating OpenObserve | Shares existing retention policy; sampling can reduce volume; OO compacts old data automatically |
 | Span volume in production | Head-based sampling (e.g. 10% of traces); tail-based sampling keeps all errors |
 | ARQ job context serialization | Use standard OTel context propagation; trace_ctx is just a string in job metadata |
