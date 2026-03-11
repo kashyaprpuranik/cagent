@@ -181,6 +181,72 @@ docker compose port --index 1 cell-dev 22
 docker compose port --index 2 cell-dev 22
 ```
 
+## Data Loss Prevention (DLP)
+
+The MITM proxy scans outbound request bodies for leaked secrets and PII before they leave the data plane. Configured via `configs/mitm/dlp_config.json` (standalone) or pushed from the control plane (connected mode).
+
+### Configuration
+
+```json
+{
+  "enabled": true,
+  "mode": "log",
+  "skip_domains": ["api.openai.com"],
+  "custom_patterns": [
+    {"name": "aws_access_key", "regex": "AKIA[0-9A-Z]{16}"},
+    {"name": "email_bulk", "regex": "[a-zA-Z0-9_.+-]{1,64}@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+", "threshold": 5}
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Enable/disable DLP scanning |
+| `mode` | string | `log` (warn only), `block` (return 403), or `redact` (replace matches with `[REDACTED]`) |
+| `skip_domains` | list | Domains to skip scanning (e.g., AI API providers where tokens are expected) |
+| `custom_patterns` | list | Detection patterns (see below) |
+
+### Patterns
+
+All detection patterns are defined in `custom_patterns`. Each pattern has:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Pattern identifier (used in violation logs) |
+| `regex` | string | Yes | Regular expression (google-re2 syntax) |
+| `threshold` | int | No | Minimum match count to trigger (for bulk detection) |
+
+Without `threshold`, any single match triggers a violation. With `threshold`, the pattern only fires when the match count reaches the threshold — useful for detecting bulk data extraction (e.g., 5+ email addresses in one request body is suspicious, but a single email is normal).
+
+### Default Patterns
+
+In standalone mode, warden writes a default config with 12 built-in patterns:
+
+| Pattern | Type | Description |
+|---------|------|-------------|
+| `aws_access_key` | Secret | AWS access key IDs (`AKIA...`) |
+| `github_token` | Secret | GitHub personal/OAuth/app tokens |
+| `openai_api_key` | Secret | OpenAI API keys (`sk-...`) |
+| `anthropic_api_key` | Secret | Anthropic API keys (`sk-ant-...`) |
+| `private_key` | Secret | PEM-encoded private keys |
+| `jwt` | Secret | JSON Web Tokens |
+| `generic_api_key` | Secret | Common `api_key=...` / `secret_key=...` patterns |
+| `connection_string` | Secret | Database/message broker connection URIs |
+| `ssn` | PII | US Social Security Numbers |
+| `credit_card` | PII | 16-digit card numbers |
+| `email_bulk` | PII | 5+ email addresses in one request (threshold-based) |
+| `phone_bulk` | PII | 5+ US phone numbers in one request (threshold-based) |
+
+To disable a specific pattern, remove it from `custom_patterns`. To add a new pattern, append it to the list.
+
+### Connected Mode
+
+In connected mode, the control plane pushes DLP config via `GET /api/v1/dlp-policies`. The CP config fully replaces the local defaults — warden writes the received config to `dlp_config.json` and restarts the MITM proxy.
+
+### Violations
+
+Violations are logged as structured JSON to stdout. Vector picks them up via Docker log collection and ships them to the configured sinks (OpenObserve, file, S3, etc.). In connected mode, violations are visible in the control plane log viewer.
+
 ## Log Collection
 
 Enabled with `--profile auditing`. Vector collects logs from all containers (cell, HTTP proxy, DNS filter, warden) and ships them to:

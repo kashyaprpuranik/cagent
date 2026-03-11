@@ -281,6 +281,7 @@ docker compose --profile dev --profile managed --profile auditing up -d
 | **Traffic Analytics** | Requests/sec, top domains, error rates in log viewer |
 | **Web Terminal** | Browser-based shell access to cells (xterm.js) |
 | **gVisor Isolation** | Optional kernel-level syscall isolation for defense in depth |
+| **Data Loss Prevention** | Detects secrets, API keys, and PII in egress request bodies (log, block, or redact) |
 | **Email Proxy** | Controlled IMAP/SMTP access with per-recipient policies - **beta** |
 
 ## Configuration
