@@ -108,9 +108,9 @@ services:
     # Environment
     environment:
       - HTTP_PROXY=http://10.200.1.10:8443
-      - HTTPS_PROXY=${HTTPS_PROXY:-http://10.200.1.10:8443}
+      - HTTPS_PROXY=${HTTPS_PROXY:-http://10.200.1.15:8080}
       - http_proxy=http://10.200.1.10:8443
-      - https_proxy=${HTTPS_PROXY:-http://10.200.1.10:8443}
+      - https_proxy=${HTTPS_PROXY:-http://10.200.1.15:8080}
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
       - SSL_CERT_FILE=/tmp/ca-certificates.crt
@@ -230,9 +230,9 @@ services:
     # Environment
     environment:
       - HTTP_PROXY=http://10.200.1.10:8443
-      - HTTPS_PROXY=${HTTPS_PROXY:-http://10.200.1.10:8443}
+      - HTTPS_PROXY=${HTTPS_PROXY:-http://10.200.1.15:8080}
       - http_proxy=http://10.200.1.10:8443
-      - https_proxy=${HTTPS_PROXY:-http://10.200.1.10:8443}
+      - https_proxy=${HTTPS_PROXY:-http://10.200.1.15:8080}
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
       - SSL_CERT_FILE=/tmp/ca-certificates.crt
