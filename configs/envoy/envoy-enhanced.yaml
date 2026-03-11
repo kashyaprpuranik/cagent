@@ -44,6 +44,7 @@ static_resources:
                           response_flags: "%RESPONSE_FLAGS%"
                           credential_injected: "%REQ(X-CREDENTIAL-INJECTED)%"
                           rate_limited: "%REQ(X-RATE-LIMITED)%"
+                          request_id: "%REQ(X-REQUEST-ID)%"
                           duration_ms: "%DURATION%"
                           bytes_received: "%BYTES_RECEIVED%"
                           bytes_sent: "%BYTES_SENT%"
