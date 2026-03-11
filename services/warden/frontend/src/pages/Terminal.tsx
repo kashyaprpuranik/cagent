@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Terminal as TerminalIcon, RefreshCw, X, ChevronDown } from 'lucide-react';
+import { Terminal as TerminalIcon, RefreshCw, X, ChevronDown, Search, ArrowUp, ArrowDown } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SearchAddon } from '@xterm/addon-search';
 import { createTerminal, getContainers } from '../api/client';
 import '@xterm/xterm/css/xterm.css';
 
@@ -15,10 +19,15 @@ export default function TerminalPage() {
   const xtermRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch containers to discover agent containers dynamically
   const { data: containersData } = useQuery({
@@ -44,7 +53,27 @@ export default function TerminalPage() {
     }
   }, [agentContainers, selectedContainer]);
 
-  const connect = () => {
+  const disconnect = useCallback(() => {
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+      resizeObserverRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (xtermRef.current) {
+      xtermRef.current.dispose();
+      xtermRef.current = null;
+    }
+    fitAddonRef.current = null;
+    searchAddonRef.current = null;
+    setIsConnected(false);
+    setShowSearch(false);
+    setSearchQuery('');
+  }, []);
+
+  const connect = useCallback(() => {
     if (!terminalRef.current || !selectedContainer) return;
 
     // Clean up previous connection
@@ -55,6 +84,7 @@ export default function TerminalPage() {
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      scrollback: 10000,
       theme: {
         background: '#1a1a2e',
         foreground: '#eaeaea',
@@ -81,13 +111,37 @@ export default function TerminalPage() {
     });
 
     const fitAddon = new FitAddon();
+    const searchAddon = new SearchAddon();
+
     term.loadAddon(fitAddon);
+    term.loadAddon(new ClipboardAddon());
+    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(searchAddon);
+
+    // WebGL addon with fallback on context loss
+    try {
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+      });
+      term.loadAddon(webglAddon);
+    } catch {
+      // WebGL not available — falls back to canvas renderer
+    }
 
     term.open(terminalRef.current);
     fitAddon.fit();
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+    searchAddonRef.current = searchAddon;
+
+    // Use ResizeObserver instead of window resize listener
+    const resizeObserver = new ResizeObserver(() => {
+      if (fitAddonRef.current) fitAddonRef.current.fit();
+    });
+    resizeObserver.observe(terminalRef.current);
+    resizeObserverRef.current = resizeObserver;
 
     // Connect WebSocket to the selected container
     const ws = createTerminal(selectedContainer);
@@ -97,6 +151,8 @@ export default function TerminalPage() {
       setIsConnected(true);
       setError(null);
       term.write(`\r\n\x1b[32mConnected to ${selectedContainer}\x1b[0m\r\n\r\n`);
+      // Send initial size
+      ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
     };
 
     ws.onmessage = (event) => {
@@ -120,37 +176,59 @@ export default function TerminalPage() {
       }
     });
 
-    // Handle resize
-    const handleResize = () => {
-      if (fitAddonRef.current) {
-        fitAddonRef.current.fit();
+    // Send resize events to backend
+    term.onResize(({ cols, rows }) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
       }
-    };
+    });
 
-    window.addEventListener('resize', handleResize);
+    // Ctrl+Shift+F to toggle search
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && e.key === 'F') {
+        setShowSearch((prev) => !prev);
+        return false;
+      }
+      return true;
+    });
+  }, [selectedContainer, disconnect]);
 
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
+  // Focus search input when search bar opens
+  useEffect(() => {
+    if (showSearch && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [showSearch]);
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setShowSearch(false);
+      setSearchQuery('');
+      searchAddonRef.current?.clearDecorations();
+      xtermRef.current?.focus();
+    } else if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        searchAddonRef.current?.findPrevious(searchQuery);
+      } else {
+        searchAddonRef.current?.findNext(searchQuery);
+      }
+    }
   };
 
-  const disconnect = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (value) {
+      searchAddonRef.current?.findNext(value);
+    } else {
+      searchAddonRef.current?.clearDecorations();
     }
-    if (xtermRef.current) {
-      xtermRef.current.dispose();
-      xtermRef.current = null;
-    }
-    setIsConnected(false);
   };
 
   useEffect(() => {
     return () => {
       disconnect();
     };
-  }, []);
+  }, [disconnect]);
 
   return (
     <div className="h-full flex flex-col">
@@ -240,6 +318,48 @@ export default function TerminalPage() {
           {isConnected ? `Connected to ${selectedContainer}` : 'Disconnected'}
         </span>
       </div>
+
+      {/* Search bar */}
+      {showSearch && (
+        <div className="flex items-center gap-2 mb-2 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5">
+          <Search size={14} className="text-gray-400 shrink-0" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search..."
+            className="flex-1 bg-transparent text-sm text-gray-200 outline-none placeholder-gray-500"
+          />
+          <button
+            onClick={() => searchAddonRef.current?.findPrevious(searchQuery)}
+            className="p-1 text-gray-400 hover:text-gray-200"
+            title="Previous (Shift+Enter)"
+          >
+            <ArrowUp size={14} />
+          </button>
+          <button
+            onClick={() => searchAddonRef.current?.findNext(searchQuery)}
+            className="p-1 text-gray-400 hover:text-gray-200"
+            title="Next (Enter)"
+          >
+            <ArrowDown size={14} />
+          </button>
+          <button
+            onClick={() => {
+              setShowSearch(false);
+              setSearchQuery('');
+              searchAddonRef.current?.clearDecorations();
+              xtermRef.current?.focus();
+            }}
+            className="p-1 text-gray-400 hover:text-gray-200"
+            title="Close (Escape)"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       <div
         ref={terminalRef}
