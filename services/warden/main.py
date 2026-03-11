@@ -898,8 +898,13 @@ def main_loop(stop_event: Optional[threading.Event] = None):
     config_state.email_hash = _stable_hash(config_generator.generate_email_config())
     logger.info("Initial config generation complete")
 
-    # Notify CP that this DP is online (completes provisioning)
+    # Wait for infra containers before notifying CP that this DP is online
     if DATAPLANE_MODE == "connected" and CONTROL_PLANE_TOKEN:
+        logger.info("Waiting for infra containers before sending online ping...")
+        while not _infra_containers_ready():
+            logger.info("Infra containers not ready yet, rechecking in 5s")
+            time.sleep(5)
+        logger.info("Infra containers ready")
         public_ip = _detect_public_ip()
         if public_ip:
             logger.info("Detected public IP: %s", public_ip)
