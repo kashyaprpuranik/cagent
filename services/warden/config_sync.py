@@ -19,10 +19,12 @@ from constants import (
     COREDNS_CONTAINER_NAME,
     COREDNS_COREFILE_PATH,
     DATAPLANE_MODE,
+    DLP_CONFIG_PATH,
     EMAIL_CONFIG_PATH,
     EMAIL_PROXY_CONTAINER_NAME,
     ENVOY_CONFIG_PATH,
     ENVOY_CONTAINER_NAME,
+    MITM_PROXY_CONTAINER_NAME,
     DATA_PLANE_DIR,
     docker_client,
 )
@@ -87,6 +89,21 @@ def restart_email_proxy():
         return False
 
 
+def restart_mitm_proxy():
+    """Restart mitm-proxy container to pick up new DLP config."""
+    try:
+        container = docker_client.containers.get(MITM_PROXY_CONTAINER_NAME)
+        container.restart(timeout=10)
+        logger.info("Restarted mitm-proxy to apply new DLP config")
+        return True
+    except docker.errors.NotFound:
+        logger.debug(f"MITM-proxy container '{MITM_PROXY_CONTAINER_NAME}' not found (not running)")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to restart mitm-proxy: {e}")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Config state tracking
 # ---------------------------------------------------------------------------
@@ -109,6 +126,7 @@ class ConfigState:
         self.envoy_hash: Optional[str] = None
         self.corefile_hash: Optional[str] = None
         self.email_hash: Optional[str] = None
+        self.dlp_hash: Optional[str] = None
         self.last_policy_version: Optional[int] = None
 
 
@@ -120,14 +138,19 @@ config_state = ConfigState()
 # ---------------------------------------------------------------------------
 
 
-def regenerate_configs(additional_domains: list = None, additional_email_accounts: list = None) -> bool:
-    """Regenerate CoreDNS, Envoy, and email configs from cagent.yaml.
+def regenerate_configs(
+    additional_domains: list = None,
+    additional_email_accounts: list = None,
+    additional_dlp_config: dict = None,
+) -> bool:
+    """Regenerate CoreDNS, Envoy, email, and DLP configs from cagent.yaml.
 
     Args:
         additional_domains: Extra domain entries to merge (e.g., from control plane sync).
             Each entry is a dict with at least 'domain' key, matching cagent.yaml format.
         additional_email_accounts: Extra email account entries to merge (e.g., from CP sync).
             Each entry is a dict matching cagent.yaml email account format.
+        additional_dlp_config: CP-provided DLP config.  When set, fully replaces local config.
 
     Returns:
         True if configs were regenerated, False otherwise.
@@ -136,20 +159,24 @@ def regenerate_configs(additional_domains: list = None, additional_email_account
         config_changed = config_generator.load_config()
         config_generator.set_additional_domains(additional_domains or [])
         config_generator.set_additional_email_accounts(additional_email_accounts or [])
+        config_generator.set_additional_dlp_config(additional_dlp_config)
 
         # Generate configs and compute stable hashes (ignoring timestamps)
         corefile_content = config_generator.generate_corefile()
         envoy_config = config_generator.generate_envoy_config()
         envoy_yaml = yaml.dump(envoy_config, default_flow_style=False, sort_keys=False)
         email_config = config_generator.generate_email_config()
+        dlp_config = config_generator.generate_dlp_config()
 
         corefile_hash = _stable_hash(corefile_content)
         envoy_hash = _stable_hash(envoy_yaml)
         email_hash = _stable_hash(email_config)
+        dlp_hash = _stable_hash(dlp_config)
 
         corefile_changed = corefile_hash != config_state.corefile_hash
         envoy_changed = envoy_hash != config_state.envoy_hash
         email_changed = email_hash != config_state.email_hash
+        dlp_changed = dlp_hash != config_state.dlp_hash
 
         if corefile_changed:
             config_generator.write_corefile(COREDNS_COREFILE_PATH)
@@ -166,11 +193,16 @@ def regenerate_configs(additional_domains: list = None, additional_email_account
             restart_email_proxy()
             config_state.email_hash = email_hash
 
+        if dlp_changed:
+            config_generator.write_dlp_config(DLP_CONFIG_PATH)
+            restart_mitm_proxy()
+            config_state.dlp_hash = dlp_hash
+
         # Always update resource env vars when config changes
         if config_changed:
             config_generator.write_resource_env(ENV_FILE_PATH)
 
-        if corefile_changed or envoy_changed or email_changed:
+        if corefile_changed or envoy_changed or email_changed or dlp_changed:
             logger.info("Regenerated configs from cagent.yaml")
             # Invalidate caches when config changes
             from routers.domain_policy import invalidate_cache
@@ -208,6 +240,20 @@ def _cp_policy_to_domain_entry(policy: dict) -> dict:
         entry["read_only"] = True
     # Note: credentials are NOT included — ext_authz handles them dynamically
     return entry
+
+
+def _cp_dlp_policy_to_config(policy: dict) -> dict:
+    """Convert a CP DLP policy response to a local dlp_config.json format."""
+    config: dict = {}
+    if "enabled" in policy:
+        config["enabled"] = bool(policy["enabled"])
+    if "mode" in policy:
+        config["mode"] = policy["mode"] if policy["mode"] in ("log", "block", "redact") else "log"
+    if "skip_domains" in policy:
+        config["skip_domains"] = list(policy["skip_domains"])
+    if "custom_patterns" in policy:
+        config["custom_patterns"] = list(policy["custom_patterns"])
+    return config
 
 
 def _cp_email_policy_to_account_entry(policy: dict) -> dict:
@@ -270,6 +316,7 @@ def sync_config() -> bool:
 
     cp_domain_entries = []
     cp_email_entries = []
+    cp_dlp_config = None
     headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
 
     try:
@@ -314,9 +361,30 @@ def sync_config() -> bool:
         logger.error(f"Error parsing email policies: {e}")
 
     try:
+        # Fetch DLP policy from control plane
+        response = requests.get(
+            f"{CONTROL_PLANE_URL}/api/v1/dlp-policies",
+            headers=headers,
+            timeout=10,
+        )
+
+        if response.status_code == 200:
+            policy = response.json()
+            cp_dlp_config = _cp_dlp_policy_to_config(policy)
+            logger.info("Fetched DLP policy from control plane")
+        else:
+            logger.warning(f"Failed to fetch DLP policy: {response.status_code}")
+
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Could not fetch DLP policy: {e}")
+    except Exception as e:
+        logger.error(f"Error parsing DLP policy: {e}")
+
+    try:
         return regenerate_configs(
             additional_domains=cp_domain_entries,
             additional_email_accounts=cp_email_entries,
+            additional_dlp_config=cp_dlp_config,
         )
     except Exception as e:
         logger.error(f"Error syncing config: {e}")

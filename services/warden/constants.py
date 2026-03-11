@@ -31,6 +31,7 @@ COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Co
 ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
 EMAIL_CONFIG_PATH = os.environ.get("EMAIL_CONFIG_PATH", "/etc/cagent/email/accounts.json")
 DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/cagent")
+DLP_CONFIG_PATH = os.path.join(DATA_PLANE_DIR, "configs", "mitm", "dlp_config.json")
 
 # ---------------------------------------------------------------------------
 # Seccomp profiles

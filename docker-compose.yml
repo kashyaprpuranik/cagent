@@ -441,6 +441,7 @@ services:
       --set upstream_cert=false
       --set connection_strategy=lazy
       -s /etc/mitmproxy/mitm_addon.py
+      -s /etc/mitmproxy/dlp_addon.py
 
     volumes:
       # Read-write: mitmproxy writes DH params and cert cache to confdir at startup

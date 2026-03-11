@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "mode": "log",
+  "skip_domains": ["api.openai.com", "api.anthropic.com"],
+  "custom_patterns": []
+}
