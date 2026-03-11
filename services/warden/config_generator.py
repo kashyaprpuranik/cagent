@@ -571,6 +571,7 @@ class ConfigGenerator:
         cluster = {
             "name": name,
             "type": "LOGICAL_DNS",
+            "dns_lookup_family": "V4_ONLY",
             "connect_timeout": "10s",
             "lb_policy": "ROUND_ROBIN",
             "circuit_breakers": {
