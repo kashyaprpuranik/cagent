@@ -433,7 +433,8 @@ services:
       - no-new-privileges:true
 
     command: >
-      mitmdump
+      sh -c "pip install -q google-re2>=1.1 &&
+      exec mitmdump
       --mode regular
       --listen-port 8080
       --set confdir=/etc/mitmproxy
@@ -441,7 +442,7 @@ services:
       --set upstream_cert=false
       --set connection_strategy=lazy
       -s /etc/mitmproxy/mitm_addon.py
-      -s /etc/mitmproxy/dlp_addon.py
+      -s /etc/mitmproxy/dlp_addon.py"
 
     volumes:
       # Read-write: mitmproxy writes DH params and cert cache to confdir at startup

@@ -251,6 +251,8 @@ def _cp_dlp_policy_to_config(policy: dict) -> dict:
         config["mode"] = policy["mode"] if policy["mode"] in ("log", "block", "redact") else "log"
     if "skip_domains" in policy:
         config["skip_domains"] = list(policy["skip_domains"])
+    if "disabled_patterns" in policy:
+        config["disabled_patterns"] = list(policy["disabled_patterns"])
     if "custom_patterns" in policy:
         config["custom_patterns"] = list(policy["custom_patterns"])
     return config
