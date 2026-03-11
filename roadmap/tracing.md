@@ -1,6 +1,6 @@
 # Distributed Tracing Plan
 
-OpenTelemetry-based request tracing across control plane and data plane, with Jaeger as the backend.
+OpenTelemetry-based request tracing across control plane and data plane.
 
 ## Motivation
 
@@ -26,30 +26,34 @@ Distributed tracing solves this by assigning a single trace ID to each request a
                          │    │  trace_id    │  trace_id in      │
                          │    │  in logs     │  job metadata     │
                          └────┼──────────────┼──────────────────┘
-                              │              │
+                              │
                               │   OTel SDK exports spans
-                              │              │
-                              ▼              ▼
+                              ▼
+                         ┌──────────────────┐
+                         │  Jaeger (CP-only) │
+                         │  OTLP/gRPC :4317  │
+                         │  UI on :16686     │
+                         └──────────────────┘
+
+
                          ┌──────────────────────────────────────┐
-                         │  Jaeger (all-in-one)                  │
-                         │  Receives spans via OTLP/gRPC :4317   │
-                         │  UI on :16686                         │
-                         └──────────────────────────────────────┘
-                              ▲              ▲
-                              │              │
-                              │   OTel SDK exports spans
-                              │              │
-                         ┌────┼──────────────┼──────────────────┐
-                         │    │              │                   │
-  Envoy ──► ext_authz ──►│  Warden FastAPI  │  config_generator │
-  (x-request-id)         │    │              │                   │
-                         │    │  trace_id    │                   │
-                         │    │  in logs     │                   │
                          │           Data Plane                  │
+                         │                                      │
+  Envoy ──► ext_authz ──►│  Warden FastAPI    config_generator  │
+  (x-request-id)         │    │                                 │
+                         │    │  trace_id in logs               │
+                         │    │                                 │
+                         │    │  OTel SDK exports spans          │
+                         │    ▼                                 │
+                         │  OpenObserve (log-store, already     │
+                         │  running under auditing profile)     │
+                         │  OTLP/HTTP :5080  ·  traces + logs   │
                          └──────────────────────────────────────┘
 ```
 
-Trace context propagation uses the W3C `traceparent` header standard. Envoy generates `x-request-id` for access logs. The OTel SDK in each Python service creates spans and exports them to Jaeger via OTLP/gRPC.
+Each plane stores traces locally. The CP exports spans to Jaeger. The DP exports spans to the existing OpenObserve instance (`log-store` container, already running under the `auditing` profile) — no new infrastructure needed on the DP side.
+
+Trace context propagation uses the W3C `traceparent` header standard. When CP calls DP (via `proxy_to_warden()`), the traceparent header is forwarded so the DP can log the same trace ID — but spans stay local to each plane. Envoy generates `x-request-id` for access log correlation.
 
 ## Current State
 
@@ -61,6 +65,7 @@ Trace context propagation uses the W3C `traceparent` header standard. Envoy gene
 | CP → DP calls | `proxy_to_warden()` in `warden_proxy.py` uses httpx | No traceparent propagation |
 | Warden middleware | CORS only | No tracing middleware |
 | CP middleware | SecurityHeaders, CloudflareOrigin, CORS | No tracing middleware |
+| OpenObserve (DP) | Running as `log-store` under `auditing` profile; receives logs from Vector | Supports OTLP trace ingestion natively — not yet configured for traces |
 | OTel packages | None in either repo | Everything needs to be added |
 
 ## What Gets Added
@@ -82,18 +87,15 @@ opentelemetry-exporter-otlp-proto-grpc
 - httpx auto-instrumentation (`proxy_to_warden()` propagates `traceparent` to DP)
 - ARQ job trace propagation: `trace_id` stored in job metadata, linked as child span in worker
 - Background task trace propagation: capture span context before `asyncio.create_task`, restore in task
+- Jaeger all-in-one container in CP docker-compose (dev) or standalone (staging/prod)
 
 ### DP-specific
 
-- Same `tracing.py` module (shared pattern, separate code)
+- `tracing.py` module: OTel SDK init, exports spans to local OpenObserve via OTLP/HTTP
 - FastAPI auto-instrumentation on warden
 - Envoy config changes: enable `x-request-id` generation, add to access log JSON format
 - Vector: `request_id` field already parsed — starts working once Envoy generates it
-
-### Infrastructure
-
-- Jaeger all-in-one container in CP docker-compose (dev) or standalone (staging/prod)
-- OTel collector optional — SDK exports directly to Jaeger OTLP endpoint for simplicity
+- No new containers — OpenObserve (`log-store`) already runs under the `auditing` profile and accepts OTLP traces natively
 
 ## What Stays the Same
 
@@ -131,13 +133,17 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 def init_tracing(app, service_name: str):
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
     provider.add_span_processor(BatchSpanProcessor(
-        OTLPSpanExporter(endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317"))
+        OTLPSpanExporter(endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "..."))
     ))
     trace.set_tracer_provider(provider)
     FastAPIInstrumentor.instrument_app(app)
 ```
 
 One call in `app.py` (CP) and `main.py` (DP). All routes get spans automatically.
+
+Default endpoints differ per plane:
+- **CP**: `http://jaeger:4317` (gRPC) — Jaeger all-in-one
+- **DP**: `http://log-store:5081/api/default/v1/traces` (HTTP) — OpenObserve OTLP ingestion (uses `opentelemetry-exporter-otlp-proto-http` instead of gRPC)
 
 ### httpx propagation (CP → DP)
 
@@ -198,14 +204,15 @@ class TraceIdFilter(logging.Filter):
 - Enrich CP structured logs with trace_id
 - **Result**: CP requests visible in Jaeger UI; CP→DP calls carry traceparent
 
-### Phase 3: OTel in DP + cross-plane traces (2-3 days)
+### Phase 3: OTel in DP + OpenObserve traces (2-3 days)
 
 - Add OTel packages to DP requirements
-- Init tracing in warden `main.py`
+- Init tracing in warden `main.py`, exporting spans to local OpenObserve via OTLP/HTTP
 - FastAPI auto-instrumentation on warden routes
-- Warden picks up traceparent from CP calls → linked spans
+- Warden picks up traceparent from CP calls → logs the same trace_id (spans stay in local OpenObserve)
 - Enrich warden logs with trace_id
-- **Result**: full CP→DP traces visible in Jaeger; single trace ID across planes
+- No new containers — OpenObserve already runs under the `auditing` profile
+- **Result**: DP traces queryable in OpenObserve alongside logs; shared trace_id with CP for cross-plane correlation via log search
 
 ### Phase 4: Background task + ARQ propagation (2-3 days)
 
@@ -227,7 +234,8 @@ class TraceIdFilter(logging.Filter):
 
 | Item | Cost |
 |------|------|
-| Jaeger all-in-one (dev) | ~100-200MB RAM, single container, $0 |
+| Jaeger all-in-one (CP, dev) | ~100-200MB RAM, single container, $0 |
+| OpenObserve trace ingestion (DP) | Already running — trace data shares existing OO resource budget |
 | OTel SDK per request | <1ms latency overhead (OTel project benchmarks) |
 | Python packages | 6 packages, ~5MB installed |
 | Span storage | ~1KB/span, ~5 spans/request → ~5KB/request |
@@ -240,7 +248,13 @@ class TraceIdFilter(logging.Filter):
 | 1,000 req/hr (staging) | ~120MB | ~3.6GB |
 | 10,000 req/hr (prod) | ~1.2GB | ~36GB |
 
-### Production backend options
+DP trace storage is governed by OpenObserve's existing `ZO_COMPACT_DATA_RETENTION_DAYS` setting (default 30 days), same as logs.
+
+### Backend options by plane
+
+**DP**: OpenObserve (already deployed). No new infrastructure. Traces are stored alongside logs and queryable via the same OO SQL API. Retention controlled by existing `LOG_RETENTION_DAYS` env var.
+
+**CP**:
 
 | Option | Cost | Persistence | Notes |
 |--------|------|------------|-------|
@@ -264,7 +278,8 @@ class TraceIdFilter(logging.Filter):
 | Risk | Mitigation |
 |------|------------|
 | OTel SDK overhead on hot paths | <1ms per span; auto-instrumentation is battle-tested; disable in benchmarks if needed |
-| Jaeger as single point of failure | Tracing is observability-only — if Jaeger is down, requests still work, spans are dropped |
+| Trace backend unavailable | Tracing is observability-only — if Jaeger/OpenObserve is down, requests still work, spans are dropped |
+| DP trace volume bloating OpenObserve | Shares existing retention policy; sampling can reduce volume; OO compacts old data automatically |
 | Span volume in production | Head-based sampling (e.g. 10% of traces); tail-based sampling keeps all errors |
 | ARQ job context serialization | Use standard OTel context propagation; trace_ctx is just a string in job metadata |
 | Package version conflicts | Pin OTel packages together; they release in lockstep |
