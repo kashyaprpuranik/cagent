@@ -425,6 +425,7 @@ services:
   # credential injection, rate limiting, and path filtering for HTTPS.
   # ===========================================================================
   mitm-proxy:
+    image: ghcr.io/kashyaprpuranik/mitmproxy:10.4.2-re2
     build:
       context: ./configs/mitm
       dockerfile: Dockerfile
