@@ -42,12 +42,15 @@ from constants import (
     CONFIG_SYNC_INTERVAL,
     CONTROL_PLANE_TOKEN,
     CONTROL_PLANE_URL,
+    COREDNS_CONTAINER_NAME,
     COREDNS_COREFILE_PATH,
     DATAPLANE_MODE,
     ENVOY_CONFIG_PATH,
+    ENVOY_CONTAINER_NAME,
     HEARTBEAT_INTERVAL,
     HEARTBEAT_URL,
     MAX_HEARTBEAT_WORKERS,
+    MITM_PROXY_CONTAINER_NAME,
     MTLS_CA_CERT_PATH,
     MTLS_CERT_PATH,
     MTLS_ENABLED,
@@ -393,6 +396,20 @@ def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, 
 # Status helpers
 # ---------------------------------------------------------------------------
 
+_INFRA_CONTAINERS = [COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, MITM_PROXY_CONTAINER_NAME]
+
+
+def _infra_containers_ready() -> bool:
+    """Return True if all infrastructure containers are running."""
+    for name in _INFRA_CONTAINERS:
+        try:
+            c = docker_client.containers.get(name)
+            if c.status != "running":
+                return False
+        except Exception:
+            return False
+    return True
+
 
 def get_container_status(container) -> dict:
     """Get status metrics for a single cell container."""
@@ -533,6 +550,12 @@ def send_heartbeat(container) -> Optional[dict]:
 
     name = container.name
     status = get_container_status(container)
+
+    # If the cell container is running but infra containers aren't ready yet,
+    # report as provisioning so CP doesn't mark the cell online prematurely.
+    if status["status"] == "running" and not _infra_containers_ready():
+        logger.info(f"{name}: cell running but infra containers not ready, reporting provisioning")
+        status["status"] = "provisioning"
 
     heartbeat = {
         "status": status["status"],
