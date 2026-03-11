@@ -111,6 +111,9 @@ OPENOBSERVE_URL = os.environ.get("OPENOBSERVE_URL", "http://log-store:5080")
 OPENOBSERVE_USER = os.environ.get("OPENOBSERVE_USER", "admin@cagent.local")
 OPENOBSERVE_PASSWORD = os.environ.get("OPENOBSERVE_PASSWORD", "")
 
+# OpenTelemetry tracing (opt-in)
+OTEL_ENABLED = os.environ.get("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+
 # ---------------------------------------------------------------------------
 # Timing
 # ---------------------------------------------------------------------------

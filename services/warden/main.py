@@ -67,7 +67,10 @@ from fastapi.staticfiles import StaticFiles
 from utils import calculate_container_stats
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - [trace=%(otelTraceID)s span=%(otelSpanID)s] - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # Thread-safe command result tracking (written from ThreadPoolExecutor workers,
@@ -989,6 +992,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# OpenTelemetry tracing (opt-in via OTEL_ENABLED env var)
+from tracing import setup_tracing
+
+setup_tracing(app)
 
 # Register routers
 from routers import (
