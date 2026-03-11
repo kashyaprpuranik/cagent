@@ -571,6 +571,8 @@ services:
       - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://log-store:5080}
       - OPENOBSERVE_USER=${OPENOBSERVE_USER:-admin@cagent.local}
       - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD:-openobserve-local-dev}
+      # OpenTelemetry tracing (opt-in, off by default)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
       # Local admin settings
       - DATA_PLANE_DIR=/app/cagent
 
