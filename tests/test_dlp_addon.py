@@ -1,0 +1,405 @@
+"""
+Tests for the DLP (secret detection) mitmproxy addon.
+
+Verifies pattern detection, mode behavior, skip domains,
+base64 decoding, and body size truncation.
+"""
+
+import base64
+import json
+import sys
+import types
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# ---------------------------------------------------------------------------
+# Mock mitmproxy before importing the addon (not installed in test env)
+# ---------------------------------------------------------------------------
+_mock_http = types.ModuleType("mitmproxy.http")
+
+
+class _MockResponse:
+    """Minimal stand-in for mitmproxy.http.Response."""
+
+    def __init__(self, status_code, content, headers):
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers
+
+    @staticmethod
+    def make(status_code, content, headers):
+        return _MockResponse(status_code, content, headers)
+
+
+_mock_http.HTTPFlow = MagicMock  # type annotations only
+_mock_http.Response = _MockResponse
+
+_mock_mitmproxy = types.ModuleType("mitmproxy")
+_mock_mitmproxy.http = _mock_http  # type: ignore[attr-defined]
+sys.modules["mitmproxy"] = _mock_mitmproxy
+sys.modules["mitmproxy.http"] = _mock_http
+
+# Now safe to import
+MITM_DIR = Path(__file__).resolve().parent.parent / "configs" / "mitm"
+sys.path.insert(0, str(MITM_DIR))
+
+from dlp_addon import (  # noqa: E402
+    MAX_BODY_SCAN_BYTES,
+    DLPAddon,
+    _compile_custom_patterns,
+    _load_config,
+    _redact_text,
+    _scan_text,
+    _try_base64_decode,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_flow(body="", host="example.com", method="POST", path="/api"):
+    """Build a minimal mock HTTPFlow for testing."""
+    flow = MagicMock()
+    flow.request.method = method
+    flow.request.path = path
+    flow.request.pretty_host = host
+    flow.request.headers = {"Host": host}
+    flow.request.get_text.return_value = body
+    flow.response = None
+    return flow
+
+
+def _make_addon(enabled=True, mode="log", skip_domains=None, custom_patterns=None):
+    """Build a DLPAddon with the given config (no file needed)."""
+    addon = DLPAddon.__new__(DLPAddon)
+    addon.config = {
+        "enabled": enabled,
+        "mode": mode,
+        "skip_domains": skip_domains or [],
+        "custom_patterns": custom_patterns or [],
+    }
+    addon._custom_patterns = _compile_custom_patterns(addon.config["custom_patterns"])
+    return addon
+
+
+# ---------------------------------------------------------------------------
+# Config loading
+# ---------------------------------------------------------------------------
+
+class TestConfigLoading:
+
+    def test_load_valid_config(self, tmp_path):
+        cfg_file = tmp_path / "dlp_config.json"
+        cfg_file.write_text(json.dumps({
+            "enabled": True,
+            "mode": "block",
+            "skip_domains": ["a.com"],
+        }))
+        cfg = _load_config(cfg_file)
+        assert cfg["enabled"] is True
+        assert cfg["mode"] == "block"
+        assert cfg["skip_domains"] == ["a.com"]
+
+    def test_load_missing_file_returns_defaults(self, tmp_path):
+        cfg = _load_config(tmp_path / "nonexistent.json")
+        assert cfg["enabled"] is False
+        assert cfg["mode"] == "log"
+        assert cfg["skip_domains"] == []
+
+    def test_load_invalid_json_returns_defaults(self, tmp_path):
+        cfg_file = tmp_path / "bad.json"
+        cfg_file.write_text("NOT JSON")
+        cfg = _load_config(cfg_file)
+        assert cfg["enabled"] is False
+
+    def test_load_invalid_mode_defaults_to_log(self, tmp_path):
+        cfg_file = tmp_path / "dlp_config.json"
+        cfg_file.write_text(json.dumps({"enabled": True, "mode": "destroy"}))
+        cfg = _load_config(cfg_file)
+        assert cfg["mode"] == "log"
+
+
+# ---------------------------------------------------------------------------
+# Pattern detection
+# ---------------------------------------------------------------------------
+
+class TestPatternDetection:
+
+    def test_aws_access_key(self):
+        text = "key=AKIAIOSFODNN7EXAMPLE"
+        findings = _scan_text(text)
+        names = [f["pattern"] for f in findings]
+        assert "aws_access_key" in names
+
+    def test_github_token(self):
+        token = "ghp_" + "A" * 36
+        findings = _scan_text(f"token={token}")
+        names = [f["pattern"] for f in findings]
+        assert "github_token" in names
+
+    def test_openai_api_key(self):
+        findings = _scan_text("Authorization: Bearer sk-abc123def456ghi789jkl012")
+        names = [f["pattern"] for f in findings]
+        assert "openai_api_key" in names
+
+    def test_anthropic_api_key(self):
+        findings = _scan_text("key=sk-ant-abc123def456ghi789jkl012")
+        names = [f["pattern"] for f in findings]
+        assert "anthropic_api_key" in names
+
+    def test_private_key(self):
+        findings = _scan_text("-----BEGIN RSA PRIVATE KEY-----\nMIIE...")
+        names = [f["pattern"] for f in findings]
+        assert "private_key" in names
+
+    def test_ec_private_key(self):
+        findings = _scan_text("-----BEGIN EC PRIVATE KEY-----")
+        names = [f["pattern"] for f in findings]
+        assert "private_key" in names
+
+    def test_jwt(self):
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+        findings = _scan_text(jwt)
+        names = [f["pattern"] for f in findings]
+        assert "jwt" in names
+
+    def test_generic_api_key(self):
+        findings = _scan_text('api_key = "abcdefghij1234567890xy"')
+        names = [f["pattern"] for f in findings]
+        assert "generic_api_key" in names
+
+    def test_connection_string_postgres(self):
+        findings = _scan_text("postgres://user:pass@host:5432/db")
+        names = [f["pattern"] for f in findings]
+        assert "connection_string" in names
+
+    def test_connection_string_mongodb(self):
+        findings = _scan_text("mongodb+srv://user:pass@cluster0.abc.mongodb.net/mydb")
+        names = [f["pattern"] for f in findings]
+        assert "connection_string" in names
+
+    def test_no_false_positive_on_normal_text(self):
+        findings = _scan_text("Hello, this is a normal request body with no secrets.")
+        assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# Skip domain logic
+# ---------------------------------------------------------------------------
+
+class TestSkipDomains:
+
+    def test_skip_domain_is_not_scanned(self):
+        addon = _make_addon(enabled=True, mode="block", skip_domains=["api.openai.com"])
+        flow = _make_flow(body="sk-abc123def456ghi789jkl012", host="api.openai.com")
+        addon.request(flow)
+        assert flow.response is None
+
+    def test_non_skip_domain_is_scanned(self):
+        addon = _make_addon(enabled=True, mode="block", skip_domains=["api.openai.com"])
+        flow = _make_flow(body="sk-abc123def456ghi789jkl012", host="evil.com")
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Mode behavior
+# ---------------------------------------------------------------------------
+
+class TestModeBehavior:
+
+    def test_log_mode_does_not_block(self):
+        addon = _make_addon(enabled=True, mode="log")
+        flow = _make_flow(body="ghp_" + "A" * 36)
+        with patch("dlp_addon._emit_log"):
+            addon.request(flow)
+        assert flow.response is None
+
+    def test_block_mode_returns_403(self):
+        addon = _make_addon(enabled=True, mode="block")
+        flow = _make_flow(body="ghp_" + "A" * 36)
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_redact_mode_replaces_secrets(self):
+        secret = "ghp_" + "A" * 36
+        addon = _make_addon(enabled=True, mode="redact")
+        flow = _make_flow(body=f"token={secret}&other=value")
+        addon.request(flow)
+        flow.request.set_text.assert_called_once()
+        redacted_body = flow.request.set_text.call_args[0][0]
+        assert secret not in redacted_body
+        assert "[REDACTED]" in redacted_body
+        assert flow.response is None
+
+
+# ---------------------------------------------------------------------------
+# Base64 detection
+# ---------------------------------------------------------------------------
+
+class TestBase64Detection:
+
+    def test_base64_encoded_secret_detected(self):
+        secret = "ghp_" + "A" * 36
+        encoded = base64.b64encode(secret.encode()).decode()
+        addon = _make_addon(enabled=True, mode="block")
+        # Use newline separator so the base64 regex captures only the encoded blob
+        flow = _make_flow(body=f"data:\n{encoded}")
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_try_base64_decode_valid(self):
+        text = base64.b64encode(b"Hello, this is a test string for base64 decoding").decode()
+        result = _try_base64_decode(text)
+        assert result is not None
+        assert "Hello" in result
+
+    def test_try_base64_decode_short_string(self):
+        assert _try_base64_decode("abc") is None
+
+    def test_try_base64_decode_invalid(self):
+        # Characters outside the base64 alphabet cause decode failure
+        assert _try_base64_decode("!" * 40) is None
+
+
+# ---------------------------------------------------------------------------
+# Body truncation
+# ---------------------------------------------------------------------------
+
+class TestBodyTruncation:
+
+    def test_large_body_secret_past_limit_not_detected(self):
+        addon = _make_addon(enabled=True, mode="block")
+        padding = "A" * (MAX_BODY_SCAN_BYTES + 100)
+        secret = "ghp_" + "B" * 36
+        body = padding + secret
+        flow = _make_flow(body=body)
+        addon.request(flow)
+        assert flow.response is None
+
+    def test_secret_within_limit_is_detected(self):
+        addon = _make_addon(enabled=True, mode="block")
+        secret = "ghp_" + "B" * 36
+        flow = _make_flow(body=secret)
+        addon.request(flow)
+        assert flow.response is not None
+
+
+# ---------------------------------------------------------------------------
+# Disabled mode
+# ---------------------------------------------------------------------------
+
+class TestDisabledMode:
+
+    def test_disabled_addon_does_nothing(self):
+        addon = _make_addon(enabled=False, mode="block")
+        flow = _make_flow(body="ghp_" + "A" * 36)
+        addon.request(flow)
+        assert flow.response is None
+
+    def test_empty_body_does_nothing(self):
+        addon = _make_addon(enabled=True, mode="block")
+        flow = _make_flow(body="")
+        addon.request(flow)
+        assert flow.response is None
+
+
+# ---------------------------------------------------------------------------
+# Redact helper
+# ---------------------------------------------------------------------------
+
+class TestRedactText:
+
+    def test_redact_replaces_all_matches(self):
+        secret1 = "ghp_" + "C" * 36
+        secret2 = "sk-ant-DDDDDDDDDDDDDDDDDDDDDDDDDDD"
+        text = f"a={secret1}&b={secret2}"
+        result = _redact_text(text)
+        assert secret1 not in result
+        assert secret2 not in result
+        assert "[REDACTED]" in result
+
+
+# ---------------------------------------------------------------------------
+# Custom patterns
+# ---------------------------------------------------------------------------
+
+class TestCustomPatterns:
+
+    def test_custom_pattern_loaded_from_config(self, tmp_path):
+        cfg_file = tmp_path / "dlp_config.json"
+        cfg_file.write_text(json.dumps({
+            "enabled": True,
+            "mode": "log",
+            "skip_domains": [],
+            "custom_patterns": [
+                {"name": "internal_token", "regex": r"INTERNAL_[A-Z]{16}"}
+            ],
+        }))
+        cfg = _load_config(cfg_file)
+        assert len(cfg["custom_patterns"]) == 1
+        assert cfg["custom_patterns"][0]["name"] == "internal_token"
+
+    def test_invalid_custom_regex_skipped(self):
+        patterns = _compile_custom_patterns([
+            {"name": "good", "regex": r"GOOD_[A-Z]+"},
+            {"name": "bad", "regex": r"[invalid("},
+            {"name": "also_good", "regex": r"ALSO_[A-Z]+"},
+        ])
+        assert len(patterns) == 2
+        names = [p[0] for p in patterns]
+        assert "good" in names
+        assert "also_good" in names
+        assert "bad" not in names
+
+    def test_custom_pattern_detection_in_scan(self):
+        patterns = _compile_custom_patterns([
+            {"name": "corp_secret", "regex": r"CORP_SECRET_[A-Z0-9]{20}"},
+        ])
+        from dlp_addon import SECRET_PATTERNS
+        all_patterns = SECRET_PATTERNS + patterns
+        findings = _scan_text("data=CORP_SECRET_ABCDEFGHIJ1234567890", patterns=all_patterns)
+        names = [f["pattern"] for f in findings]
+        assert "corp_secret" in names
+
+    def test_custom_pattern_block_mode(self):
+        addon = _make_addon(
+            enabled=True,
+            mode="block",
+            custom_patterns=[{"name": "corp_key", "regex": r"CORPKEY_[A-Z0-9]{20}"}],
+        )
+        flow = _make_flow(body="token=CORPKEY_ABCDEFGHIJ1234567890")
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_custom_pattern_alongside_hardcoded(self):
+        addon = _make_addon(
+            enabled=True,
+            mode="block",
+            custom_patterns=[{"name": "corp_key", "regex": r"CORPKEY_[A-Z0-9]{20}"}],
+        )
+        # Hardcoded pattern still works
+        flow = _make_flow(body="ghp_" + "A" * 36)
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_empty_custom_patterns_no_error(self):
+        patterns = _compile_custom_patterns([])
+        assert patterns == []
+
+    def test_missing_name_or_regex_skipped(self):
+        patterns = _compile_custom_patterns([
+            {"name": "no_regex"},
+            {"regex": r"no_name"},
+            {"name": "", "regex": r"empty_name"},
+            {"name": "empty_regex", "regex": ""},
+        ])
+        assert patterns == []

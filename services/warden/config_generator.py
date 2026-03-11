@@ -52,6 +52,7 @@ class ConfigGenerator:
         self.last_hash = None
         self._additional_domains = []  # CP-provided domain entries
         self._additional_email_accounts = []  # CP-provided email account entries
+        self._additional_dlp_config = None  # CP-provided DLP config (replaces local when set)
 
     def set_additional_domains(self, domains: list):
         """Set additional domain entries (e.g., from control plane policies)."""
@@ -60,6 +61,10 @@ class ConfigGenerator:
     def set_additional_email_accounts(self, accounts: list):
         """Set additional email account entries (e.g., from control plane email policies)."""
         self._additional_email_accounts = accounts
+
+    def set_additional_dlp_config(self, config: Optional[dict]):
+        """Set CP-provided DLP config.  When set, fully replaces local config."""
+        self._additional_dlp_config = config
 
     def load_config(self) -> bool:
         """Load cagent.yaml config. Returns True if config changed."""
@@ -791,6 +796,38 @@ class ConfigGenerator:
             return True
         except Exception as e:
             logger.error(f"Failed to write email config: {e}")
+            return False
+
+    # =========================================================================
+    # DLP Config Generation
+    # =========================================================================
+
+    def get_dlp_config(self) -> dict:
+        """Get DLP config.  CP config fully replaces local when present."""
+        if self._additional_dlp_config is not None:
+            return self._additional_dlp_config
+        # Standalone fallback: return sensible defaults
+        return {
+            "enabled": False,
+            "mode": "log",
+            "skip_domains": [],
+            "custom_patterns": [],
+        }
+
+    def generate_dlp_config(self) -> str:
+        """Generate DLP config as JSON string."""
+        return json.dumps(self.get_dlp_config(), indent=2)
+
+    def write_dlp_config(self, output_path: str) -> bool:
+        """Write generated DLP config as JSON."""
+        try:
+            content = self.generate_dlp_config()
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_path).write_text(content)
+            logger.info(f"Wrote DLP config to {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write DLP config: {e}")
             return False
 
     # =========================================================================
