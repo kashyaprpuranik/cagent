@@ -74,23 +74,17 @@ class TestCpDlpPolicyToConfig:
         result = _cp_dlp_policy_to_config({})
         assert result == {}
 
-    def test_disabled_patterns_passthrough(self):
+    def test_custom_patterns_with_threshold(self):
         from config_sync import _cp_dlp_policy_to_config
 
         policy = {
             "enabled": True,
-            "mode": "log",
-            "disabled_patterns": ["ssn", "credit_card", "email_bulk"],
+            "custom_patterns": [
+                {"name": "email_bulk", "regex": "[a-z]+@[a-z]+\\.[a-z]+", "threshold": 5},
+            ],
         }
         result = _cp_dlp_policy_to_config(policy)
-        assert result["disabled_patterns"] == ["ssn", "credit_card", "email_bulk"]
-
-    def test_disabled_patterns_absent_not_in_result(self):
-        from config_sync import _cp_dlp_policy_to_config
-
-        policy = {"enabled": True}
-        result = _cp_dlp_policy_to_config(policy)
-        assert "disabled_patterns" not in result
+        assert result["custom_patterns"][0]["threshold"] == 5
 
 
 # ---------------------------------------------------------------------------
@@ -100,14 +94,16 @@ class TestCpDlpPolicyToConfig:
 class TestConfigGeneratorDlp:
 
     def test_get_dlp_config_defaults(self):
-        from config_generator import ConfigGenerator
+        from config_generator import ConfigGenerator, DEFAULT_DLP_PATTERNS
 
         gen = ConfigGenerator("/nonexistent.yaml")
         cfg = gen.get_dlp_config()
         assert cfg["enabled"] is False
         assert cfg["mode"] == "log"
-        assert cfg["disabled_patterns"] == []
-        assert cfg["custom_patterns"] == []
+        assert len(cfg["custom_patterns"]) == len(DEFAULT_DLP_PATTERNS)
+        names = [p["name"] for p in cfg["custom_patterns"]]
+        assert "aws_access_key" in names
+        assert "ssn" in names
 
     def test_get_dlp_config_with_cp_override(self):
         from config_generator import ConfigGenerator
@@ -137,12 +133,22 @@ class TestConfigGeneratorDlp:
         assert written["enabled"] is True
 
     def test_set_none_falls_back_to_defaults(self):
-        from config_generator import ConfigGenerator
+        from config_generator import ConfigGenerator, DEFAULT_DLP_PATTERNS
 
         gen = ConfigGenerator("/nonexistent.yaml")
         gen.set_additional_dlp_config(None)
         cfg = gen.get_dlp_config()
         assert cfg["enabled"] is False
+        assert len(cfg["custom_patterns"]) == len(DEFAULT_DLP_PATTERNS)
+
+    def test_defaults_include_threshold_patterns(self):
+        from config_generator import DEFAULT_DLP_PATTERNS
+
+        threshold_patterns = [p for p in DEFAULT_DLP_PATTERNS if "threshold" in p]
+        assert len(threshold_patterns) >= 2
+        names = [p["name"] for p in threshold_patterns]
+        assert "email_bulk" in names
+        assert "phone_bulk" in names
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +254,8 @@ class TestRegenerateConfigsDlp:
             written = json.loads(self.dlp_path.read_text())
             assert written["enabled"] is False
             assert written["mode"] == "log"
+            # Standalone defaults include all built-in patterns
+            assert len(written["custom_patterns"]) > 0
 
 
 # ---------------------------------------------------------------------------

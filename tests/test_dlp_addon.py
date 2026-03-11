@@ -46,10 +46,7 @@ MITM_DIR = Path(__file__).resolve().parent.parent / "configs" / "mitm"
 sys.path.insert(0, str(MITM_DIR))
 
 from dlp_addon import (  # noqa: E402
-    BUILTIN_PATTERNS,
-    BULK_THRESHOLD,
     MAX_BODY_SCAN_BYTES,
-    _BULK_PATTERNS,
     DLPAddon,
     _compile_custom_patterns,
     _load_config,
@@ -57,6 +54,11 @@ from dlp_addon import (  # noqa: E402
     _scan_text,
     _try_base64_decode,
 )
+
+# Load the shipped default config and compile its patterns for use in tests
+_DEFAULT_CONFIG = _load_config(MITM_DIR / "dlp_config.json")
+_DEFAULT_RAW = _DEFAULT_CONFIG["custom_patterns"]
+_DEFAULT_COMPILED = _compile_custom_patterns(_DEFAULT_RAW)
 
 
 # ---------------------------------------------------------------------------
@@ -75,21 +77,19 @@ def _make_flow(body="", host="example.com", method="POST", path="/api"):
     return flow
 
 
-def _make_addon(enabled=True, mode="log", skip_domains=None, custom_patterns=None, disabled_patterns=None):
-    """Build a DLPAddon with the given config (no file needed)."""
+def _make_addon(enabled=True, mode="log", skip_domains=None, custom_patterns=None):
+    """Build a DLPAddon with the given config (no file needed).
+
+    custom_patterns defaults to the shipped default patterns.
+    """
     addon = DLPAddon.__new__(DLPAddon)
     addon.config = {
         "enabled": enabled,
         "mode": mode,
         "skip_domains": skip_domains or [],
-        "disabled_patterns": disabled_patterns or [],
-        "custom_patterns": custom_patterns or [],
+        "custom_patterns": custom_patterns if custom_patterns is not None else list(_DEFAULT_RAW),
     }
-    disabled = set(addon.config["disabled_patterns"])
-    addon._patterns = [p for p in BUILTIN_PATTERNS if p[0] not in disabled]
-    addon._bulk_patterns = [p for p in _BULK_PATTERNS if p[0] not in disabled]
-    addon._custom_patterns = _compile_custom_patterns(addon.config["custom_patterns"])
-    addon._all_patterns = addon._patterns + addon._custom_patterns
+    addon._patterns = _compile_custom_patterns(addon.config["custom_patterns"])
     return addon
 
 
@@ -129,6 +129,19 @@ class TestConfigLoading:
         cfg = _load_config(cfg_file)
         assert cfg["mode"] == "log"
 
+    def test_load_config_with_custom_patterns(self, tmp_path):
+        cfg_file = tmp_path / "dlp_config.json"
+        cfg_file.write_text(json.dumps({
+            "enabled": True,
+            "mode": "log",
+            "custom_patterns": [
+                {"name": "test_pat", "regex": "TEST_[A-Z]+", "threshold": 3},
+            ],
+        }))
+        cfg = _load_config(cfg_file)
+        assert len(cfg["custom_patterns"]) == 1
+        assert cfg["custom_patterns"][0]["threshold"] == 3
+
 
 # ---------------------------------------------------------------------------
 # Pattern detection
@@ -138,59 +151,59 @@ class TestPatternDetection:
 
     def test_aws_access_key(self):
         text = "key=AKIAIOSFODNN7EXAMPLE"
-        findings = _scan_text(text)
+        findings = _scan_text(text, patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "aws_access_key" in names
 
     def test_github_token(self):
         token = "ghp_" + "A" * 36
-        findings = _scan_text(f"token={token}")
+        findings = _scan_text(f"token={token}", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "github_token" in names
 
     def test_openai_api_key(self):
-        findings = _scan_text("Authorization: Bearer sk-abc123def456ghi789jkl012")
+        findings = _scan_text("Authorization: Bearer sk-abc123def456ghi789jkl012", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "openai_api_key" in names
 
     def test_anthropic_api_key(self):
-        findings = _scan_text("key=sk-ant-abc123def456ghi789jkl012")
+        findings = _scan_text("key=sk-ant-abc123def456ghi789jkl012", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "anthropic_api_key" in names
 
     def test_private_key(self):
-        findings = _scan_text("-----BEGIN RSA PRIVATE KEY-----\nMIIE...")
+        findings = _scan_text("-----BEGIN RSA PRIVATE KEY-----\nMIIE...", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "private_key" in names
 
     def test_ec_private_key(self):
-        findings = _scan_text("-----BEGIN EC PRIVATE KEY-----")
+        findings = _scan_text("-----BEGIN EC PRIVATE KEY-----", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "private_key" in names
 
     def test_jwt(self):
         jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
-        findings = _scan_text(jwt)
+        findings = _scan_text(jwt, patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "jwt" in names
 
     def test_generic_api_key(self):
-        findings = _scan_text('api_key = "abcdefghij1234567890xy"')
+        findings = _scan_text('api_key = "abcdefghij1234567890xy"', patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "generic_api_key" in names
 
     def test_connection_string_postgres(self):
-        findings = _scan_text("postgres://user:pass@host:5432/db")
+        findings = _scan_text("postgres://user:pass@host:5432/db", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "connection_string" in names
 
     def test_connection_string_mongodb(self):
-        findings = _scan_text("mongodb+srv://user:pass@cluster0.abc.mongodb.net/mydb")
+        findings = _scan_text("mongodb+srv://user:pass@cluster0.abc.mongodb.net/mydb", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "connection_string" in names
 
     def test_no_false_positive_on_normal_text(self):
-        findings = _scan_text("Hello, this is a normal request body with no secrets.")
+        findings = _scan_text("Hello, this is a normal request body with no secrets.", patterns=_DEFAULT_COMPILED)
         assert findings == []
 
 
@@ -328,7 +341,7 @@ class TestRedactText:
         secret1 = "ghp_" + "C" * 36
         secret2 = "sk-ant-DDDDDDDDDDDDDDDDDDDDDDDDDDD"
         text = f"a={secret1}&b={secret2}"
-        result = _redact_text(text)
+        result = _redact_text(text, patterns=_DEFAULT_COMPILED)
         assert secret1 not in result
         assert secret2 not in result
         assert "[REDACTED]" in result
@@ -370,8 +383,7 @@ class TestCustomPatterns:
         patterns = _compile_custom_patterns([
             {"name": "corp_secret", "regex": r"CORP_SECRET_[A-Z0-9]{20}"},
         ])
-        all_patterns = BUILTIN_PATTERNS + patterns
-        findings = _scan_text("data=CORP_SECRET_ABCDEFGHIJ1234567890", patterns=all_patterns)
+        findings = _scan_text("data=CORP_SECRET_ABCDEFGHIJ1234567890", patterns=patterns)
         names = [f["pattern"] for f in findings]
         assert "corp_secret" in names
 
@@ -386,13 +398,15 @@ class TestCustomPatterns:
         assert flow.response is not None
         assert flow.response.status_code == 403
 
-    def test_custom_pattern_alongside_hardcoded(self):
+    def test_custom_pattern_alongside_defaults(self):
+        """Custom patterns combined with default patterns all work."""
+        extra = [{"name": "corp_key", "regex": r"CORPKEY_[A-Z0-9]{20}"}]
         addon = _make_addon(
             enabled=True,
             mode="block",
-            custom_patterns=[{"name": "corp_key", "regex": r"CORPKEY_[A-Z0-9]{20}"}],
+            custom_patterns=list(_DEFAULT_RAW) + extra,
         )
-        # Hardcoded pattern still works
+        # Default pattern still works
         flow = _make_flow(body="ghp_" + "A" * 36)
         addon.request(flow)
         assert flow.response is not None
@@ -411,6 +425,31 @@ class TestCustomPatterns:
         ])
         assert patterns == []
 
+    def test_threshold_pattern_compiled(self):
+        patterns = _compile_custom_patterns([
+            {"name": "bulk_test", "regex": r"test_\d+", "threshold": 3},
+        ])
+        assert len(patterns) == 1
+        name, _, threshold = patterns[0]
+        assert name == "bulk_test"
+        assert threshold == 3
+
+    def test_threshold_none_when_absent(self):
+        patterns = _compile_custom_patterns([
+            {"name": "no_threshold", "regex": r"NT_[A-Z]+"},
+        ])
+        assert len(patterns) == 1
+        _, _, threshold = patterns[0]
+        assert threshold is None
+
+    def test_invalid_threshold_treated_as_none(self):
+        patterns = _compile_custom_patterns([
+            {"name": "bad_thresh", "regex": r"BT_[A-Z]+", "threshold": "not_a_number"},
+        ])
+        assert len(patterns) == 1
+        _, _, threshold = patterns[0]
+        assert threshold is None
+
 
 # ---------------------------------------------------------------------------
 # PII pattern detection
@@ -419,57 +458,57 @@ class TestCustomPatterns:
 class TestPIIDetection:
 
     def test_ssn_detected(self):
-        findings = _scan_text("SSN: 123-45-6789")
+        findings = _scan_text("SSN: 123-45-6789", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "ssn" in names
 
     def test_ssn_no_false_positive(self):
         # Phone-like number should not match SSN pattern (different format)
-        findings = _scan_text("call 123-456-7890")
+        findings = _scan_text("call 123-456-7890", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "ssn" not in names
 
     def test_credit_card_detected(self):
-        findings = _scan_text("card: 4111-1111-1111-1111")
+        findings = _scan_text("card: 4111-1111-1111-1111", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "credit_card" in names
 
     def test_credit_card_no_separator(self):
-        findings = _scan_text("card: 4111111111111111")
+        findings = _scan_text("card: 4111111111111111", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "credit_card" in names
 
     def test_credit_card_space_separator(self):
-        findings = _scan_text("card: 4111 1111 1111 1111")
+        findings = _scan_text("card: 4111 1111 1111 1111", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "credit_card" in names
 
     def test_email_bulk_at_threshold(self):
         emails = " ".join(f"user{i}@example.com" for i in range(5))
-        findings = _scan_text(emails)
+        findings = _scan_text(emails, patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "email_bulk" in names
 
     def test_email_bulk_below_threshold(self):
         emails = " ".join(f"user{i}@example.com" for i in range(4))
-        findings = _scan_text(emails)
+        findings = _scan_text(emails, patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "email_bulk" not in names
 
     def test_phone_bulk_at_threshold(self):
         phones = " ".join(f"(555) 000-{i:04d}" for i in range(5))
-        findings = _scan_text(phones)
+        findings = _scan_text(phones, patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "phone_bulk" in names
 
     def test_phone_bulk_below_threshold(self):
         phones = " ".join(f"(555) 000-{i:04d}" for i in range(4))
-        findings = _scan_text(phones)
+        findings = _scan_text(phones, patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "phone_bulk" not in names
 
     def test_single_email_no_flag(self):
-        findings = _scan_text("contact: admin@example.com")
+        findings = _scan_text("contact: admin@example.com", patterns=_DEFAULT_COMPILED)
         names = [f["pattern"] for f in findings]
         assert "email_bulk" not in names
 
@@ -482,79 +521,60 @@ class TestPIIDetection:
 
 
 # ---------------------------------------------------------------------------
-# disabled_patterns
+# Selective patterns (removing patterns from config disables them)
 # ---------------------------------------------------------------------------
 
-class TestDisabledPatterns:
+class TestSelectivePatterns:
 
-    def test_disable_builtin_pattern(self):
-        addon = _make_addon(enabled=True, mode="block", disabled_patterns=["github_token"])
+    def test_removing_pattern_from_config_disables_it(self):
+        """Omitting a pattern from custom_patterns means it won't be detected."""
+        # Use only ssn pattern, no github_token
+        addon = _make_addon(
+            enabled=True,
+            mode="block",
+            custom_patterns=[{"name": "ssn", "regex": "\\b\\d{3}-\\d{2}-\\d{4}\\b"}],
+        )
         flow = _make_flow(body="ghp_" + "A" * 36)
         addon.request(flow)
-        # github_token disabled — should NOT block
+        # github_token not in config — should NOT block
         assert flow.response is None
 
-    def test_other_patterns_still_work_when_one_disabled(self):
-        addon = _make_addon(enabled=True, mode="block", disabled_patterns=["github_token"])
-        flow = _make_flow(body="SSN: 123-45-6789")
+    def test_empty_patterns_detects_nothing(self):
+        addon = _make_addon(enabled=True, mode="block", custom_patterns=[])
+        flow = _make_flow(body="ghp_" + "A" * 36 + " SSN: 123-45-6789")
         addon.request(flow)
-        assert flow.response is not None
-        assert flow.response.status_code == 403
+        assert flow.response is None
 
-    def test_disable_pii_keeps_secrets(self):
-        addon = _make_addon(enabled=True, mode="block", disabled_patterns=["ssn", "credit_card"])
-        # SSN not detected
-        flow_ssn = _make_flow(body="SSN: 123-45-6789")
-        addon.request(flow_ssn)
-        assert flow_ssn.response is None
-        # Secret still detected
+    def test_subset_of_patterns_still_works(self):
+        """Only secrets, no PII."""
+        secrets_only = [p for p in _DEFAULT_RAW if p["name"] in ("github_token", "openai_api_key")]
+        addon = _make_addon(enabled=True, mode="block", custom_patterns=secrets_only)
+        # Secret detected
         flow_secret = _make_flow(body="ghp_" + "A" * 36)
         addon.request(flow_secret)
         assert flow_secret.response is not None
-
-    def test_disable_bulk_pattern(self):
-        addon = _make_addon(enabled=True, mode="block", disabled_patterns=["email_bulk"])
-        emails = " ".join(f"user{i}@example.com" for i in range(10))
-        flow = _make_flow(body=emails)
-        addon.request(flow)
-        assert flow.response is None
-
-    def test_disabled_patterns_loaded_from_config(self, tmp_path):
-        cfg_file = tmp_path / "dlp_config.json"
-        cfg_file.write_text(json.dumps({
-            "enabled": True,
-            "mode": "log",
-            "skip_domains": [],
-            "disabled_patterns": ["jwt", "ssn"],
-            "custom_patterns": [],
-        }))
-        cfg = _load_config(cfg_file)
-        assert cfg["disabled_patterns"] == ["jwt", "ssn"]
-
-    def test_empty_disabled_patterns_default(self, tmp_path):
-        cfg_file = tmp_path / "dlp_config.json"
-        cfg_file.write_text(json.dumps({"enabled": True, "mode": "log"}))
-        cfg = _load_config(cfg_file)
-        assert cfg["disabled_patterns"] == []
+        # PII not detected
+        flow_ssn = _make_flow(body="SSN: 123-45-6789")
+        addon.request(flow_ssn)
+        assert flow_ssn.response is None
 
 
 # ---------------------------------------------------------------------------
-# BUILTIN_PATTERNS contents
+# Default config ships all patterns
 # ---------------------------------------------------------------------------
 
-class TestBuiltinPatterns:
+class TestDefaultConfig:
 
-    def test_builtin_patterns_has_pii(self):
-        names = [name for name, _ in BUILTIN_PATTERNS]
-        assert "ssn" in names
-        assert "credit_card" in names
-
-    def test_builtin_patterns_has_secrets(self):
-        names = [name for name, _ in BUILTIN_PATTERNS]
+    def test_shipped_config_has_all_patterns(self):
+        names = [p["name"] for p in _DEFAULT_RAW]
         assert "aws_access_key" in names
         assert "github_token" in names
-
-    def test_bulk_patterns_exist(self):
-        names = [name for name, _ in _BULK_PATTERNS]
+        assert "ssn" in names
+        assert "credit_card" in names
         assert "email_bulk" in names
         assert "phone_bulk" in names
+
+    def test_shipped_config_compiles_all_patterns(self):
+        """All patterns in shipped config compile successfully with re2."""
+        compiled = _compile_custom_patterns(_DEFAULT_RAW)
+        assert len(compiled) == len(_DEFAULT_RAW)

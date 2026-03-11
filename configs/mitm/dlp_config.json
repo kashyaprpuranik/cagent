@@ -1,7 +1,60 @@
 {
   "enabled": false,
   "mode": "log",
-  "skip_domains": ["api.openai.com", "api.anthropic.com"],
-  "disabled_patterns": [],
-  "custom_patterns": []
+  "skip_domains": [
+    "api.openai.com",
+    "api.anthropic.com"
+  ],
+  "custom_patterns": [
+    {
+      "name": "aws_access_key",
+      "regex": "AKIA[0-9A-Z]{16}"
+    },
+    {
+      "name": "github_token",
+      "regex": "(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}"
+    },
+    {
+      "name": "openai_api_key",
+      "regex": "sk-[A-Za-z0-9_-]{20,}"
+    },
+    {
+      "name": "anthropic_api_key",
+      "regex": "sk-ant-[A-Za-z0-9_-]{20,}"
+    },
+    {
+      "name": "private_key",
+      "regex": "-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+    },
+    {
+      "name": "jwt",
+      "regex": "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"
+    },
+    {
+      "name": "generic_api_key",
+      "regex": "(?i)(?:api_key|apikey|api-key|access_token|auth_token|secret_key)[\\s]*[=:]\\s*['\"]?[A-Za-z0-9_\\-/.]{20,}['\"]?"
+    },
+    {
+      "name": "connection_string",
+      "regex": "(?:mongodb(?:\\+srv)?|postgres(?:ql)?|mysql|redis|amqp)://[^\\s'\"]{10,}"
+    },
+    {
+      "name": "ssn",
+      "regex": "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+    },
+    {
+      "name": "credit_card",
+      "regex": "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b"
+    },
+    {
+      "name": "email_bulk",
+      "regex": "[a-zA-Z0-9_.+-]{1,64}@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+",
+      "threshold": 5
+    },
+    {
+      "name": "phone_bulk",
+      "regex": "\\+?1?[-.\\s]?\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}",
+      "threshold": 5
+    }
+  ]
 }
