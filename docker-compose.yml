@@ -433,7 +433,8 @@ services:
       - no-new-privileges:true
 
     command: >
-      mitmdump
+      sh -c "pip install -q google-re2>=1.1 &&
+      exec mitmdump
       --mode regular
       --listen-port 8080
       --set confdir=/etc/mitmproxy
@@ -441,7 +442,7 @@ services:
       --set upstream_cert=false
       --set connection_strategy=lazy
       -s /etc/mitmproxy/mitm_addon.py
-      -s /etc/mitmproxy/dlp_addon.py
+      -s /etc/mitmproxy/dlp_addon.py"
 
     volumes:
       # Read-write: mitmproxy writes DH params and cert cache to confdir at startup
@@ -571,6 +572,8 @@ services:
       - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://log-store:5080}
       - OPENOBSERVE_USER=${OPENOBSERVE_USER:-admin@cagent.local}
       - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD:-openobserve-local-dev}
+      # OpenTelemetry tracing (opt-in, off by default)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
       # Local admin settings
       - DATA_PLANE_DIR=/app/cagent
 

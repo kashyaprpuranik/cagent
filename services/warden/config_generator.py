@@ -811,6 +811,7 @@ class ConfigGenerator:
             "enabled": False,
             "mode": "log",
             "skip_domains": [],
+            "disabled_patterns": [],
             "custom_patterns": [],
         }
 

@@ -74,6 +74,24 @@ class TestCpDlpPolicyToConfig:
         result = _cp_dlp_policy_to_config({})
         assert result == {}
 
+    def test_disabled_patterns_passthrough(self):
+        from config_sync import _cp_dlp_policy_to_config
+
+        policy = {
+            "enabled": True,
+            "mode": "log",
+            "disabled_patterns": ["ssn", "credit_card", "email_bulk"],
+        }
+        result = _cp_dlp_policy_to_config(policy)
+        assert result["disabled_patterns"] == ["ssn", "credit_card", "email_bulk"]
+
+    def test_disabled_patterns_absent_not_in_result(self):
+        from config_sync import _cp_dlp_policy_to_config
+
+        policy = {"enabled": True}
+        result = _cp_dlp_policy_to_config(policy)
+        assert "disabled_patterns" not in result
+
 
 # ---------------------------------------------------------------------------
 # ConfigGenerator DLP methods
@@ -88,6 +106,7 @@ class TestConfigGeneratorDlp:
         cfg = gen.get_dlp_config()
         assert cfg["enabled"] is False
         assert cfg["mode"] == "log"
+        assert cfg["disabled_patterns"] == []
         assert cfg["custom_patterns"] == []
 
     def test_get_dlp_config_with_cp_override(self):
