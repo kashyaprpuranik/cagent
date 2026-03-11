@@ -299,9 +299,7 @@ See [docs/configuration.md](docs/configuration.md) for detailed configuration in
 - [ ] Improved secret management in standalone mode (encrypted local storage)
 - [ ] Alert rules for security events (gVisor syscall denials, rate limit hits)
 - [ ] Per-path rate limits and credential injection (path-level policies within a domain)
-- [ ] Content policies (egress body inspection, DLP rules to block sensitive data leaving the cell)
 - [ ] Prompt injection protection (detect and block injected instructions in agent inputs/outputs)
-- [ ] Data loss prevention (classify and redact PII, secrets, and proprietary code at the proxy layer)
 
 ## License
 
