@@ -425,7 +425,9 @@ services:
   # credential injection, rate limiting, and path filtering for HTTPS.
   # ===========================================================================
   mitm-proxy:
-    image: ghcr.io/kashyaprpuranik/mitmproxy:10.4.2
+    build:
+      context: ./configs/mitm
+      dockerfile: Dockerfile
     container_name: mitm-proxy
     labels:
       - "cagent.log-collect=true"
@@ -433,8 +435,7 @@ services:
       - no-new-privileges:true
 
     command: >
-      sh -c "pip install -q google-re2>=1.1 &&
-      exec mitmdump
+      mitmdump
       --mode regular
       --listen-port 8080
       --set confdir=/etc/mitmproxy
@@ -442,7 +443,7 @@ services:
       --set upstream_cert=false
       --set connection_strategy=lazy
       -s /etc/mitmproxy/mitm_addon.py
-      -s /etc/mitmproxy/dlp_addon.py"
+      -s /etc/mitmproxy/dlp_addon.py
 
     volumes:
       # Read-write: mitmproxy writes DH params and cert cache to confdir at startup
