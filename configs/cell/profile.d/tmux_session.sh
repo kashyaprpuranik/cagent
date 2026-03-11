@@ -9,7 +9,7 @@
 # =============================================================================
 
 # Skip if auto-attach is disabled
-if [[ "${TMUX_AUTO_ATTACH:-1}" == "0" ]]; then
+if [[ "${TMUX_AUTO_ATTACH:-0}" == "0" ]]; then
     return 0
 fi
 
