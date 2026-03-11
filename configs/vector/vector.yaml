@@ -56,6 +56,8 @@ transforms:
 
       .source = if contains(container, "http-proxy") {
         "envoy"
+      } else if contains(container, "mitm-proxy") {
+        "mitmproxy"
       } else if contains(container, "email-proxy") {
         "email-proxy"
       } else if contains(container, "warden") {
