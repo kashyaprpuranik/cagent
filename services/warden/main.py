@@ -66,6 +66,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from utils import calculate_container_stats
 
+# Inject default OTel fields so the log format works even when tracing is disabled.
+# LoggingInstrumentor sets these to real values when active; we provide fallback "0".
+_old_factory = logging.getLogRecordFactory()
+
+def _otel_record_factory(*args, **kwargs):
+    record = _old_factory(*args, **kwargs)
+    if not hasattr(record, "otelTraceID"):
+        record.otelTraceID = "0"
+    if not hasattr(record, "otelSpanID"):
+        record.otelSpanID = "0"
+    return record
+
+logging.setLogRecordFactory(_otel_record_factory)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
