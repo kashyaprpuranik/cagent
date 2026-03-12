@@ -43,6 +43,8 @@ else:
     CAGENT_CONFIG_PATH = "/etc/cagent/cagent.yaml"
 COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Corefile")
 ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
+ENVOY_CDS_PATH = os.environ.get("ENVOY_CDS_PATH", "/etc/envoy/cds.yaml")
+ENVOY_RDS_PATH = os.environ.get("ENVOY_RDS_PATH", "/etc/envoy/rds.yaml")
 EMAIL_CONFIG_PATH = os.environ.get("EMAIL_CONFIG_PATH", "/etc/cagent/email/accounts.json")
 DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/cagent")
 DLP_CONFIG_PATH = os.path.join(DATA_PLANE_DIR, "configs", "mitm", "dlp_config.json")

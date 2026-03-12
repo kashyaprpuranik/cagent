@@ -22,8 +22,10 @@ from constants import (
     DATAPLANE_MODE,
     DLP_CONFIG_PATH,
     EMAIL_CONFIG_PATH,
+    ENVOY_CDS_PATH,
     ENVOY_CONFIG_PATH,
     ENVOY_CONTAINER_NAME,
+    ENVOY_RDS_PATH,
     DATA_PLANE_DIR,
     docker_client,
 )
@@ -115,6 +117,24 @@ def reload_mitm_proxy():
 
 
 # ---------------------------------------------------------------------------
+# Atomic file writes (for Envoy xDS hot-reload via inotify)
+# ---------------------------------------------------------------------------
+
+
+def _atomic_write(path: str, content: str):
+    """Write content atomically via rename for Envoy inotify-based xDS reload.
+
+    Envoy's watched_directory triggers on MOVED_TO events.  Writing to a temp
+    file then renaming ensures Envoy never reads a partially-written file.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(content)
+    tmp.rename(target)
+
+
+# ---------------------------------------------------------------------------
 # Config state tracking
 # ---------------------------------------------------------------------------
 
@@ -133,7 +153,9 @@ class ConfigState:
     """
 
     def __init__(self):
-        self.envoy_hash: Optional[str] = None
+        self.envoy_bootstrap_hash: Optional[str] = None
+        self.envoy_cds_hash: Optional[str] = None
+        self.envoy_rds_hash: Optional[str] = None
         self.corefile_hash: Optional[str] = None
         self.email_hash: Optional[str] = None
         self.dlp_hash: Optional[str] = None
@@ -174,18 +196,29 @@ def regenerate_configs(
 
         # Generate configs and compute stable hashes (ignoring timestamps)
         corefile_content = config_generator.generate_corefile()
-        envoy_config = config_generator.generate_envoy_config()
-        envoy_yaml = yaml.dump(envoy_config, default_flow_style=False, sort_keys=False)
         email_config = config_generator.generate_email_config()
         dlp_config = config_generator.generate_dlp_config()
 
+        # Envoy xDS: bootstrap (static) + CDS/RDS (dynamic, hot-reloaded)
+        bootstrap = config_generator.generate_envoy_bootstrap()
+        bootstrap_yaml = yaml.dump(bootstrap, default_flow_style=False, sort_keys=False)
+        cds = config_generator.generate_envoy_cds()
+        cds_yaml = yaml.dump(cds, default_flow_style=False, sort_keys=False)
+        rds = config_generator.generate_envoy_rds()
+        rds_yaml = yaml.dump(rds, default_flow_style=False, sort_keys=False)
+
         corefile_hash = _stable_hash(corefile_content)
-        envoy_hash = _stable_hash(envoy_yaml)
+        bootstrap_hash = _stable_hash(bootstrap_yaml)
+        cds_hash = _stable_hash(cds_yaml)
+        rds_hash = _stable_hash(rds_yaml)
         email_hash = _stable_hash(email_config)
         dlp_hash = _stable_hash(dlp_config)
 
         corefile_changed = corefile_hash != config_state.corefile_hash
-        envoy_changed = envoy_hash != config_state.envoy_hash
+        bootstrap_changed = bootstrap_hash != config_state.envoy_bootstrap_hash
+        cds_changed = cds_hash != config_state.envoy_cds_hash
+        rds_changed = rds_hash != config_state.envoy_rds_hash
+        envoy_changed = cds_changed or rds_changed
         email_changed = email_hash != config_state.email_hash
         dlp_changed = dlp_hash != config_state.dlp_hash
 
@@ -194,10 +227,22 @@ def regenerate_configs(
             # CoreDNS auto-reloads via the `reload` plugin — no restart needed
             config_state.corefile_hash = corefile_hash
 
-        if envoy_changed:
-            config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
+        # Write CDS + RDS first so files exist before any bootstrap restart.
+        # Envoy watches these via inotify — no container restart needed.
+        if cds_changed:
+            _atomic_write(ENVOY_CDS_PATH, cds_yaml)
+            config_state.envoy_cds_hash = cds_hash
+
+        if rds_changed:
+            _atomic_write(ENVOY_RDS_PATH, rds_yaml)
+            config_state.envoy_rds_hash = rds_hash
+
+        # Bootstrap only changes on first boot or when listener-level config
+        # changes (rate limit defaults, admin port).  Requires Envoy restart.
+        if bootstrap_changed:
+            config_generator.write_envoy_bootstrap(ENVOY_CONFIG_PATH)
             reload_envoy()
-            config_state.envoy_hash = envoy_hash
+            config_state.envoy_bootstrap_hash = bootstrap_hash
 
         if email_changed:
             config_generator.write_email_config(EMAIL_CONFIG_PATH)
@@ -213,7 +258,8 @@ def regenerate_configs(
         if config_changed:
             config_generator.write_resource_env(ENV_FILE_PATH)
 
-        if corefile_changed or envoy_changed or email_changed or dlp_changed:
+        any_changed = corefile_changed or envoy_changed or bootstrap_changed or email_changed or dlp_changed
+        if any_changed:
             logger.info("Regenerated configs from cagent.yaml")
             # Invalidate domain policy caches only when domain configs changed
             domain_configs_changed = corefile_changed or envoy_changed

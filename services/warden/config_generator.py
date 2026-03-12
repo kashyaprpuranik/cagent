@@ -261,19 +261,16 @@ class ConfigGenerator:
     # Envoy Generation
     # =========================================================================
 
-    def generate_envoy_config(self) -> dict:
-        """Generate Envoy config from cagent.yaml."""
+    def _build_virtual_hosts_and_clusters(self):
+        """Extract virtual hosts and clusters from domain config.
+
+        Returns:
+            Tuple of (virtual_hosts, clusters) for use in both monolithic
+            and xDS config generation.
+        """
         domains = self.get_domains()
         default_rate_limit = self.get_default_rate_limit()
 
-        # Collect credential headers from all domains for ext_authz config
-        credential_headers = {"authorization"}  # always include
-        for entry in domains:
-            cred = entry.get("credential", {})
-            if cred and cred.get("header"):
-                credential_headers.add(cred["header"].lower())
-
-        # Build virtual hosts and clusters
         virtual_hosts = []
         clusters = []
         cluster_names = set()
@@ -444,14 +441,67 @@ class ConfigGenerator:
             }
         )
 
-        # Build full Envoy config
-        config = self._build_envoy_config(
-            virtual_hosts,
-            clusters,
-            default_rate_limit,
-            credential_headers,
-        )
-        return config
+        return virtual_hosts, clusters
+
+    def generate_envoy_config(self) -> dict:
+        """Generate Envoy config from cagent.yaml (monolithic format, for backward compat)."""
+        virtual_hosts, clusters = self._build_virtual_hosts_and_clusters()
+        default_rate_limit = self.get_default_rate_limit()
+        credential_headers = {"authorization"}
+        for entry in self.get_domains():
+            cred = entry.get("credential", {})
+            if cred and cred.get("header"):
+                credential_headers.add(cred["header"].lower())
+        return self._build_envoy_config(virtual_hosts, clusters, default_rate_limit, credential_headers)
+
+    def generate_envoy_bootstrap(self) -> dict:
+        """Generate Envoy bootstrap config with xDS references for hot-reload."""
+        default_rate_limit = self.get_default_rate_limit()
+        return {
+            "admin": {"address": {"socket_address": {"address": "127.0.0.1", "port_value": 9901}}},
+            "static_resources": {
+                "listeners": [self._build_xds_listener(default_rate_limit)],
+                "clusters": [self._build_control_plane_cluster()],
+            },
+            "dynamic_resources": {
+                "cds_config": {
+                    "path_config_source": {
+                        "path": "/etc/envoy/cds.yaml",
+                        "watched_directory": {"path": "/etc/envoy"},
+                    },
+                    "resource_api_version": "V3",
+                },
+            },
+            "layered_runtime": {
+                "layers": [{
+                    "name": "static_layer",
+                    "static_layer": {
+                        "envoy": {"resource_limits": {"listener": {"egress_https": {"connection_limit": 1000}}}}
+                    },
+                }]
+            },
+        }
+
+    def generate_envoy_cds(self) -> dict:
+        """Generate CDS (Cluster Discovery Service) resources for file-based xDS."""
+        _, clusters = self._build_virtual_hosts_and_clusters()
+        return {
+            "resources": [
+                {"@type": "type.googleapis.com/envoy.config.cluster.v3.Cluster", **c}
+                for c in clusters
+            ],
+        }
+
+    def generate_envoy_rds(self) -> dict:
+        """Generate RDS (Route Discovery Service) resources for file-based xDS."""
+        virtual_hosts, _ = self._build_virtual_hosts_and_clusters()
+        return {
+            "resources": [{
+                "@type": "type.googleapis.com/envoy.config.route.v3.RouteConfiguration",
+                "name": "egress_routes",
+                "virtual_hosts": virtual_hosts,
+            }],
+        }
 
     def _build_route_entry(
         self,
@@ -690,6 +740,80 @@ class ConfigGenerator:
             ],
         }
 
+    def _build_xds_listener(self, default_rate_limit: dict) -> dict:
+        """Build HTTPS egress listener with RDS reference for dynamic route updates."""
+        return {
+            "name": "egress_https",
+            "address": {"socket_address": {"address": "0.0.0.0", "port_value": 8443}},
+            "filter_chains": [{
+                "filters": [{
+                    "name": "envoy.filters.network.http_connection_manager",
+                    "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+                        "stat_prefix": "egress_https",
+                        "codec_type": "AUTO",
+                        "access_log": [self._build_access_log()],
+                        "rds": {
+                            "config_source": {
+                                "path_config_source": {
+                                    "path": "/etc/envoy/rds.yaml",
+                                    "watched_directory": {"path": "/etc/envoy"},
+                                },
+                                "resource_api_version": "V3",
+                            },
+                            "route_config_name": "egress_routes",
+                        },
+                        "http_filters": [
+                            self._build_ext_authz_filter_permissive(),
+                            self._build_local_ratelimit_filter(default_rate_limit),
+                            {
+                                "name": "envoy.filters.http.router",
+                                "typed_config": {
+                                    "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
+                                },
+                            },
+                        ],
+                    },
+                }],
+            }],
+        }
+
+    def _build_ext_authz_filter_permissive(self) -> dict:
+        """Build ext_authz filter with permissive upstream headers.
+
+        Used in the xDS bootstrap where credential headers can't be known
+        statically (they depend on which domains are configured).  Safe because
+        warden's ext_authz endpoint controls exactly which headers to inject.
+        """
+        return {
+            "name": "envoy.filters.http.ext_authz",
+            "typed_config": {
+                "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz",
+                "transport_api_version": "V3",
+                "allowed_headers": {
+                    "patterns": [
+                        {"exact": ":authority"},
+                        {"exact": ":method"},
+                        {"exact": ":path"},
+                    ]
+                },
+                "http_service": {
+                    "server_uri": {
+                        "uri": "warden:8080",
+                        "cluster": "control_plane_api",
+                        "timeout": "5s",
+                    },
+                    "path_prefix": "/api/v1/ext-authz",
+                    "authorization_response": {
+                        "allowed_upstream_headers": {
+                            "patterns": [{"prefix": ""}],
+                        }
+                    },
+                },
+                "failure_mode_allow": True,
+            },
+        }
+
     def _build_access_log(self) -> dict:
         """Build access log config."""
         return {
@@ -863,7 +987,7 @@ class ConfigGenerator:
             return False
 
     def write_envoy_config(self, output_path: str) -> bool:
-        """Write generated Envoy config."""
+        """Write generated Envoy config (monolithic format)."""
         try:
             config = self.generate_envoy_config()
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -884,6 +1008,27 @@ class ConfigGenerator:
             return True
         except Exception as e:
             logger.error(f"Failed to write Envoy config: {e}")
+            return False
+
+    def write_envoy_bootstrap(self, output_path: str) -> bool:
+        """Write Envoy bootstrap config (xDS mode)."""
+        try:
+            config = self.generate_envoy_bootstrap()
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            yaml_content = yaml.dump(config, default_flow_style=False, sort_keys=False)
+            header = f"""# =============================================================================
+# Envoy Bootstrap - Auto-generated (xDS mode)
+# Generated: {datetime.utcnow().isoformat()}Z
+# Routes and clusters are loaded dynamically via CDS/RDS files
+# DO NOT EDIT - changes will be overwritten
+# =============================================================================
+
+"""
+            Path(output_path).write_text(header + yaml_content)
+            logger.info(f"Wrote Envoy bootstrap to {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write Envoy bootstrap: {e}")
             return False
 
     def write_resource_env(self, env_path: str) -> bool:

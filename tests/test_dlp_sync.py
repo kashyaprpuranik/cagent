@@ -164,6 +164,8 @@ class TestRegenerateConfigsDlp:
         self.yaml_path.write_text("domains:\n  - domain: example.com\n")
         self.corefile_path = tmp_path / "Corefile"
         self.envoy_path = tmp_path / "envoy.yaml"
+        self.cds_path = tmp_path / "cds.yaml"
+        self.rds_path = tmp_path / "rds.yaml"
         self.email_path = tmp_path / "accounts.json"
         self.dlp_path = tmp_path / "dlp_config.json"
         self.env_path = tmp_path / ".env"
@@ -181,6 +183,8 @@ class TestRegenerateConfigsDlp:
         # Patch output paths
         with patch("config_sync.COREDNS_COREFILE_PATH", str(self.corefile_path)), \
              patch("config_sync.ENVOY_CONFIG_PATH", str(self.envoy_path)), \
+             patch("config_sync.ENVOY_CDS_PATH", str(self.cds_path)), \
+             patch("config_sync.ENVOY_RDS_PATH", str(self.rds_path)), \
              patch("config_sync.EMAIL_CONFIG_PATH", str(self.email_path)), \
              patch("config_sync.DLP_CONFIG_PATH", str(self.dlp_path)), \
              patch("config_sync.ENV_FILE_PATH", str(self.env_path)), \
@@ -211,6 +215,8 @@ class TestRegenerateConfigsDlp:
 
         with patch("config_sync.COREDNS_COREFILE_PATH", str(self.corefile_path)), \
              patch("config_sync.ENVOY_CONFIG_PATH", str(self.envoy_path)), \
+             patch("config_sync.ENVOY_CDS_PATH", str(self.cds_path)), \
+             patch("config_sync.ENVOY_RDS_PATH", str(self.rds_path)), \
              patch("config_sync.EMAIL_CONFIG_PATH", str(self.email_path)), \
              patch("config_sync.DLP_CONFIG_PATH", str(self.dlp_path)), \
              patch("config_sync.ENV_FILE_PATH", str(self.env_path)), \
@@ -240,6 +246,8 @@ class TestRegenerateConfigsDlp:
 
         with patch("config_sync.COREDNS_COREFILE_PATH", str(self.corefile_path)), \
              patch("config_sync.ENVOY_CONFIG_PATH", str(self.envoy_path)), \
+             patch("config_sync.ENVOY_CDS_PATH", str(self.cds_path)), \
+             patch("config_sync.ENVOY_RDS_PATH", str(self.rds_path)), \
              patch("config_sync.EMAIL_CONFIG_PATH", str(self.email_path)), \
              patch("config_sync.DLP_CONFIG_PATH", str(self.dlp_path)), \
              patch("config_sync.ENV_FILE_PATH", str(self.env_path)), \
