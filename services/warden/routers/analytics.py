@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import subprocess
@@ -6,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, docker_client
+from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, DATA_PLANE_DIR, docker_client
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -50,233 +51,14 @@ def _oo_query(sql: str, window_hours: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Widget query functions
+# Widget registry (loaded from JSON config)
 # ---------------------------------------------------------------------------
 
-def _query_blocked_domains_top(params: dict) -> list[list]:
-    window_hours = params.get("window_hours", 24)
-    limit = params.get("limit", 10)
-    sql = (
-        'SELECT authority as domain, COUNT(*) as count, MAX(_timestamp) as last_seen '
-        'FROM "cagent_logs" '
-        "WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 "
-        'GROUP BY authority '
-        'ORDER BY count DESC '
-        f'LIMIT {int(limit)}'
-    )
-    rows = _oo_query(sql, window_hours)
-    return [[r.get("domain", ""), r.get("count", 0), r.get("last_seen", "")] for r in rows]
-
-
-def _query_blocked_timeseries(params: dict) -> list[list]:
-    window_hours = params.get("window_hours", 24)
-    buckets = params.get("buckets", 12)
-    interval_min = max(1, int(window_hours * 60 / buckets))
-    sql = (
-        f"SELECT FLOOR(_timestamp / {interval_min * 60 * 1_000_000}) * {interval_min * 60 * 1_000_000} as bucket, "
-        'COUNT(*) as count '
-        'FROM "cagent_logs" '
-        "WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 "
-        'GROUP BY bucket '
-        'ORDER BY bucket'
-    )
-    rows = _oo_query(sql, window_hours)
-    return [[r.get("bucket", 0), r.get("count", 0)] for r in rows]
-
-
-def _query_bandwidth_by_domain(params: dict) -> list[list]:
-    window_hours = params.get("window_hours", 24)
-    limit = params.get("limit", 10)
-    sql = (
-        'SELECT authority as domain, '
-        'SUM(bytes_sent) as bytes_sent, '
-        'SUM(bytes_received) as bytes_received, '
-        'SUM(bytes_sent) + SUM(bytes_received) as total_bytes '
-        'FROM "cagent_logs" '
-        "WHERE source = 'envoy' AND log_type = 'access' "
-        'GROUP BY authority '
-        'ORDER BY total_bytes DESC '
-        f'LIMIT {int(limit)}'
-    )
-    rows = _oo_query(sql, window_hours)
-    return [
-        [r.get("domain", ""), r.get("bytes_sent", 0), r.get("bytes_received", 0), r.get("total_bytes", 0)]
-        for r in rows
-    ]
-
-
-def _query_requests_by_status(params: dict) -> list[list]:
-    window_hours = params.get("window_hours", 24)
-    sql = (
-        'SELECT response_code as status_code, COUNT(*) as count '
-        'FROM "cagent_logs" '
-        "WHERE source = 'envoy' AND log_type = 'access' "
-        'GROUP BY response_code '
-        'ORDER BY count DESC'
-    )
-    rows = _oo_query(sql, window_hours)
-    return [[r.get("status_code", 0), r.get("count", 0)] for r in rows]
-
-
-def _query_request_volume(params: dict) -> list[list]:
-    window_hours = params.get("window_hours", 24)
-    buckets = params.get("buckets", 12)
-    interval_min = max(1, int(window_hours * 60 / buckets))
-    interval_us = interval_min * 60 * 1_000_000
-    sql = (
-        f'SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, '
-        'COUNT(*) as total, '
-        "SUM(CASE WHEN response_code = 403 THEN 1 ELSE 0 END) as blocked, "
-        "SUM(CASE WHEN rate_limited IS NOT NULL AND rate_limited != '' THEN 1 ELSE 0 END) as rate_limited "
-        'FROM "cagent_logs" '
-        "WHERE source = 'envoy' AND log_type = 'access' "
-        'GROUP BY bucket '
-        'ORDER BY bucket'
-    )
-    rows = _oo_query(sql, window_hours)
-    return [
-        [r.get("bucket", 0), r.get("total", 0), r.get("blocked", 0), r.get("rate_limited", 0)]
-        for r in rows
-    ]
-
-
-def _query_latency_by_domain(params: dict) -> list[list]:
-    window_hours = params.get("window_hours", 24)
-    limit = params.get("limit", 10)
-    sql = (
-        'SELECT authority as domain, '
-        'COUNT(*) as request_count, '
-        'AVG(duration_ms) as avg_ms, '
-        'MAX(duration_ms) as max_ms '
-        'FROM "cagent_logs" '
-        "WHERE source = 'envoy' AND log_type = 'access' "
-        'GROUP BY authority '
-        'ORDER BY avg_ms DESC '
-        f'LIMIT {int(limit)}'
-    )
-    rows = _oo_query(sql, window_hours)
-    return [
-        [
-            r.get("domain", ""),
-            r.get("request_count", 0),
-            round(r.get("avg_ms", 0), 1),
-            r.get("max_ms", 0),
-        ]
-        for r in rows
-    ]
-
-
-def _query_credential_usage(params: dict) -> list[list]:
-    window_hours = params.get("window_hours", 24)
-    limit = params.get("limit", 10)
-    sql = (
-        'SELECT authority as domain, '
-        'COUNT(*) as total_requests, '
-        "SUM(CASE WHEN credential_injected = 'true' THEN 1 ELSE 0 END) as injected_count "
-        'FROM "cagent_logs" '
-        "WHERE source = 'envoy' AND log_type = 'access' "
-        'GROUP BY authority '
-        'ORDER BY injected_count DESC '
-        f'LIMIT {int(limit)}'
-    )
-    rows = _oo_query(sql, window_hours)
-    return [
-        [r.get("domain", ""), r.get("total_requests", 0), r.get("injected_count", 0)]
-        for r in rows
-    ]
-
-
-# ---------------------------------------------------------------------------
-# Widget registry
-# ---------------------------------------------------------------------------
-
-WIDGET_REGISTRY: dict[str, dict[str, Any]] = {
-    "blocked_domains_top": {
-        "name": "Top Blocked Domains",
-        "category": "security",
-        "visualization": "bar_horizontal",
-        "default_params": {"window_hours": 24, "limit": 10},
-        "columns": [
-            {"name": "domain", "type": "string", "role": "dimension"},
-            {"name": "count", "type": "number", "role": "measure"},
-            {"name": "last_seen", "type": "datetime", "role": "info"},
-        ],
-        "query_fn": _query_blocked_domains_top,
-    },
-    "blocked_timeseries": {
-        "name": "Blocked Requests Over Time",
-        "category": "security",
-        "visualization": "line",
-        "default_params": {"window_hours": 24, "buckets": 12},
-        "columns": [
-            {"name": "bucket", "type": "datetime", "role": "dimension"},
-            {"name": "count", "type": "number", "role": "measure"},
-        ],
-        "query_fn": _query_blocked_timeseries,
-    },
-    "bandwidth_by_domain": {
-        "name": "Bandwidth by Domain",
-        "category": "performance",
-        "visualization": "bar_horizontal",
-        "default_params": {"window_hours": 24, "limit": 10},
-        "columns": [
-            {"name": "domain", "type": "string", "role": "dimension"},
-            {"name": "bytes_sent", "type": "number", "role": "measure"},
-            {"name": "bytes_received", "type": "number", "role": "measure"},
-            {"name": "total_bytes", "type": "number", "role": "measure"},
-        ],
-        "query_fn": _query_bandwidth_by_domain,
-    },
-    "requests_by_status": {
-        "name": "Requests by Status Code",
-        "category": "overview",
-        "visualization": "donut",
-        "default_params": {"window_hours": 24},
-        "columns": [
-            {"name": "status_code", "type": "number", "role": "dimension"},
-            {"name": "count", "type": "number", "role": "measure"},
-        ],
-        "query_fn": _query_requests_by_status,
-    },
-    "request_volume": {
-        "name": "Request Volume",
-        "category": "overview",
-        "visualization": "stacked_area",
-        "default_params": {"window_hours": 24, "buckets": 12},
-        "columns": [
-            {"name": "bucket", "type": "datetime", "role": "dimension"},
-            {"name": "total", "type": "number", "role": "measure"},
-            {"name": "blocked", "type": "number", "role": "measure"},
-            {"name": "rate_limited", "type": "number", "role": "measure"},
-        ],
-        "query_fn": _query_request_volume,
-    },
-    "latency_by_domain": {
-        "name": "Latency Percentiles by Domain",
-        "category": "performance",
-        "visualization": "table",
-        "default_params": {"window_hours": 24, "limit": 10},
-        "columns": [
-            {"name": "domain", "type": "string", "role": "dimension"},
-            {"name": "request_count", "type": "number", "role": "info"},
-            {"name": "avg_ms", "type": "number", "role": "measure"},
-            {"name": "max_ms", "type": "number", "role": "measure"},
-        ],
-        "query_fn": _query_latency_by_domain,
-    },
-    "credential_usage": {
-        "name": "Credential Injection by Domain",
-        "category": "security",
-        "visualization": "bar_horizontal",
-        "default_params": {"window_hours": 24, "limit": 10},
-        "columns": [
-            {"name": "domain", "type": "string", "role": "dimension"},
-            {"name": "total_requests", "type": "number", "role": "measure"},
-            {"name": "injected_count", "type": "number", "role": "measure"},
-        ],
-        "query_fn": _query_credential_usage,
-    },
-}
+_WIDGETS_JSON_PATH = Path(DATA_PLANE_DIR) / "configs" / "widgets.json"
+if not _WIDGETS_JSON_PATH.exists():
+    # Fallback for test environments where DATA_PLANE_DIR differs
+    _WIDGETS_JSON_PATH = Path(__file__).resolve().parents[3] / "configs" / "widgets.json"
+WIDGET_REGISTRY: dict[str, dict[str, Any]] = json.loads(_WIDGETS_JSON_PATH.read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +102,14 @@ def query_widget(body: WidgetQueryRequest):
     if body.params:
         merged_params.update(body.params)
 
+    # Compute derived interval params for timeseries widgets
+    if "buckets" in merged_params:
+        window_hours = merged_params["window_hours"]
+        buckets = merged_params["buckets"]
+        interval_min = max(1, int(window_hours * 60 / buckets))
+        merged_params["interval_min"] = interval_min
+        merged_params["interval_us"] = interval_min * 60 * 1_000_000
+
     meta: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -332,7 +122,25 @@ def query_widget(body: WidgetQueryRequest):
         meta["note"] = "OpenObserve unavailable, returning empty results"
         rows: list = []
     else:
-        rows = spec["query_fn"](merged_params)
+        # Format SQL template with int params only (validated as ints)
+        int_params = {k: int(v) for k, v in merged_params.items() if isinstance(v, (int, float))}
+        sql = spec["sql"].format(**int_params)
+        window_hours = merged_params["window_hours"]
+        raw_rows = _oo_query(sql, window_hours)
+
+        # Generic row mapper: extract column values in order, round floats
+        columns = spec["columns"]
+        rows = []
+        for r in raw_rows:
+            row = []
+            for col in columns:
+                val = r.get(col["name"])
+                if val is None:
+                    val = "" if col["type"] == "string" else 0
+                if col["type"] == "number" and isinstance(val, float):
+                    val = round(val, 1)
+                row.append(val)
+            rows.append(row)
 
     return {
         "widget": widget_id,

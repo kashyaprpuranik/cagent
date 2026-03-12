@@ -37,7 +37,7 @@ def test_widget_registry_has_all_types():
 
 
 def test_widget_registry_entries_have_required_keys():
-    required = {"name", "category", "visualization", "default_params", "columns", "query_fn"}
+    required = {"name", "category", "visualization", "default_params", "columns", "sql"}
     for widget_id, spec in analytics.WIDGET_REGISTRY.items():
         missing = required - set(spec.keys())
         assert not missing, f"Widget {widget_id} missing keys: {missing}"
