@@ -330,14 +330,3 @@ domains:
 #         allowed_senders: ["*@myserver.com"]
 #         sends_per_hour: 20
 #         reads_per_hour: 100
-
-
-# =============================================================================
-# Internal Services (Docker DNS)
-# =============================================================================
-# These resolve via Docker's internal DNS (127.0.0.11)
-internal_services:
-  - backend
-  - envoy
-  - dns-filter
-  - vector

@@ -584,6 +584,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Main config file (read-write for admin UI config editing)
       - ./configs/cagent.yaml:/etc/cagent/cagent.yaml
+      # Connected-mode config (minimal — no domains/resources/security)
+      - ./configs/cagent_connected.yaml:/etc/cagent/cagent_connected.yaml
       # CoreDNS config directory (warden overwrites Corefile here)
       - ./configs/coredns:/etc/coredns
       # HTTP proxy config volume (warden writes generated config here)

@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
 
 # Config generator instance (shared with main.py via this module)
-config_generator = ConfigGenerator(CAGENT_CONFIG_PATH)
+config_generator = ConfigGenerator(CAGENT_CONFIG_PATH, mode=DATAPLANE_MODE)
 
 # Synced domain policies with credentials (populated by sync_config in connected mode)
 _synced_domain_policies: list[dict] = []
