@@ -6,6 +6,7 @@ sync_config / regenerate_configs without circular imports.
 
 import hashlib
 import logging
+from pathlib import Path
 from typing import Optional
 
 import docker
@@ -23,7 +24,6 @@ from constants import (
     EMAIL_CONFIG_PATH,
     ENVOY_CONFIG_PATH,
     ENVOY_CONTAINER_NAME,
-    MITM_PROXY_CONTAINER_NAME,
     DATA_PLANE_DIR,
     docker_client,
 )
@@ -98,18 +98,19 @@ def reload_email_proxy():
         return False
 
 
-def restart_mitm_proxy():
-    """Restart mitm-proxy container to pick up new DLP config."""
+def reload_mitm_proxy():
+    """Trigger mitmproxy live-reload by touching the DLP addon script.
+
+    mitmproxy's watchdog detects the mtime change on the -s script file
+    and re-instantiates the addon, which re-reads dlp_config.json.
+    """
     try:
-        container = docker_client.containers.get(MITM_PROXY_CONTAINER_NAME)
-        container.restart(timeout=10)
-        logger.info("Restarted mitm-proxy to apply new DLP config")
+        addon_path = Path(DLP_CONFIG_PATH).parent / "dlp_addon.py"
+        addon_path.touch()
+        logger.info("Touched %s to trigger mitmproxy live-reload", addon_path)
         return True
-    except docker.errors.NotFound:
-        logger.debug(f"MITM-proxy container '{MITM_PROXY_CONTAINER_NAME}' not found (not running)")
-        return False
     except Exception as e:
-        logger.error(f"Failed to restart mitm-proxy: {e}")
+        logger.error(f"Failed to touch DLP addon for reload: {e}")
         return False
 
 
@@ -205,7 +206,7 @@ def regenerate_configs(
 
         if dlp_changed:
             config_generator.write_dlp_config(DLP_CONFIG_PATH)
-            restart_mitm_proxy()
+            reload_mitm_proxy()
             config_state.dlp_hash = dlp_hash
 
         # Always update resource env vars when config changes
