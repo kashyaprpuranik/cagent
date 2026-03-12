@@ -83,9 +83,23 @@ transforms:
         .bytes_sent = parsed.bytes_sent
         .bytes_received = parsed.bytes_received
         .request_id = parsed.request_id
+        .authority = parsed.authority
+        .credential_injected = parsed.credential_injected
+        .rate_limited = parsed.rate_limited
+        .response_flags = parsed.response_flags
 
         if .source == "envoy" && .method != "" {
           .log_type = "access"
+        }
+
+        # DLP violation events from mitm-proxy
+        if .source == "mitmproxy" && parsed.event == "dlp_violation" {
+          .log_type = "dlp_violation"
+          .dlp_mode = parsed.mode
+          .dlp_host = parsed.host
+          .dlp_path = parsed.path
+          .dlp_method = parsed.method
+          .dlp_findings = encode_json(parsed.findings)
         }
       }
 

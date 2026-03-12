@@ -2,15 +2,14 @@ import json
 import logging
 import re
 import subprocess
-import time
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
-import docker
 import yaml
-from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, docker_client
+from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, DATA_PLANE_DIR, docker_client
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -21,185 +20,140 @@ router = APIRouter()
 _VALID_DOMAIN_RE = re.compile(r"^[a-zA-Z0-9._][a-zA-Z0-9._-]*$")
 
 
-def _get_envoy_logs(hours: int) -> str:
-    """Read Envoy access log lines from Docker for the given time window."""
-    try:
-        container = docker_client.containers.get(ENVOY_CONTAINER_NAME)
-    except docker.errors.NotFound:
-        raise HTTPException(404, f"Container not found: {ENVOY_CONTAINER_NAME}")
+# ---------------------------------------------------------------------------
+# OpenObserve helpers (lazy import so module loads even without OO)
+# ---------------------------------------------------------------------------
 
-    since = int(time.time()) - hours * 3600
+def _oo_available() -> bool:
+    """Check if OpenObserve client is importable and healthy."""
     try:
-        return container.logs(stdout=True, stderr=False, since=since).decode("utf-8")
+        from openobserve_client import is_openobserve_healthy
+
+        return is_openobserve_healthy()
+    except ImportError:
+        return False
+
+
+def _oo_query(sql: str, window_hours: int) -> list[dict]:
+    """Run a SQL query against OpenObserve for the given time window."""
+    try:
+        from openobserve_client import datetime_to_us, now_us, query_openobserve
+
+        end_us = now_us()
+        start_us = end_us - window_hours * 3600 * 1_000_000
+        return query_openobserve(sql, start_us, end_us)
+    except ImportError:
+        logger.warning("openobserve_client not available")
+        return []
     except Exception as e:
-        raise HTTPException(500, f"Failed to read logs: {e}")
+        logger.warning("OpenObserve query failed: %s", e)
+        return []
 
 
-def _parse_log_entries(raw: str):
-    """Parse all JSON access log lines from raw Envoy output."""
-    for line in raw.strip().split("\n"):
-        if not line:
-            continue
-        json_start = line.find("{")
-        if json_start == -1:
-            continue
-        try:
-            yield json.loads(line[json_start:])
-        except (json.JSONDecodeError, ValueError):
-            continue
+# ---------------------------------------------------------------------------
+# Widget registry (loaded from JSON config)
+# ---------------------------------------------------------------------------
+
+_WIDGETS_JSON_PATH = Path(DATA_PLANE_DIR) / "configs" / "widgets.json"
+if not _WIDGETS_JSON_PATH.exists():
+    # Fallback for test environments where DATA_PLANE_DIR differs
+    _WIDGETS_JSON_PATH = Path(__file__).resolve().parents[3] / "configs" / "widgets.json"
+WIDGET_REGISTRY: dict[str, dict[str, Any]] = json.loads(_WIDGETS_JSON_PATH.read_text())
 
 
-@router.get("/analytics/blocked-domains")
-def get_blocked_domains(
-    hours: int = Query(default=1, le=24),
-    limit: int = Query(default=10, le=50),
-):
-    """Get top blocked (403) domains from Envoy access logs."""
-    raw = _get_envoy_logs(hours)
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
 
-    domain_counts: dict[str, int] = defaultdict(int)
-    domain_last_seen: dict[str, str] = {}
+class WidgetQueryRequest(BaseModel):
+    type: str
+    params: dict[str, Any] | None = None
 
-    for entry in _parse_log_entries(raw):
-        try:
-            code = int(entry.get("response_code", 0))
-        except (ValueError, TypeError):
-            continue
 
-        if code != 403:
-            continue
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
-        authority = entry.get("authority", "")
-        if not authority or authority == "-":
-            continue
+@router.get("/analytics/types")
+def get_widget_types():
+    """Return list of available widget types."""
+    widgets = []
+    for widget_id, spec in WIDGET_REGISTRY.items():
+        widgets.append({
+            "type": widget_id,
+            "name": spec["name"],
+            "category": spec["category"],
+            "visualization": spec["visualization"],
+            "default_params": spec["default_params"],
+            "columns": spec["columns"],
+        })
+    return {"widgets": widgets}
 
-        domain_counts[authority] += 1
-        ts = entry.get("timestamp", "")
-        if ts:
-            domain_last_seen[authority] = ts
 
-    sorted_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+@router.post("/analytics/query")
+def query_widget(body: WidgetQueryRequest):
+    """Execute a widget query and return columnar data."""
+    widget_id = body.type
+    if widget_id not in WIDGET_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unknown widget type: {widget_id}")
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-    blocked_domains = [
-        {
-            "domain": domain,
-            "count": count,
-            "last_seen": domain_last_seen.get(domain, now_iso),
-        }
-        for domain, count in sorted_domains
-    ]
+    spec = WIDGET_REGISTRY[widget_id]
+    merged_params = {**spec["default_params"]}
+    if body.params:
+        merged_params.update(body.params)
+
+    # Compute derived interval params for timeseries widgets
+    if "buckets" in merged_params:
+        window_hours = merged_params["window_hours"]
+        buckets = merged_params["buckets"]
+        interval_min = max(1, int(window_hours * 60 / buckets))
+        merged_params["interval_min"] = interval_min
+        merged_params["interval_us"] = interval_min * 60 * 1_000_000
+
+    meta: dict[str, Any] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Include relevant params in meta
+    for key in ("window_hours", "limit", "buckets"):
+        if key in merged_params:
+            meta[key] = merged_params[key]
+
+    if not _oo_available():
+        meta["note"] = "OpenObserve unavailable, returning empty results"
+        rows: list = []
+    else:
+        # Format SQL template with int params only (validated as ints)
+        int_params = {k: int(v) for k, v in merged_params.items() if isinstance(v, (int, float))}
+        sql = spec["sql"].format(**int_params)
+        window_hours = merged_params["window_hours"]
+        raw_rows = _oo_query(sql, window_hours)
+
+        # Generic row mapper: extract column values in order, round floats
+        columns = spec["columns"]
+        rows = []
+        for r in raw_rows:
+            row = []
+            for col in columns:
+                val = r.get(col["name"])
+                if val is None:
+                    val = "" if col["type"] == "string" else 0
+                if col["type"] == "number" and isinstance(val, float):
+                    val = round(val, 1)
+                row.append(val)
+            rows.append(row)
 
     return {
-        "blocked_domains": blocked_domains,
-        "window_hours": hours,
+        "widget": widget_id,
+        "visualization": spec["visualization"],
+        "columns": spec["columns"],
+        "rows": rows,
+        "meta": meta,
     }
 
 
-@router.get("/analytics/blocked-domains/timeseries")
-def get_blocked_timeseries(
-    hours: int = Query(default=1, ge=1, le=24),
-    buckets: int = Query(default=12, ge=2, le=60),
-):
-    """Get blocked request counts bucketed by time interval."""
-    raw = _get_envoy_logs(hours)
-
-    end_time = datetime.now(timezone.utc)
-    start_time = end_time - timedelta(hours=hours)
-    bucket_duration = (end_time - start_time) / buckets
-
-    # Initialize buckets
-    bucket_counts = [0] * buckets
-    bucket_starts = [start_time + bucket_duration * i for i in range(buckets)]
-    bucket_ends = [start_time + bucket_duration * (i + 1) for i in range(buckets)]
-
-    for entry in _parse_log_entries(raw):
-        try:
-            code = int(entry.get("response_code", 0))
-        except (ValueError, TypeError):
-            continue
-        if code != 403:
-            continue
-
-        ts_str = entry.get("timestamp", "")
-        if not ts_str:
-            continue
-        try:
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            continue
-
-        # Find bucket index
-        if ts < start_time or ts > end_time:
-            continue
-        idx = int((ts - start_time) / bucket_duration)
-        if idx >= buckets:
-            idx = buckets - 1
-        bucket_counts[idx] += 1
-
-    bucket_minutes = int(bucket_duration.total_seconds() / 60)
-
-    return {
-        "buckets": [
-            {
-                "start": bucket_starts[i].isoformat(),
-                "end": bucket_ends[i].isoformat(),
-                "count": bucket_counts[i],
-            }
-            for i in range(buckets)
-        ],
-        "window_hours": hours,
-        "bucket_minutes": bucket_minutes,
-    }
-
-
-@router.get("/analytics/bandwidth")
-def get_bandwidth(
-    hours: int = Query(default=1, ge=1, le=24),
-    limit: int = Query(default=10, le=50),
-):
-    """Get bandwidth usage per domain from Envoy access logs."""
-    raw = _get_envoy_logs(hours)
-
-    domain_stats: dict[str, dict] = defaultdict(lambda: {"bytes_sent": 0, "bytes_received": 0, "request_count": 0})
-
-    for entry in _parse_log_entries(raw):
-        authority = entry.get("authority", "")
-        if not authority or authority == "-":
-            continue
-
-        try:
-            bs = int(entry.get("bytes_sent", 0))
-            br = int(entry.get("bytes_received", 0))
-        except (ValueError, TypeError):
-            continue
-
-        stats = domain_stats[authority]
-        stats["bytes_sent"] += bs
-        stats["bytes_received"] += br
-        stats["request_count"] += 1
-
-    # Sort by total bytes descending
-    sorted_domains = sorted(
-        domain_stats.items(),
-        key=lambda x: x[1]["bytes_sent"] + x[1]["bytes_received"],
-        reverse=True,
-    )[:limit]
-
-    return {
-        "domains": [
-            {
-                "domain": domain,
-                "bytes_sent": stats["bytes_sent"],
-                "bytes_received": stats["bytes_received"],
-                "total_bytes": stats["bytes_sent"] + stats["bytes_received"],
-                "request_count": stats["request_count"],
-            }
-            for domain, stats in sorted_domains
-        ],
-        "window_hours": hours,
-    }
-
+# ---------------------------------------------------------------------------
+# Diagnose endpoint (kept as-is)
+# ---------------------------------------------------------------------------
 
 @router.get("/analytics/diagnose")
 def diagnose_domain(
@@ -250,28 +204,34 @@ def diagnose_domain(
         logger.debug("DNS resolution failed for domain lookup: %s", e)
         dns_result = "unknown"
 
-    # Get recent log entries for this domain
-    recent_requests = []
+    # Get recent log entries for this domain via OpenObserve
+    recent_requests: list[dict] = []
     try:
-        raw = _get_envoy_logs(1)
-        for entry in _parse_log_entries(raw):
-            authority = entry.get("authority", "")
-            if authority != domain:
-                continue
-            recent_requests.append(
-                {
-                    "timestamp": entry.get("timestamp", ""),
-                    "method": entry.get("method", ""),
-                    "path": entry.get("path", ""),
-                    "response_code": int(entry.get("response_code", 0)),
-                    "response_flags": entry.get("response_flags", ""),
-                    "duration_ms": int(entry.get("duration_ms", 0)),
-                }
-            )
-        # Keep only last 5, most recent first
-        recent_requests = recent_requests[-5:][::-1]
+        from openobserve_client import _STREAM, datetime_to_us, now_us, query_openobserve
+
+        end_us = now_us()
+        start_us = end_us - 1 * 3600 * 1_000_000  # last 1 hour
+        escaped = domain.replace("'", "''")
+        sql = (
+            f'SELECT _timestamp, method, path, response_code, response_flags, duration_ms '
+            f'FROM "{_STREAM}" '
+            f"WHERE source = 'envoy' AND log_type = 'access' AND authority = '{escaped}' "
+            f'ORDER BY _timestamp DESC LIMIT 5'
+        )
+        rows = query_openobserve(sql, start_us, end_us)
+        for r in rows:
+            recent_requests.append({
+                "timestamp": r.get("_timestamp", ""),
+                "method": r.get("method", ""),
+                "path": r.get("path", ""),
+                "response_code": int(r.get("response_code", 0)),
+                "response_flags": r.get("response_flags", ""),
+                "duration_ms": int(r.get("duration_ms", 0)),
+            })
+    except ImportError:
+        logger.warning("openobserve_client not available for diagnose")
     except Exception as e:
-        logger.warning("Failed to parse recent requests: %s", e)
+        logger.warning("Failed to query recent requests: %s", e)
 
     # Build human-readable diagnosis
     parts = []
