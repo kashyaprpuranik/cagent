@@ -163,6 +163,10 @@ graph TD
         end
 
         Warden --> cellnet
+
+        Email["📧 Email Proxy (:8025) — beta<br/>IMAP/SMTP · per-recipient policy"]
+
+        style Email stroke-dasharray: 5 5
     end
 ```
 
