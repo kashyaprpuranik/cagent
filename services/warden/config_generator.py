@@ -238,6 +238,7 @@ class ConfigGenerator:
             [
                 "# Catch-all: health, metrics, and block non-allowlisted domains",
                 ". {",
+                "    reload 5s",
                 "    health :8080",
                 "    prometheus :9153",
                 "",
