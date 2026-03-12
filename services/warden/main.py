@@ -126,7 +126,8 @@ def _get_current_policy_label(container) -> Optional[str]:
         container.reload()
         labels = container.labels or {}
         return labels.get("cagent.runtime_policy") or labels.get("cagent.seccomp_profile")
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to get runtime policy for container: %s", e)
         return None
 
 
@@ -406,7 +407,8 @@ def _infra_containers_ready() -> bool:
             c = docker_client.containers.get(name)
             if c.status != "running":
                 return False
-        except Exception:
+        except Exception as e:
+            logger.debug("Infra container %r not ready: %s", name, e)
             return False
     return True
 
@@ -1084,9 +1086,8 @@ if FRONTEND_DIR.exists():
 
             if file_path.exists() and file_path.is_file():
                 return FileResponse(file_path)
-        except Exception:
-            # Path resolution error or other issue
-            pass
+        except Exception as e:
+            logger.debug("SPA path resolution error for %r: %s", path, e)
 
         return FileResponse(FRONTEND_DIR / "index.html")
 
