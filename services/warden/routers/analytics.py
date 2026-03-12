@@ -246,7 +246,8 @@ def diagnose_domain(
                 dns_result = "resolved"
         else:
             dns_result = "NXDOMAIN"
-    except Exception:
+    except Exception as e:
+        logger.debug("DNS resolution failed for domain lookup: %s", e)
         dns_result = "unknown"
 
     # Get recent log entries for this domain

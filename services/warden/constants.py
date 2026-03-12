@@ -1,9 +1,12 @@
 """Constants for warden."""
 
+import logging
 import os
 from typing import List
 
 import docker
+
+_logger = logging.getLogger(__name__)
 
 # Docker client (single instance shared across the service)
 docker_client = docker.from_env()
@@ -216,6 +219,7 @@ def discover_cell_containers() -> List:
         container = docker_client.containers.get(CELL_CONTAINER_FALLBACK)
         return [container]
     except docker.errors.NotFound:
+        _logger.debug("Fallback cell container %r not found", CELL_CONTAINER_FALLBACK)
         return []
     except docker.errors.APIError as e:
         _logger.error(f"Docker API error during fallback discovery: {e}")
@@ -245,7 +249,8 @@ def _container_exists(name: str) -> bool:
     try:
         docker_client.containers.get(name)
         return True
-    except Exception:
+    except Exception as e:
+        _logger.debug("Error checking container %r existence: %s", name, e)
         return False
 
 

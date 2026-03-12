@@ -21,7 +21,8 @@ def is_openobserve_healthy() -> bool:
     try:
         resp = requests.get(f"{OPENOBSERVE_URL}/healthz", timeout=3)
         return resp.status_code == 200
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as e:
+        logger.debug("OpenObserve health check failed: %s", e)
         return False
 
 
