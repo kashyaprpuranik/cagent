@@ -158,13 +158,13 @@ graph TD
             Cell["🔒 Cell"]
             HP["HTTP(S) Proxy<br/>egress controls"]
             DNS["DNS Filter<br/>allowlist"]
+            Email["📧 Email Proxy — beta<br/>IMAP/SMTP · per-recipient policy"]
             Cell --> HP
             Cell --> DNS
+            Cell --> Email
         end
 
         Warden --> cellnet
-
-        Email["📧 Email Proxy (:8025) — beta<br/>IMAP/SMTP · per-recipient policy"]
 
         style Email stroke-dasharray: 5 5
     end
