@@ -189,7 +189,7 @@ def regenerate_configs(
 
         if corefile_changed:
             config_generator.write_corefile(COREDNS_COREFILE_PATH)
-            restart_coredns()
+            # CoreDNS auto-reloads via the `reload` plugin — no restart needed
             config_state.corefile_hash = corefile_hash
 
         if envoy_changed:
