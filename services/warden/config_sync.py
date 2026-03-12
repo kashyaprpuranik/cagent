@@ -21,7 +21,6 @@ from constants import (
     DATAPLANE_MODE,
     DLP_CONFIG_PATH,
     EMAIL_CONFIG_PATH,
-    EMAIL_PROXY_CONTAINER_NAME,
     ENVOY_CONFIG_PATH,
     ENVOY_CONTAINER_NAME,
     MITM_PROXY_CONTAINER_NAME,
@@ -82,18 +81,20 @@ def reload_envoy():
         return False
 
 
-def restart_email_proxy():
-    """Restart email-proxy container to pick up new config."""
+def reload_email_proxy():
+    """Tell email-proxy to reload its config from disk."""
     try:
-        container = docker_client.containers.get(EMAIL_PROXY_CONTAINER_NAME)
-        container.restart(timeout=10)
-        logger.info("Restarted email-proxy to apply new config")
-        return True
-    except docker.errors.NotFound:
-        logger.debug(f"Email-proxy container '{EMAIL_PROXY_CONTAINER_NAME}' not found (not running)")
+        resp = requests.post("http://10.200.2.40:8025/reload", timeout=5)
+        if resp.status_code == 200:
+            logger.info("Email-proxy reloaded config: %s", resp.json())
+            return True
+        logger.warning("Email-proxy reload returned %s", resp.status_code)
+        return False
+    except requests.exceptions.ConnectionError:
+        logger.debug("Email-proxy not reachable (not running)")
         return False
     except Exception as e:
-        logger.error(f"Failed to restart email-proxy: {e}")
+        logger.error(f"Failed to reload email-proxy: {e}")
         return False
 
 
@@ -199,7 +200,7 @@ def regenerate_configs(
 
         if email_changed:
             config_generator.write_email_config(EMAIL_CONFIG_PATH)
-            restart_email_proxy()
+            reload_email_proxy()
             config_state.email_hash = email_hash
 
         if dlp_changed:
