@@ -285,7 +285,7 @@ class TestEnvoyXdsGeneration:
         ext_authz = hcm["http_filters"][0]
         assert ext_authz["name"] == "envoy.filters.http.ext_authz"
         patterns = ext_authz["typed_config"]["http_service"]["authorization_response"]["allowed_upstream_headers"]["patterns"]
-        assert {"prefix": ""} in patterns
+        assert {"safe_regex": {"google_re2": {}, "regex": ".*"}} in patterns
 
     def test_cds_has_domain_clusters(self, configs_dir):
         """CDS should contain typed cluster resources."""

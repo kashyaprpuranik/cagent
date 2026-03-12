@@ -458,6 +458,7 @@ class ConfigGenerator:
         """Generate Envoy bootstrap config with xDS references for hot-reload."""
         default_rate_limit = self.get_default_rate_limit()
         return {
+            "node": {"id": "cagent-proxy", "cluster": "cagent"},
             "admin": {"address": {"socket_address": {"address": "127.0.0.1", "port_value": 9901}}},
             "static_resources": {
                 "listeners": [self._build_xds_listener(default_rate_limit)],
@@ -661,6 +662,7 @@ class ConfigGenerator:
     ) -> dict:
         """Build complete Envoy config."""
         return {
+            "node": {"id": "cagent-proxy", "cluster": "cagent"},
             "admin": {"address": {"socket_address": {"address": "127.0.0.1", "port_value": 9901}}},
             "static_resources": {
                 "listeners": [
@@ -806,7 +808,7 @@ class ConfigGenerator:
                     "path_prefix": "/api/v1/ext-authz",
                     "authorization_response": {
                         "allowed_upstream_headers": {
-                            "patterns": [{"prefix": ""}],
+                            "patterns": [{"safe_regex": {"google_re2": {}, "regex": ".*"}}],
                         }
                     },
                 },
