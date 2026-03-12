@@ -239,6 +239,8 @@ def regenerate_configs(
 def _cp_policy_to_domain_entry(policy: dict) -> dict:
     """Convert a CP domain policy response to a cagent.yaml domain entry."""
     entry = {"domain": policy["domain"]}
+    if policy.get("alias"):
+        entry["alias"] = policy["alias"]
     if policy.get("allowed_paths"):
         entry["allowed_paths"] = policy["allowed_paths"]
     if policy.get("requests_per_minute") is not None:
