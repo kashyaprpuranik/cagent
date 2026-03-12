@@ -10,12 +10,7 @@ Returns 200 with credential headers when available.
 import logging
 import time
 
-import requests
-from constants import (
-    CONTROL_PLANE_TOKEN,
-    CONTROL_PLANE_URL,
-    DATAPLANE_MODE,
-)
+from constants import CONTROL_PLANE_TOKEN, CONTROL_PLANE_URL, DATAPLANE_MODE
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
@@ -48,19 +43,56 @@ def invalidate_cache():
     _policy_cache.clear()
 
 
-def _get_policy_connected(domain: str):
-    """Get full domain policy from control plane."""
-    try:
-        resp = requests.get(
-            f"{CONTROL_PLANE_URL}/api/v1/domain-policies/for-domain",
-            params={"domain": domain},
-            headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
-            timeout=5,
-        )
-        if resp.status_code == 200:
-            return resp.json()
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"CP unreachable for policy lookup: {e}")
+def _match_domain(pattern: str, domain: str) -> bool:
+    """Match domain against pattern (supports wildcard prefix)."""
+    if not pattern:
+        return False
+    pattern = pattern.lower()
+    if pattern.startswith("*."):
+        suffix = pattern[1:]  # .github.com
+        return domain.endswith(suffix) or domain == pattern[2:]
+    return domain == pattern
+
+
+def _lookup_synced_policy(domain: str) -> dict | None:
+    """Look up a domain in the synced policies from config_sync.
+
+    Returns a policy dict with header_name/header_value if credentials exist,
+    or None if no match found.
+    """
+    from config_sync import get_synced_domain_policies
+
+    policies = get_synced_domain_policies()
+    if not policies:
+        return None
+
+    # Check for alias match first (devbox.local)
+    if domain.endswith(".devbox.local"):
+        alias = domain.replace(".devbox.local", "")
+        for policy in policies:
+            if policy.get("alias", "").lower() == alias:
+                result = {
+                    "matched": True,
+                    "domain": policy["domain"],
+                    "header_name": policy.get("credential_header"),
+                    "header_value": policy.get("credential_value"),
+                }
+                if policy["domain"].startswith("*."):
+                    result["target_domain"] = policy["domain"][2:]
+                else:
+                    result["target_domain"] = policy["domain"]
+                return result
+
+    # Exact match first, then wildcard
+    for policy in policies:
+        if _match_domain(policy.get("domain", ""), domain):
+            return {
+                "matched": True,
+                "domain": policy["domain"],
+                "header_name": policy.get("credential_header"),
+                "header_value": policy.get("credential_value"),
+            }
+
     return None
 
 
@@ -82,15 +114,18 @@ def _get_policy(domain: str) -> dict:
         _cache_set(domain_lower, policy)
         return policy
 
-    # Connected mode: try CP first
+    # Connected mode: look up from synced policies (no CP call needed)
     if DATAPLANE_MODE == "connected" and CONTROL_PLANE_URL and CONTROL_PLANE_TOKEN:
-        policy = _get_policy_connected(domain_lower)
+        policy = _lookup_synced_policy(domain_lower)
         if policy:
             _cache_set(domain_lower, policy)
             return policy
-        # Fall through to standalone on CP failure
+        # No match in synced policies — return unmatched (no credentials)
+        policy = {"matched": False, "domain": domain_lower}
+        _cache_set(domain_lower, policy)
+        return policy
 
-    # Standalone mode or CP fallback
+    # Standalone mode
     policy = _build_standalone_policy(domain_lower)
     _cache_set(domain_lower, policy)
     return policy

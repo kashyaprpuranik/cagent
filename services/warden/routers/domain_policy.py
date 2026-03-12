@@ -14,7 +14,6 @@ import secrets
 import time
 from pathlib import Path
 
-import requests
 import yaml
 from constants import (
     CAGENT_CONFIG_PATH,
@@ -168,29 +167,18 @@ def get_domain_policy(
             _cache_set(domain_lower, policy)
 
         elif DATAPLANE_MODE == "connected" and CONTROL_PLANE_URL and CONTROL_PLANE_TOKEN:
-            # Forward to control plane
-            try:
-                resp = requests.get(
-                    f"{CONTROL_PLANE_URL}/api/v1/domain-policies/for-domain",
-                    params={"domain": domain_lower},
-                    headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
-                    timeout=5,
-                )
-                if resp.status_code == 200:
-                    policy = resp.json()
-                    _cache_set(domain_lower, policy)
-                else:
-                    logger.warning(f"CP domain-policy lookup failed: {resp.status_code}, falling back to cagent.yaml")
-                    # Fallback
-                    policy = _build_standalone_policy(domain_lower)
-                    _cache_set(domain_lower, policy)
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"CP unreachable for domain-policy: {e}, falling back to cagent.yaml")
-                # Fallback
-                policy = _build_standalone_policy(domain_lower)
-                _cache_set(domain_lower, policy)
+            # Look up from synced policies (no CP call needed)
+            from routers.ext_authz import _lookup_synced_policy
+
+            synced = _lookup_synced_policy(domain_lower)
+            if synced:
+                policy = synced
+            else:
+                # No match in synced policies — return unmatched
+                policy = {"matched": False, "domain": domain_lower}
+            _cache_set(domain_lower, policy)
         else:
-            # Standalone mode or CP fallback
+            # Standalone mode
             policy = _build_standalone_policy(domain_lower)
             _cache_set(domain_lower, policy)
 
