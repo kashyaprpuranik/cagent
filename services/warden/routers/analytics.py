@@ -58,9 +58,7 @@ _WIDGETS_JSON_PATH = Path(DATA_PLANE_DIR) / "configs" / "widgets.json"
 if not _WIDGETS_JSON_PATH.exists():
     # Fallback for test environments where DATA_PLANE_DIR differs
     _WIDGETS_JSON_PATH = Path(__file__).resolve().parents[3] / "configs" / "widgets.json"
-_CONFIG: dict[str, Any] = json.loads(_WIDGETS_JSON_PATH.read_text())
-WIDGET_REGISTRY: dict[str, dict[str, Any]] = _CONFIG["widgets"]
-ALERT_REGISTRY: dict[str, dict[str, Any]] = _CONFIG.get("alerts", {})
+WIDGET_REGISTRY: dict[str, dict[str, Any]] = json.loads(_WIDGETS_JSON_PATH.read_text())
 
 
 # ---------------------------------------------------------------------------

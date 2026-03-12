@@ -1015,14 +1015,17 @@ def alert_loop(stop_event: Optional[threading.Event] = None):
     # Start from 60 minutes ago on first run
     _last_alert_check_us = int((time.time() - 3600) * 1_000_000)
 
-    from routers.analytics import ALERT_REGISTRY
+    _alerts_path = Path(DATA_PLANE_DIR) / "configs" / "alerts.json"
+    if not _alerts_path.exists():
+        _alerts_path = Path(__file__).resolve().parents[1] / "configs" / "alerts.json"
+    alert_registry: dict = json.loads(_alerts_path.read_text())
 
     while not (stop_event and stop_event.is_set()):
         try:
             now_us = int(time.time() * 1_000_000)
             alerts: list[dict] = []
 
-            for alert_id, alert_def in ALERT_REGISTRY.items():
+            for alert_id, alert_def in alert_registry.items():
                 sql = alert_def["sql"].format(last_check_us=_last_alert_check_us)
                 rows = _query_oo_alerts(sql, _last_alert_check_us, now_us)
                 if not rows:

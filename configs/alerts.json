@@ -1,0 +1,9 @@
+{
+  "dlp_detection": {
+    "event_type": "dlp_detection",
+    "severity": "warning",
+    "title": "DLP: {count} {pattern} detections on {domain}",
+    "message": "Mode: {mode}, Pattern: {pattern}, Count: {count}",
+    "sql": "SELECT dlp_host as domain, json_extract(dlp_findings, '$[0].pattern') as pattern, COUNT(*) as count, dlp_mode as mode FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' AND _timestamp > {last_check_us} GROUP BY dlp_host, pattern, dlp_mode ORDER BY count DESC LIMIT 50"
+  }
+}

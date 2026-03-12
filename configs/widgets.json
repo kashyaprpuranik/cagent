@@ -1,123 +1,112 @@
 {
-  "widgets": {
-    "blocked_domains_top": {
-      "name": "Top Blocked Domains",
-      "category": "security",
-      "visualization": "bar_horizontal",
-      "default_params": {"window_hours": 24, "limit": 10},
-      "columns": [
-        {"name": "domain", "type": "string", "role": "dimension"},
-        {"name": "count", "type": "number", "role": "measure"},
-        {"name": "last_seen", "type": "datetime", "role": "info"}
-      ],
-      "sql": "SELECT authority as domain, COUNT(*) as count, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 GROUP BY authority ORDER BY count DESC LIMIT {limit}"
-    },
-    "blocked_timeseries": {
-      "name": "Blocked Requests Over Time",
-      "category": "security",
-      "visualization": "line",
-      "default_params": {"window_hours": 24, "buckets": 12},
-      "columns": [
-        {"name": "bucket", "type": "datetime", "role": "dimension"},
-        {"name": "count", "type": "number", "role": "measure"}
-      ],
-      "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 GROUP BY bucket ORDER BY bucket"
-    },
-    "bandwidth_by_domain": {
-      "name": "Bandwidth by Domain",
-      "category": "performance",
-      "visualization": "bar_horizontal",
-      "default_params": {"window_hours": 24, "limit": 10},
-      "columns": [
-        {"name": "domain", "type": "string", "role": "dimension"},
-        {"name": "bytes_sent", "type": "number", "role": "measure"},
-        {"name": "bytes_received", "type": "number", "role": "measure"},
-        {"name": "total_bytes", "type": "number", "role": "measure"}
-      ],
-      "sql": "SELECT authority as domain, SUM(bytes_sent) as bytes_sent, SUM(bytes_received) as bytes_received, SUM(bytes_sent) + SUM(bytes_received) as total_bytes FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY total_bytes DESC LIMIT {limit}"
-    },
-    "requests_by_status": {
-      "name": "Requests by Status Code",
-      "category": "overview",
-      "visualization": "donut",
-      "default_params": {"window_hours": 24},
-      "columns": [
-        {"name": "status_code", "type": "number", "role": "dimension"},
-        {"name": "count", "type": "number", "role": "measure"}
-      ],
-      "sql": "SELECT response_code as status_code, COUNT(*) as count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY response_code ORDER BY count DESC"
-    },
-    "request_volume": {
-      "name": "Request Volume",
-      "category": "overview",
-      "visualization": "stacked_area",
-      "default_params": {"window_hours": 24, "buckets": 12},
-      "columns": [
-        {"name": "bucket", "type": "datetime", "role": "dimension"},
-        {"name": "total", "type": "number", "role": "measure"},
-        {"name": "blocked", "type": "number", "role": "measure"},
-        {"name": "rate_limited", "type": "number", "role": "measure"}
-      ],
-      "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as total, SUM(CASE WHEN response_code = 403 THEN 1 ELSE 0 END) as blocked, SUM(CASE WHEN rate_limited IS NOT NULL AND rate_limited != '' THEN 1 ELSE 0 END) as rate_limited FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY bucket ORDER BY bucket"
-    },
-    "latency_by_domain": {
-      "name": "Latency Percentiles by Domain",
-      "category": "performance",
-      "visualization": "table",
-      "default_params": {"window_hours": 24, "limit": 10},
-      "columns": [
-        {"name": "domain", "type": "string", "role": "dimension"},
-        {"name": "request_count", "type": "number", "role": "info"},
-        {"name": "avg_ms", "type": "number", "role": "measure"},
-        {"name": "max_ms", "type": "number", "role": "measure"}
-      ],
-      "sql": "SELECT authority as domain, COUNT(*) as request_count, AVG(duration_ms) as avg_ms, MAX(duration_ms) as max_ms FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY avg_ms DESC LIMIT {limit}"
-    },
-    "credential_usage": {
-      "name": "Credential Injection by Domain",
-      "category": "security",
-      "visualization": "bar_horizontal",
-      "default_params": {"window_hours": 24, "limit": 10},
-      "columns": [
-        {"name": "domain", "type": "string", "role": "dimension"},
-        {"name": "total_requests", "type": "number", "role": "measure"},
-        {"name": "injected_count", "type": "number", "role": "measure"}
-      ],
-      "sql": "SELECT authority as domain, COUNT(*) as total_requests, SUM(CASE WHEN credential_injected = 'true' THEN 1 ELSE 0 END) as injected_count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY injected_count DESC LIMIT {limit}"
-    },
-    "dlp_detections": {
-      "name": "DLP Detections",
-      "category": "security",
-      "visualization": "table",
-      "default_params": {"window_hours": 24, "limit": 20},
-      "columns": [
-        {"name": "domain", "type": "string", "role": "dimension"},
-        {"name": "pattern", "type": "string", "role": "dimension"},
-        {"name": "count", "type": "number", "role": "measure"},
-        {"name": "mode", "type": "string", "role": "info"},
-        {"name": "last_seen", "type": "datetime", "role": "info"}
-      ],
-      "sql": "SELECT dlp_host as domain, json_extract(dlp_findings, '$[0].pattern') as pattern, COUNT(*) as count, dlp_mode as mode, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY dlp_host, pattern, dlp_mode ORDER BY count DESC LIMIT {limit}"
-    },
-    "dlp_timeseries": {
-      "name": "DLP Detections Over Time",
-      "category": "security",
-      "visualization": "line",
-      "default_params": {"window_hours": 24, "buckets": 12},
-      "columns": [
-        {"name": "bucket", "type": "datetime", "role": "dimension"},
-        {"name": "count", "type": "number", "role": "measure"}
-      ],
-      "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as count FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY bucket ORDER BY bucket"
-    }
+  "blocked_domains_top": {
+    "name": "Top Blocked Domains",
+    "category": "security",
+    "visualization": "bar_horizontal",
+    "default_params": {"window_hours": 24, "limit": 10},
+    "columns": [
+      {"name": "domain", "type": "string", "role": "dimension"},
+      {"name": "count", "type": "number", "role": "measure"},
+      {"name": "last_seen", "type": "datetime", "role": "info"}
+    ],
+    "sql": "SELECT authority as domain, COUNT(*) as count, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 GROUP BY authority ORDER BY count DESC LIMIT {limit}"
   },
-  "alerts": {
-    "dlp_detection": {
-      "event_type": "dlp_detection",
-      "severity": "warning",
-      "title": "DLP: {count} {pattern} detections on {domain}",
-      "message": "Mode: {mode}, Pattern: {pattern}, Count: {count}",
-      "sql": "SELECT dlp_host as domain, json_extract(dlp_findings, '$[0].pattern') as pattern, COUNT(*) as count, dlp_mode as mode FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' AND _timestamp > {last_check_us} GROUP BY dlp_host, pattern, dlp_mode ORDER BY count DESC LIMIT 50"
-    }
+  "blocked_timeseries": {
+    "name": "Blocked Requests Over Time",
+    "category": "security",
+    "visualization": "line",
+    "default_params": {"window_hours": 24, "buckets": 12},
+    "columns": [
+      {"name": "bucket", "type": "datetime", "role": "dimension"},
+      {"name": "count", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 GROUP BY bucket ORDER BY bucket"
+  },
+  "bandwidth_by_domain": {
+    "name": "Bandwidth by Domain",
+    "category": "performance",
+    "visualization": "bar_horizontal",
+    "default_params": {"window_hours": 24, "limit": 10},
+    "columns": [
+      {"name": "domain", "type": "string", "role": "dimension"},
+      {"name": "bytes_sent", "type": "number", "role": "measure"},
+      {"name": "bytes_received", "type": "number", "role": "measure"},
+      {"name": "total_bytes", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT authority as domain, SUM(bytes_sent) as bytes_sent, SUM(bytes_received) as bytes_received, SUM(bytes_sent) + SUM(bytes_received) as total_bytes FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY total_bytes DESC LIMIT {limit}"
+  },
+  "requests_by_status": {
+    "name": "Requests by Status Code",
+    "category": "overview",
+    "visualization": "donut",
+    "default_params": {"window_hours": 24},
+    "columns": [
+      {"name": "status_code", "type": "number", "role": "dimension"},
+      {"name": "count", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT response_code as status_code, COUNT(*) as count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY response_code ORDER BY count DESC"
+  },
+  "request_volume": {
+    "name": "Request Volume",
+    "category": "overview",
+    "visualization": "stacked_area",
+    "default_params": {"window_hours": 24, "buckets": 12},
+    "columns": [
+      {"name": "bucket", "type": "datetime", "role": "dimension"},
+      {"name": "total", "type": "number", "role": "measure"},
+      {"name": "blocked", "type": "number", "role": "measure"},
+      {"name": "rate_limited", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as total, SUM(CASE WHEN response_code = 403 THEN 1 ELSE 0 END) as blocked, SUM(CASE WHEN rate_limited IS NOT NULL AND rate_limited != '' THEN 1 ELSE 0 END) as rate_limited FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY bucket ORDER BY bucket"
+  },
+  "latency_by_domain": {
+    "name": "Latency Percentiles by Domain",
+    "category": "performance",
+    "visualization": "table",
+    "default_params": {"window_hours": 24, "limit": 10},
+    "columns": [
+      {"name": "domain", "type": "string", "role": "dimension"},
+      {"name": "request_count", "type": "number", "role": "info"},
+      {"name": "avg_ms", "type": "number", "role": "measure"},
+      {"name": "max_ms", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT authority as domain, COUNT(*) as request_count, AVG(duration_ms) as avg_ms, MAX(duration_ms) as max_ms FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY avg_ms DESC LIMIT {limit}"
+  },
+  "credential_usage": {
+    "name": "Credential Injection by Domain",
+    "category": "security",
+    "visualization": "bar_horizontal",
+    "default_params": {"window_hours": 24, "limit": 10},
+    "columns": [
+      {"name": "domain", "type": "string", "role": "dimension"},
+      {"name": "total_requests", "type": "number", "role": "measure"},
+      {"name": "injected_count", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT authority as domain, COUNT(*) as total_requests, SUM(CASE WHEN credential_injected = 'true' THEN 1 ELSE 0 END) as injected_count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY injected_count DESC LIMIT {limit}"
+  },
+  "dlp_detections": {
+    "name": "DLP Detections",
+    "category": "security",
+    "visualization": "table",
+    "default_params": {"window_hours": 24, "limit": 20},
+    "columns": [
+      {"name": "domain", "type": "string", "role": "dimension"},
+      {"name": "pattern", "type": "string", "role": "dimension"},
+      {"name": "count", "type": "number", "role": "measure"},
+      {"name": "mode", "type": "string", "role": "info"},
+      {"name": "last_seen", "type": "datetime", "role": "info"}
+    ],
+    "sql": "SELECT dlp_host as domain, json_extract(dlp_findings, '$[0].pattern') as pattern, COUNT(*) as count, dlp_mode as mode, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY dlp_host, pattern, dlp_mode ORDER BY count DESC LIMIT {limit}"
+  },
+  "dlp_timeseries": {
+    "name": "DLP Detections Over Time",
+    "category": "security",
+    "visualization": "line",
+    "default_params": {"window_hours": 24, "buckets": 12},
+    "columns": [
+      {"name": "bucket", "type": "datetime", "role": "dimension"},
+      {"name": "count", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as count FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY bucket ORDER BY bucket"
   }
 }
