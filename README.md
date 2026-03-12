@@ -90,8 +90,8 @@ Lightweight setup with just 3 containers. Edit `cagent.yaml` and run the config 
 graph TD
     subgraph cellnet["cell-net (isolated)"]
         Cell["🔒 Cell<br/>Isolated network · no direct internet<br/>All HTTP(S) via proxy · DNS via filter"]
-        HP["HTTP(S) Proxy<br/>~50MB"]
-        DNS["DNS Filter<br/>~20MB"]
+        HP["HTTP(S) Proxy"]
+        DNS["DNS Filter"]
         Cell --> HP
         Cell --> DNS
     end
