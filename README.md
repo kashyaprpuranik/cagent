@@ -86,23 +86,15 @@ Run with local configuration - ideal for local use of one cell.
 
 Lightweight setup with just 3 containers. Edit `cagent.yaml` and run the config generator, or edit raw `coredns/Corefile` and `envoy/envoy.yaml` directly for advanced use. Ideal for simple static domain policies on one cell.
 
-```
-┌─────────────────────────────────────────────────────┐
-│                 cell-net (isolated)                  │
-│                                                     │
-│  ┌───────────────────────────────────────────────┐  │
-│  │                     Cell                      │  │
-│  │  - Isolated network (no direct internet)      │  │
-│  │  - All HTTP(S) via HTTP Proxy                 │  │
-│  │  - DNS via DNS Filter                         │  │
-│  └───────────────────────────────────────────────┘  │
-│                │                   │                 │
-│                ▼                   ▼                 │
-│         ┌───────────┐       ┌───────────┐           │
-│         │HTTP Proxy │       │DNS Filter │           │
-│         │  (~50MB)  │       │  (~20MB)  │           │
-│         └───────────┘       └───────────┘           │
-└─────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph cellnet["cell-net (isolated)"]
+        Cell["🔒 Cell<br/>Isolated network · no direct internet<br/>All HTTP(S) via proxy · DNS via filter"]
+        HP["HTTP(S) Proxy"]
+        DNS["DNS Filter"]
+        Cell --> HP
+        Cell --> DNS
+    end
 ```
 
 ```bash
@@ -117,29 +109,21 @@ docker compose --profile dev up -d
 
 Adds warden (watches `cagent.yaml`) and local admin UI for browser-based management and observability. Ideal for complex and changing domain policies on one cell.
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│                          DATA PLANE                           │
-│                                                               │
-│  ┌──────────────────────────────────────────┐                 │
-│  │       Warden (:8081)                     │                 │
-│  │  - Admin UI (config, terminal, logs)     │                 │
-│  │  - Watches cagent.yaml, regenerates      │                 │
-│  │    DNS filter + HTTP proxy configs       │                 │
-│  └──────────────┬───────────────────────────┘                 │
-│                 │                                              │
-│  ┌──────────────┼──────────────────────────────────────────┐  │
-│  │              │         cell-net (isolated)               │  │
-│  │    ┌─────────┴────────────────────────────────────┐     │  │
-│  │    │                    Cell                       │     │  │
-│  │    └──────────────────────────────────────────────┘     │  │
-│  │          │             │                │               │  │
-│  │   ┌──────┴──────┐ ┌───┴────────┐ ┌─────┴───────┐      │  │
-│  │   │ MITM Proxy  │ │ HTTP Proxy │ │ DNS Filter  │      │  │
-│  │   │ (HTTPS TLS) │ │ (controls) │ │ (allowlist) │      │  │
-│  │   └─────────────┘ └────────────┘ └─────────────┘      │  │
-│  └─────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph dp["DATA PLANE"]
+        Warden["🛡️ Warden (:8081)<br/>Admin UI · config editor · terminal · logs<br/>Watches cagent.yaml · regenerates configs"]
+
+        subgraph cellnet["cell-net (isolated)"]
+            Cell["🔒 Cell"]
+            HP["HTTP(S) Proxy<br/>egress controls"]
+            DNS["DNS Filter<br/>allowlist"]
+            Cell --> HP
+            Cell --> DNS
+        end
+
+        Warden --> cellnet
+    end
 ```
 
 ```bash
@@ -160,34 +144,30 @@ docker compose --profile dev --profile admin up -d
 
 Adds log collection and a local log store for standalone deployments. Vector collects logs from all containers and ships them to OpenObserve (local log analytics) and local files. The warden queries OpenObserve for the traffic analytics dashboard. Configure additional sinks (S3, Elasticsearch) in `configs/vector/sinks/standalone.yaml`.
 
-```
-┌───────────────────────────────────────────────────────────────────┐
-│                           DATA PLANE                               │
-│                                                                    │
-│  ┌──────────────────────────┐  ┌────────────┐  ┌───────────────┐  │
-│  │   Warden (:8081)         │  │Log Shipper │  │  Log Store    │  │
-│  │   admin UI, config sync  │  │  (Vector)  │─►│ (OpenObserve) │  │
-│  │                          │  │            │  │  30d retention │  │
-│  │   queries log store ────────────────────────►│               │  │
-│  └──────────────┬───────────┘  │  also ──►file │  │  │
-│                 │              └────────────┘  └───────────────┘  │
-│  ┌──────────────┼──────────────────────────────────────────────┐  │
-│  │              │         cell-net (isolated)                   │  │
-│  │    ┌─────────┴────────────────────────────────────┐         │  │
-│  │    │                    Cell                       │         │  │
-│  │    └──────────────────────────────────────────────┘         │  │
-│  │          │             │                │                    │  │
-│  │   ┌──────┴──────┐ ┌───┴────────┐ ┌─────┴───────┐          │  │
-│  │   │ MITM Proxy  │ │ HTTP Proxy │ │ DNS Filter  │          │  │
-│  │   └─────────────┘ └────────────┘ └─────────────┘          │  │
-│  └─────────────────────────────────────────────────────────────┘  │
-│                                                                    │
-│  Optional:                                                         │
-│  ┌──────────────────────────────────────────┐                      │
-│  │      Email Proxy (:8025) - beta          │                      │
-│  │  - IMAP/SMTP with per-recipient policy   │                      │
-│  └──────────────────────────────────────────┘                      │
-└───────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph dp["DATA PLANE"]
+        Warden["🛡️ Warden (:8081)<br/>Admin UI · config sync"]
+        Vector["📋 Log Shipper (Vector)<br/>also writes to file"]
+        OO["📊 Log Store (OpenObserve)<br/>30d retention"]
+
+        Vector --> OO
+        Warden -- "queries" --> OO
+
+        subgraph cellnet["cell-net (isolated)"]
+            Cell["🔒 Cell"]
+            HP["HTTP(S) Proxy<br/>egress controls"]
+            DNS["DNS Filter<br/>allowlist"]
+            Email["📧 Email Proxy — beta<br/>IMAP/SMTP · per-recipient policy"]
+            Cell --> HP
+            Cell --> DNS
+            Cell --> Email
+        end
+
+        Warden --> cellnet
+
+        style Email stroke-dasharray: 5 5
+    end
 ```
 
 ```bash
@@ -227,39 +207,33 @@ For centralized management of multiple data planes, connect to a [control plane]
 - **Centralized log querying** — the control plane queries each DP's local OpenObserve via warden for traffic analytics
 - **OAuth authentication** — GitHub/Google login, API tokens, and IP ACL enforcement
 
-```
-                                  ┌──────────────────────────────┐
-                                  │        Control Plane          │
-                                  │                               │
-                                  │  Admin UI ── API ── Postgres  │
-                                  │               │               │
-                                  └───────────────┼───────────────┘
-                                                  │
-                          heartbeat/poll (outbound)│log queries (inbound
-                          config sync              │  via mTLS)
-                                                  │
-┌─────────────────────────────────────────────────┼──────────────────┐
-│                         DATA PLANE              │                   │
-│                                                 │                   │
-│  ┌──────────────────────────┐                   │                   │
-│  │   Warden                 │◄──────────────────┘                   │
-│  │   config sync, heartbeat │                                       │
-│  │                          │  ┌────────────┐  ┌───────────────┐   │
-│  │   queries log store ───────────────────────►│  Log Store    │   │
-│  │                          │  │Log Shipper │─►│ (OpenObserve) │   │
-│  └──────────────┬───────────┘  │  (Vector)  │  │  30d retention │   │
-│                 │              │  also ──►file │               │   │
-│  ┌──────────────┼─────────────┘────────────┘  └───────────────┘   │
-│  │              │         cell-net (isolated)                       │
-│  │    ┌─────────┴────────────────────────────────────┐             │
-│  │    │                    Cell                       │             │
-│  │    └──────────────────────────────────────────────┘             │
-│  │          │             │                │                        │
-│  │   ┌──────┴──────┐ ┌───┴────────┐ ┌─────┴───────┐              │
-│  │   │ MITM Proxy  │ │ HTTP Proxy │ │ DNS Filter  │              │
-│  │   └─────────────┘ └────────────┘ └─────────────┘              │
-│  └─────────────────────────────────────────────────────────────────┘
-└────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph cp["CONTROL PLANE"]
+        UI["Admin UI"] --- API["API"] --- DB["Postgres"]
+    end
+
+    subgraph dp["DATA PLANE"]
+        Warden["🛡️ Warden<br/>config sync · heartbeat"]
+        Vector["📋 Log Shipper (Vector)<br/>also writes to file"]
+        OO["📊 Log Store (OpenObserve)<br/>30d retention"]
+
+        Vector --> OO
+        Warden -- "queries" --> OO
+
+        subgraph cellnet["cell-net (isolated)"]
+            Cell["🔒 Cell"]
+            HP["HTTP(S) Proxy<br/>egress controls"]
+            DNS["DNS Filter<br/>allowlist"]
+            Cell --> HP
+            Cell --> DNS
+        end
+
+        Warden --> cellnet
+    end
+
+    Warden -- "heartbeat / config sync / alerts<br/>(outbound)" --> API
+    API -- "log queries / commands / config pushes<br/>(inbound via mTLS)" --> Warden
 ```
 
 All connections from DP to CP are outbound — no inbound ports needed on the data plane. Log queries from the CP to warden use mTLS.
@@ -275,7 +249,7 @@ docker compose --profile dev --profile managed --profile auditing up -d
 | Feature | Description |
 |---------|-------------|
 | **Domain Allowlist** | Only approved domains can be accessed (enforced by CoreDNS and Envoy) |
-| **HTTPS Interception** | MITM proxy decrypts HTTPS so all controls apply to encrypted traffic |
+| **HTTPS Interception** | HTTP(S) proxy decrypts HTTPS so all controls apply to encrypted traffic |
 | **Credential Injection** | API keys injected by proxy, never exposed to cell (works for both HTTP and HTTPS) |
 | **Rate Limiting** | Per-domain rate limits to control API usage |
 | **Traffic Analytics** | Requests/sec, top domains, error rates in log viewer |
