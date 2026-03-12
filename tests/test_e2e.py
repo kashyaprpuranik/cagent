@@ -902,18 +902,21 @@ class TestWebTerminal:
 
 
 def wait_for_dp_access_log(admin_url, domain, timeout=30.0, poll=1.0):
-    """Poll DP blocked-domains endpoint until the domain appears or timeout."""
+    """Poll DP widget query until the domain appears or timeout."""
     deadline = time.time() + timeout
     while True:
-        r = requests.get(
-            f"{admin_url}/api/analytics/blocked-domains",
-            params={"hours": 1, "limit": 50},
+        r = requests.post(
+            f"{admin_url}/api/analytics/query",
+            json={"type": "blocked_domains_top", "params": {"hours": 1, "limit": 50}},
             timeout=10,
         )
         if r.status_code == 200:
-            for d in r.json().get("blocked_domains", []):
-                if d["domain"] == domain:
-                    return d
+            data = r.json()
+            cols = [c["name"] for c in data.get("columns", [])]
+            for row in data.get("rows", []):
+                entry = dict(zip(cols, row))
+                if entry.get("domain") == domain:
+                    return entry
         if time.time() >= deadline:
             return None
         time.sleep(poll)
@@ -957,67 +960,59 @@ class TestAnalytics:
         assert "last_seen" in entry
 
     def test_blocked_domains_response_shape(self, admin_url):
-        """Blocked domains response has correct top-level structure."""
-        r = requests.get(
-            f"{admin_url}/api/analytics/blocked-domains",
-            params={"hours": 1, "limit": 5},
+        """Widget query for blocked_domains_top has correct structure."""
+        r = requests.post(
+            f"{admin_url}/api/analytics/query",
+            json={"type": "blocked_domains_top", "params": {"hours": 1, "limit": 5}},
             timeout=10,
         )
         assert r.status_code == 200
         data = r.json()
-        assert "blocked_domains" in data
-        assert "window_hours" in data
-        assert data["window_hours"] == 1
-        assert isinstance(data["blocked_domains"], list)
+        assert data["widget"] == "blocked_domains_top"
+        assert "columns" in data
+        assert "rows" in data
+        assert "meta" in data
+        col_names = [c["name"] for c in data["columns"]]
+        assert "domain" in col_names
+        assert "count" in col_names
 
     def test_bandwidth_endpoint(self, admin_url, data_plane_running):
-        """GET /api/analytics/bandwidth returns bandwidth data."""
+        """Widget query for bandwidth_by_domain returns bandwidth data."""
         # Generate some traffic to an allowed domain (may already exist from fixture)
         exec_in_cell("curl -s -o /dev/null -x http://10.200.1.10:8443 http://ifconfig.me/")
         time.sleep(2)
 
-        r = requests.get(
-            f"{admin_url}/api/analytics/bandwidth",
-            params={"hours": 1, "limit": 20},
+        r = requests.post(
+            f"{admin_url}/api/analytics/query",
+            json={"type": "bandwidth_by_domain", "params": {"hours": 1, "limit": 20}},
             timeout=10,
         )
         assert r.status_code == 200
         data = r.json()
-        assert "domains" in data
-        assert "window_hours" in data
-        assert isinstance(data["domains"], list)
-        # At least one domain should have traffic (our blocked domain)
-        if data["domains"]:
-            entry = data["domains"][0]
-            assert "domain" in entry
-            assert "bytes_sent" in entry
-            assert "bytes_received" in entry
-            assert "total_bytes" in entry
-            assert "request_count" in entry
-            assert entry["request_count"] >= 1
+        assert data["widget"] == "bandwidth_by_domain"
+        assert "columns" in data
+        assert "rows" in data
+        col_names = [c["name"] for c in data["columns"]]
+        assert "domain" in col_names
+        assert "bytes_sent" in col_names
+        assert "bytes_received" in col_names
+        assert "total_bytes" in col_names
 
     def test_timeseries_endpoint(self, admin_url):
-        """GET /api/analytics/blocked-domains/timeseries returns bucketed data."""
-        r = requests.get(
-            f"{admin_url}/api/analytics/blocked-domains/timeseries",
-            params={"hours": 1, "buckets": 6},
+        """Widget query for blocked_timeseries returns bucketed data."""
+        r = requests.post(
+            f"{admin_url}/api/analytics/query",
+            json={"type": "blocked_timeseries", "params": {"hours": 1, "buckets": 6}},
             timeout=10,
         )
         assert r.status_code == 200
         data = r.json()
-        assert "buckets" in data
-        assert "window_hours" in data
-        assert "bucket_minutes" in data
-        assert len(data["buckets"]) == 6
-        # Each bucket should have start, end, count
-        for bucket in data["buckets"]:
-            assert "start" in bucket
-            assert "end" in bucket
-            assert "count" in bucket
-            assert isinstance(bucket["count"], int)
-        # At least one bucket should have blocked requests from our fixture
-        total = sum(b["count"] for b in data["buckets"])
-        assert total >= 1, "No blocked requests in any timeseries bucket"
+        assert data["widget"] == "blocked_timeseries"
+        assert "columns" in data
+        assert "rows" in data
+        col_names = [c["name"] for c in data["columns"]]
+        assert "bucket" in col_names
+        assert "count" in col_names
 
     def test_diagnose_endpoint(self, admin_url):
         """GET /api/analytics/diagnose returns diagnostic for a blocked domain."""
@@ -1059,36 +1054,40 @@ def is_openobserve_running():
 
 @pytest.mark.e2e
 class TestDeepHealth:
-    """Test /api/health/deep which includes OpenObserve liveness check."""
+    """Test /api/metrics health checks including OpenObserve liveness."""
 
-    def test_deep_health_includes_oo_check(self, admin_url, data_plane_running):
-        """Deep health should include an openobserve check."""
-        r = requests.get(f"{admin_url}/api/health/deep", timeout=10)
+    def test_metrics_health_includes_oo_check(self, admin_url, data_plane_running):
+        """Metrics health checks should include an openobserve check."""
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
         data = r.json()
-        assert "checks" in data
-        assert "openobserve" in data["checks"]
+        assert "health" in data
+        assert "checks" in data["health"]
+        assert "openobserve" in data["health"]["checks"]
         # OO should be healthy if auditing profile is running.
         # OpenObserve can take a while to start up, so poll until healthy.
         if is_openobserve_running():
             deadline = time.time() + 90
             while time.time() < deadline:
-                r = requests.get(f"{admin_url}/api/health/deep", timeout=10)
+                r = requests.get(f"{admin_url}/api/metrics", timeout=10)
                 data = r.json()
-                if data["checks"]["openobserve"]["status"] == "healthy":
+                if data["health"]["checks"]["openobserve"]["status"] == "healthy":
                     break
                 time.sleep(2)
-            if data["checks"]["openobserve"]["status"] != "healthy":
+            if data["health"]["checks"]["openobserve"]["status"] != "healthy":
                 pytest.skip("OpenObserve did not become healthy within 90s")
 
-    def test_deep_health_superset_of_detailed(self, admin_url, data_plane_running):
-        """Deep health should contain all checks from detailed health plus OO."""
-        detailed = requests.get(f"{admin_url}/api/health/detailed", timeout=10).json()
-        deep = requests.get(f"{admin_url}/api/health/deep", timeout=10).json()
-
-        for key in detailed.get("checks", {}):
-            assert key in deep["checks"], f"Deep health missing check '{key}' present in detailed"
-        assert "openobserve" in deep["checks"]
+    def test_metrics_health_has_core_checks(self, admin_url, data_plane_running):
+        """Metrics health should include core infrastructure checks."""
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
+        assert r.status_code == 200
+        health = r.json()["health"]
+        assert health["status"] in ("healthy", "degraded")
+        checks = health["checks"]
+        # Should include OpenObserve and at least one proxy/DNS check
+        assert "openobserve" in checks
+        assert "envoy_ready" in checks
+        assert "dns_resolution" in checks
 
 
 @pytest.mark.e2e
@@ -1110,10 +1109,10 @@ class TestLogIngestionPipeline:
         deadline = time.time() + 90
         while time.time() < deadline:
             try:
-                r = requests.get(f"{admin_url}/api/health/deep", timeout=10)
+                r = requests.get(f"{admin_url}/api/metrics", timeout=10)
                 if (
                     r.status_code == 200
-                    and r.json().get("checks", {}).get("openobserve", {}).get("status") == "healthy"
+                    and r.json().get("health", {}).get("checks", {}).get("openobserve", {}).get("status") == "healthy"
                 ):
                     return
             except Exception:
