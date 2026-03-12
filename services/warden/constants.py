@@ -133,6 +133,7 @@ OTEL_ENABLED = os.environ.get("OTEL_ENABLED", "false").lower() in ("true", "1", 
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "60"))
 CONFIG_SYNC_INTERVAL = int(os.environ.get("CONFIG_SYNC_INTERVAL", "300"))
 MAX_HEARTBEAT_WORKERS = int(os.environ.get("HEARTBEAT_MAX_WORKERS", "20"))
+ALERT_CHECK_INTERVAL = int(os.environ.get("ALERT_CHECK_INTERVAL", "60"))
 
 # ---------------------------------------------------------------------------
 # Beta features

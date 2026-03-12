@@ -36,6 +36,7 @@ from config_sync import (
     ENV_FILE_PATH,
 )
 from constants import (
+    ALERT_CHECK_INTERVAL,
     ALLOWED_CORS_ORIGINS,
     CAGENT_CONFIG_PATH,
     CELL_LABEL,
@@ -974,6 +975,116 @@ def main_loop(stop_event: Optional[threading.Event] = None):
 
 
 # ---------------------------------------------------------------------------
+# Alert evaluation loop
+# ---------------------------------------------------------------------------
+
+# Microsecond timestamp of the last successful alert check.
+_last_alert_check_us: int = 0
+
+
+def _query_oo_alerts(sql: str, start_us: int, end_us: int) -> list[dict]:
+    """Query OpenObserve for alert data.  Returns [] on any failure."""
+    try:
+        from openobserve_client import query_openobserve
+        return query_openobserve(sql, start_us, end_us)
+    except ImportError:
+        return []
+    except Exception as e:
+        logger.warning("Alert OO query failed: %s", e)
+        return []
+
+
+def alert_loop(stop_event: Optional[threading.Event] = None):
+    """Check OpenObserve for DLP violations and push alerts to the CP.
+
+    Runs independently from the heartbeat loop in its own thread.
+    Only active in connected mode with a valid CP token.
+    """
+    global _last_alert_check_us
+
+    if DATAPLANE_MODE != "connected" or not CONTROL_PLANE_TOKEN:
+        logger.info("Alert loop disabled (not in connected mode or no CP token)")
+        return
+
+    logger.info(
+        "Alert loop starting (interval=%ds, heartbeat_url=%s)",
+        ALERT_CHECK_INTERVAL,
+        HEARTBEAT_URL,
+    )
+
+    # Start from 60 minutes ago on first run
+    _last_alert_check_us = int((time.time() - 3600) * 1_000_000)
+
+    while not (stop_event and stop_event.is_set()):
+        try:
+            now_us = int(time.time() * 1_000_000)
+
+            sql = (
+                'SELECT dlp_host as domain, '
+                "json_extract(dlp_findings, '$[0].pattern') as pattern, "
+                'COUNT(*) as count, '
+                'dlp_mode as mode '
+                'FROM "cagent_logs" '
+                "WHERE log_type = 'dlp_violation' "
+                f'AND _timestamp > {_last_alert_check_us} '
+                'GROUP BY dlp_host, pattern, dlp_mode '
+                'ORDER BY count DESC LIMIT 50'
+            )
+
+            rows = _query_oo_alerts(sql, _last_alert_check_us, now_us)
+
+            if rows:
+                alerts = []
+                for row in rows:
+                    domain = row.get("domain", "unknown")
+                    pattern = row.get("pattern", "unknown")
+                    count = row.get("count", 0)
+                    mode = row.get("mode", "unknown")
+                    alerts.append({
+                        "event_type": "dlp_detection",
+                        "severity": "warning",
+                        "title": f"DLP: {count} {pattern} detections on {domain}",
+                        "message": f"Mode: {mode}, Pattern: {pattern}, Count: {count}",
+                        "metadata": {
+                            "host": domain,
+                            "count": count,
+                            "mode": mode,
+                            "pattern": pattern,
+                        },
+                    })
+
+                try:
+                    resp = requests.post(
+                        f"{HEARTBEAT_URL}/api/v1/cell/alerts",
+                        json={"alerts": alerts},
+                        headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
+                        timeout=10,
+                    )
+                    if resp.status_code < 300:
+                        logger.info("Pushed %d alert(s) to CP", len(alerts))
+                        _last_alert_check_us = now_us
+                    else:
+                        logger.warning(
+                            "CP alert push failed: %s %s",
+                            resp.status_code,
+                            resp.text[:200],
+                        )
+                except requests.exceptions.RequestException as e:
+                    logger.warning("CP alert push error: %s", e)
+            else:
+                # No alerts — still advance the timestamp so we don't re-query
+                _last_alert_check_us = now_us
+
+        except Exception:
+            logger.exception("Error in alert loop cycle")
+
+        if stop_event:
+            stop_event.wait(ALERT_CHECK_INTERVAL)
+        else:
+            time.sleep(ALERT_CHECK_INTERVAL)
+
+
+# ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
 
@@ -1000,9 +1111,25 @@ async def lifespan(app: FastAPI):
             if not stop_event.is_set():
                 time.sleep(5)
 
+    def _alert_loop_with_restart():
+        while not stop_event.is_set():
+            try:
+                alert_loop(stop_event)
+            except Exception:
+                logger.exception("Alert loop crashed, restarting in 5s")
+            except BaseException as exc:
+                logger.error("Alert loop killed by %s: %s — restarting in 5s", type(exc).__name__, exc)
+            if not stop_event.is_set():
+                time.sleep(5)
+
     loop_thread = threading.Thread(target=_loop_with_restart, daemon=True, name="polling-loop")
     loop_thread.start()
     logger.info("Polling loop thread started")
+
+    alert_thread = threading.Thread(target=_alert_loop_with_restart, daemon=True, name="alert-loop")
+    alert_thread.start()
+    logger.info("Alert loop thread started")
+
     yield
     stop_event.set()
 
