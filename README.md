@@ -232,7 +232,7 @@ graph TD
         Warden --> cellnet
     end
 
-    Warden -- "heartbeat / config sync<br/>(outbound)" --> API
+    Warden -- "heartbeat / config sync / alerts<br/>(outbound)" --> API
     API -- "log queries<br/>(inbound via mTLS)" --> Warden
 ```
 
