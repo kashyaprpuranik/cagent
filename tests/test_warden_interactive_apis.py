@@ -2,10 +2,9 @@
 
 Tests the endpoints used by the CP in connected mode:
 - /api/commands/* (cell restart, stop, start, wipe)
-- /api/status, /api/metrics, /api/disk, /api/processes, /api/network
+- /api/metrics (consolidated system metrics, containers, health)
 - /api/policies/apply, /api/policies/active
 - /api/logs/search
-- /api/health/deep
 """
 
 import os
@@ -29,131 +28,185 @@ client = TestClient(main.app)
 
 
 # ---------------------------------------------------------------------------
-# Health
+# Metrics (consolidated endpoint)
 # ---------------------------------------------------------------------------
-class TestDeepHealth:
-    """Test /api/health/deep endpoint (checks OpenObserve)."""
+class TestMetricsEndpoint:
+    """Test the consolidated /api/metrics endpoint.
 
-    def test_deep_health_oo_healthy(self):
-        """Deep health should include OO check when OO is healthy."""
-        mock_container = MagicMock()
-        mock_container.status = "running"
-        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z"}}
-        mock_container.exec_run.return_value = MagicMock(exit_code=0)
-
-        with (
-            patch("routers.health.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
-        ):
-            mock_dc.containers.get.return_value = mock_container
-            r = client.get("/api/health/deep")
-
-        assert r.status_code == 200
-        data = r.json()
-        assert "checks" in data
-        assert "openobserve" in data["checks"]
-        assert data["checks"]["openobserve"]["status"] == "healthy"
-
-    def test_deep_health_oo_unhealthy(self):
-        """Deep health should show degraded when OO is down."""
-        mock_container = MagicMock()
-        mock_container.status = "running"
-        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z"}}
-        mock_container.exec_run.return_value = MagicMock(exit_code=0)
-
-        with (
-            patch("routers.health.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=False),
-        ):
-            mock_dc.containers.get.return_value = mock_container
-            r = client.get("/api/health/deep")
-
-        assert r.status_code == 200
-        data = r.json()
-        assert data["checks"]["openobserve"]["status"] == "unhealthy"
-        assert data["status"] == "degraded"
-
-
-# ---------------------------------------------------------------------------
-# Status endpoints
-# ---------------------------------------------------------------------------
-class TestStatusEndpoints:
-    """Test system status and metrics endpoints.
-
-    These endpoints call real psutil functions against the host system.
-    We test through the FastAPI test client (unit-test style) and verify
-    the response shapes. No psutil mocking needed — the real system provides
-    valid data.
+    This endpoint returns system metrics, disks, processes, network,
+    containers, and health checks in a single response.
     """
 
-    def test_status_endpoint(self):
-        """GET /api/status should return system summary."""
-        r = client.get("/api/status")
-        assert r.status_code == 200
-        data = r.json()
-        assert "cpu_percent" in data
-        assert isinstance(data["cpu_percent"], (int, float))
-        assert "memory_mb" in data
-        assert data["memory_mb"] > 0
-        assert "disk_used_bytes" in data
-        assert "load_average" in data
-        assert len(data["load_average"]) == 3
-
-    def test_metrics_endpoint(self):
-        """GET /api/metrics should return detailed metrics."""
-        r = client.get("/api/metrics")
-        assert r.status_code == 200
-        data = r.json()
-        assert "cpu_count" in data
-        assert data["cpu_count"] >= 1
-        assert "memory_percent" in data
-        assert "disk_free_bytes" in data
-
-    def test_disk_endpoint(self):
-        """GET /api/disk should return disk usage per mount."""
-        r = client.get("/api/disk")
-        assert r.status_code == 200
-        data = r.json()
-        assert "disks" in data
-        assert isinstance(data["disks"], list)
-        assert len(data["disks"]) >= 1
-        assert "path" in data["disks"][0]
-        assert "total_bytes" in data["disks"][0]
-
-    def test_processes_endpoint(self):
-        """GET /api/processes should return top processes."""
-        r = client.get("/api/processes")
-        assert r.status_code == 200
-        data = r.json()
-        assert "processes" in data
-        assert isinstance(data["processes"], list)
-        assert len(data["processes"]) >= 1
-        proc = data["processes"][0]
-        assert "pid" in proc
-        assert "name" in proc
-
-    def test_network_endpoint(self):
-        """GET /api/network should return network stats."""
-        r = client.get("/api/network")
-        assert r.status_code == 200
-        data = r.json()
-        assert "interfaces" in data
-        assert isinstance(data["interfaces"], list)
-
-    def test_containers_status_endpoint(self):
-        """GET /api/containers (status router) should return container statuses."""
+    def test_metrics_returns_all_sections(self):
+        """GET /api/metrics should return all top-level sections."""
         mock_container = MagicMock()
         mock_container.status = "running"
         mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z", "Health": {"Status": "healthy"}}}
         mock_container.image = MagicMock(tags=["cell:lean"])
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
 
-        with patch("routers.status.docker_client") as mock_dc:
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+        ):
             mock_dc.containers.get.return_value = mock_container
-            r = client.get("/api/containers")
+            r = client.get("/api/metrics")
 
         assert r.status_code == 200
         data = r.json()
+        assert "system" in data
+        assert "disks" in data
+        assert "processes" in data
+        assert "network" in data
         assert "containers" in data
+        assert "health" in data
+
+    def test_metrics_system_fields(self):
+        """GET /api/metrics system section should have expected fields."""
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z", "Health": {"Status": "healthy"}}}
+        mock_container.image = MagicMock(tags=["cell:lean"])
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
+
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+        ):
+            mock_dc.containers.get.return_value = mock_container
+            r = client.get("/api/metrics")
+
+        data = r.json()
+        system = data["system"]
+        assert "cpu_percent" in system
+        assert isinstance(system["cpu_percent"], (int, float))
+        assert "cpu_count" in system
+        assert system["cpu_count"] >= 1
+        assert "memory_mb" in system
+        assert system["memory_mb"] > 0
+        assert "memory_percent" in system
+        assert "disk_used_bytes" in system
+        assert "disk_total_bytes" in system
+        assert "disk_free_bytes" in system
+        assert "load_average" in system
+        assert len(system["load_average"]) == 3
+
+    def test_metrics_disks_section(self):
+        """GET /api/metrics disks section should list mount points."""
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z", "Health": {"Status": "healthy"}}}
+        mock_container.image = MagicMock(tags=["cell:lean"])
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
+
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+        ):
+            mock_dc.containers.get.return_value = mock_container
+            r = client.get("/api/metrics")
+
+        disks = r.json()["disks"]
+        assert isinstance(disks, list)
+        assert len(disks) >= 1
+        assert "path" in disks[0]
+        assert "total_bytes" in disks[0]
+
+    def test_metrics_processes_section(self):
+        """GET /api/metrics processes section should list processes."""
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z", "Health": {"Status": "healthy"}}}
+        mock_container.image = MagicMock(tags=["cell:lean"])
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
+
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+        ):
+            mock_dc.containers.get.return_value = mock_container
+            r = client.get("/api/metrics")
+
+        procs = r.json()["processes"]
+        assert isinstance(procs, list)
+        assert len(procs) >= 1
+        assert "pid" in procs[0]
+        assert "name" in procs[0]
+
+    def test_metrics_network_section(self):
+        """GET /api/metrics network section should list interfaces."""
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z", "Health": {"Status": "healthy"}}}
+        mock_container.image = MagicMock(tags=["cell:lean"])
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
+
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+        ):
+            mock_dc.containers.get.return_value = mock_container
+            r = client.get("/api/metrics")
+
+        network = r.json()["network"]
+        assert isinstance(network, list)
+
+    def test_metrics_containers_section(self):
+        """GET /api/metrics containers section should list container statuses."""
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z", "Health": {"Status": "healthy"}}}
+        mock_container.image = MagicMock(tags=["cell:lean"])
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
+
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+        ):
+            mock_dc.containers.get.return_value = mock_container
+            r = client.get("/api/metrics")
+
+        containers = r.json()["containers"]
+        assert isinstance(containers, list)
+
+    def test_metrics_health_with_oo_healthy(self):
+        """GET /api/metrics health section should include OpenObserve check."""
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z"}}
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
+
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+        ):
+            mock_dc.containers.get.return_value = mock_container
+            r = client.get("/api/metrics")
+
+        assert r.status_code == 200
+        health = r.json()["health"]
+        assert "checks" in health
+        assert "openobserve" in health["checks"]
+        assert health["checks"]["openobserve"]["status"] == "healthy"
+
+    def test_metrics_health_with_oo_unhealthy(self):
+        """GET /api/metrics health section should show degraded when OO is down."""
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.attrs = {"State": {"StartedAt": "2026-01-01T00:00:00Z"}}
+        mock_container.exec_run.return_value = MagicMock(exit_code=0)
+
+        with (
+            patch("routers.status.docker_client") as mock_dc,
+            patch("openobserve_client.is_openobserve_healthy", return_value=False),
+        ):
+            mock_dc.containers.get.return_value = mock_container
+            r = client.get("/api/metrics")
+
+        assert r.status_code == 200
+        health = r.json()["health"]
+        assert health["checks"]["openobserve"]["status"] == "unhealthy"
+        assert health["status"] == "degraded"
 
 
 # ---------------------------------------------------------------------------
