@@ -234,3 +234,94 @@ class TestEnvoyNativeFilters:
 
         result = ConfigGenerator._rpm_to_token_bucket(10, 3)
         assert result == {"max_tokens": 3, "tokens_per_fill": 1, "fill_interval": "6s"}
+
+
+class TestEnvoyXdsGeneration:
+    """Test xDS config generation for Envoy file-based hot-reload."""
+
+    def _get_generator(self, configs_dir):
+        import sys
+
+        sys.path.insert(0, str(configs_dir.parent / "services" / "warden"))
+        from config_generator import ConfigGenerator
+
+        gen = ConfigGenerator(str(configs_dir / "cagent.yaml"))
+        gen.load_config()
+        return gen
+
+    def test_bootstrap_has_rds_reference(self, configs_dir):
+        """Bootstrap should use RDS for dynamic route config."""
+        gen = self._get_generator(configs_dir)
+        bootstrap = gen.generate_envoy_bootstrap()
+        hcm = bootstrap["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0]["typed_config"]
+        assert "rds" in hcm
+        assert "route_config" not in hcm  # no inline routes
+        assert hcm["rds"]["route_config_name"] == "egress_routes"
+        assert "path_config_source" in hcm["rds"]["config_source"]
+
+    def test_bootstrap_has_cds_config(self, configs_dir):
+        """Bootstrap should reference CDS file for dynamic clusters."""
+        gen = self._get_generator(configs_dir)
+        bootstrap = gen.generate_envoy_bootstrap()
+        assert "dynamic_resources" in bootstrap
+        cds_config = bootstrap["dynamic_resources"]["cds_config"]
+        assert "path_config_source" in cds_config
+        assert cds_config["path_config_source"]["path"] == "/etc/envoy/cds.yaml"
+
+    def test_bootstrap_has_static_control_plane_cluster(self, configs_dir):
+        """Bootstrap should have control_plane_api cluster (needed for ext_authz)."""
+        gen = self._get_generator(configs_dir)
+        bootstrap = gen.generate_envoy_bootstrap()
+        clusters = bootstrap["static_resources"]["clusters"]
+        names = [c["name"] for c in clusters]
+        assert "control_plane_api" in names
+        assert len(clusters) == 1  # only control_plane_api, domain clusters come from CDS
+
+    def test_bootstrap_ext_authz_permissive(self, configs_dir):
+        """Bootstrap ext_authz should use permissive upstream headers."""
+        gen = self._get_generator(configs_dir)
+        bootstrap = gen.generate_envoy_bootstrap()
+        hcm = bootstrap["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0]["typed_config"]
+        ext_authz = hcm["http_filters"][0]
+        assert ext_authz["name"] == "envoy.filters.http.ext_authz"
+        patterns = ext_authz["typed_config"]["http_service"]["authorization_response"]["allowed_upstream_headers"]["patterns"]
+        assert {"prefix": ""} in patterns
+
+    def test_cds_has_domain_clusters(self, configs_dir):
+        """CDS should contain typed cluster resources."""
+        gen = self._get_generator(configs_dir)
+        cds = gen.generate_envoy_cds()
+        assert "resources" in cds
+        assert len(cds["resources"]) > 0
+        for r in cds["resources"]:
+            assert r["@type"] == "type.googleapis.com/envoy.config.cluster.v3.Cluster"
+            assert "name" in r
+
+    def test_rds_has_route_configuration(self, configs_dir):
+        """RDS should contain a single RouteConfiguration with virtual hosts."""
+        gen = self._get_generator(configs_dir)
+        rds = gen.generate_envoy_rds()
+        assert "resources" in rds
+        assert len(rds["resources"]) == 1
+        rc = rds["resources"][0]
+        assert rc["@type"] == "type.googleapis.com/envoy.config.route.v3.RouteConfiguration"
+        assert rc["name"] == "egress_routes"
+        assert len(rc["virtual_hosts"]) > 0
+
+    def test_cds_rds_match_monolithic(self, configs_dir):
+        """CDS clusters + RDS routes should match the monolithic config."""
+        gen = self._get_generator(configs_dir)
+        monolithic = gen.generate_envoy_config()
+        cds = gen.generate_envoy_cds()
+        rds = gen.generate_envoy_rds()
+
+        # Clusters should match (minus control_plane_api which is static in bootstrap)
+        monolithic_clusters = monolithic["static_resources"]["clusters"]
+        monolithic_domain_clusters = [c for c in monolithic_clusters if c["name"] != "control_plane_api"]
+        cds_clusters = [{k: v for k, v in r.items() if k != "@type"} for r in cds["resources"]]
+        assert monolithic_domain_clusters == cds_clusters
+
+        # Virtual hosts should match
+        monolithic_vhosts = monolithic["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]["virtual_hosts"]
+        rds_vhosts = rds["resources"][0]["virtual_hosts"]
+        assert monolithic_vhosts == rds_vhosts
