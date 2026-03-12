@@ -233,7 +233,7 @@ graph TD
     end
 
     Warden -- "heartbeat / config sync / alerts<br/>(outbound)" --> API
-    API -- "log queries<br/>(inbound via mTLS)" --> Warden
+    API -- "log queries / commands / config pushes<br/>(inbound via mTLS)" --> Warden
 ```
 
 All connections from DP to CP are outbound — no inbound ports needed on the data plane. Log queries from the CP to warden use mTLS.
