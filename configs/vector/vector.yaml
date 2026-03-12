@@ -83,6 +83,10 @@ transforms:
         .bytes_sent = parsed.bytes_sent
         .bytes_received = parsed.bytes_received
         .request_id = parsed.request_id
+        .authority = parsed.authority
+        .credential_injected = parsed.credential_injected
+        .rate_limited = parsed.rate_limited
+        .response_flags = parsed.response_flags
 
         if .source == "envoy" && .method != "" {
           .log_type = "access"
