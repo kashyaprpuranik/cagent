@@ -32,6 +32,8 @@ def test_widget_registry_has_all_types():
         "request_volume",
         "latency_by_domain",
         "credential_usage",
+        "dlp_detections",
+        "dlp_timeseries",
     }
     assert set(analytics.WIDGET_REGISTRY.keys()) == expected
 
@@ -59,7 +61,7 @@ def test_get_widget_types():
     result = analytics.get_widget_types()
     assert "widgets" in result
     widgets = result["widgets"]
-    assert len(widgets) == 7
+    assert len(widgets) == 9
     # Verify each widget has expected fields
     for w in widgets:
         assert "type" in w

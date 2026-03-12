@@ -91,6 +91,16 @@ transforms:
         if .source == "envoy" && .method != "" {
           .log_type = "access"
         }
+
+        # DLP violation events from mitm-proxy
+        if .source == "mitmproxy" && parsed.event == "dlp_violation" {
+          .log_type = "dlp_violation"
+          .dlp_mode = parsed.mode
+          .dlp_host = parsed.host
+          .dlp_path = parsed.path
+          .dlp_method = parsed.method
+          .dlp_findings = encode_json(parsed.findings)
+        }
       }
 
       .hostname = get_env_var("HOSTNAME") ?? "unknown"

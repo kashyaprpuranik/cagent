@@ -83,5 +83,30 @@
       {"name": "injected_count", "type": "number", "role": "measure"}
     ],
     "sql": "SELECT authority as domain, COUNT(*) as total_requests, SUM(CASE WHEN credential_injected = 'true' THEN 1 ELSE 0 END) as injected_count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY injected_count DESC LIMIT {limit}"
+  },
+  "dlp_detections": {
+    "name": "DLP Detections",
+    "category": "security",
+    "visualization": "table",
+    "default_params": {"window_hours": 24, "limit": 20},
+    "columns": [
+      {"name": "domain", "type": "string", "role": "dimension"},
+      {"name": "pattern", "type": "string", "role": "dimension"},
+      {"name": "count", "type": "number", "role": "measure"},
+      {"name": "mode", "type": "string", "role": "info"},
+      {"name": "last_seen", "type": "datetime", "role": "info"}
+    ],
+    "sql": "SELECT dlp_host as domain, json_extract(dlp_findings, '$[0].pattern') as pattern, COUNT(*) as count, dlp_mode as mode, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY dlp_host, pattern, dlp_mode ORDER BY count DESC LIMIT {limit}"
+  },
+  "dlp_timeseries": {
+    "name": "DLP Detections Over Time",
+    "category": "security",
+    "visualization": "line",
+    "default_params": {"window_hours": 24, "buckets": 12},
+    "columns": [
+      {"name": "bucket", "type": "datetime", "role": "dimension"},
+      {"name": "count", "type": "number", "role": "measure"}
+    ],
+    "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as count FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY bucket ORDER BY bucket"
   }
 }
