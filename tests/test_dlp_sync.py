@@ -5,7 +5,7 @@ Verifies:
 - _cp_dlp_policy_to_config converter
 - regenerate_configs with additional_dlp_config
 - Hash-based change detection for DLP config
-- restart_mitm_proxy called only when hash changes
+- reload_mitm_proxy called only when hash changes
 - Standalone mode uses local defaults
 - Connected mode merges CP config
 """
@@ -168,7 +168,7 @@ class TestRegenerateConfigsDlp:
         self.dlp_path = tmp_path / "dlp_config.json"
         self.env_path = tmp_path / ".env"
 
-    @patch("config_sync.restart_mitm_proxy")
+    @patch("config_sync.reload_mitm_proxy")
     @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
@@ -198,7 +198,7 @@ class TestRegenerateConfigsDlp:
             assert written["enabled"] is True
             assert written["mode"] == "block"
 
-    @patch("config_sync.restart_mitm_proxy")
+    @patch("config_sync.reload_mitm_proxy")
     @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
@@ -229,7 +229,7 @@ class TestRegenerateConfigsDlp:
             regenerate_configs(additional_dlp_config=dlp_cfg)
             mock_mitm.assert_not_called()
 
-    @patch("config_sync.restart_mitm_proxy")
+    @patch("config_sync.reload_mitm_proxy")
     @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
@@ -259,31 +259,25 @@ class TestRegenerateConfigsDlp:
 
 
 # ---------------------------------------------------------------------------
-# restart_mitm_proxy
+# reload_mitm_proxy
 # ---------------------------------------------------------------------------
 
-class TestRestartMitmProxy:
+class TestReloadMitmProxy:
 
-    @patch("config_sync.docker_client")
-    def test_restart_success(self, mock_client):
-        from config_sync import restart_mitm_proxy
+    def test_touch_success(self, tmp_path):
+        from config_sync import reload_mitm_proxy
 
-        mock_container = MagicMock()
-        mock_client.containers.get.return_value = mock_container
-        assert restart_mitm_proxy() is True
-        mock_container.restart.assert_called_once_with(timeout=10)
+        # Create a fake dlp_addon.py next to a fake dlp_config.json
+        addon = tmp_path / "dlp_addon.py"
+        addon.write_text("# addon")
+        config = tmp_path / "dlp_config.json"
+        config.write_text("{}")
 
-    @patch("config_sync.docker_client")
-    def test_restart_not_found(self, mock_client):
-        from config_sync import restart_mitm_proxy
+        with patch("config_sync.DLP_CONFIG_PATH", str(config)):
+            assert reload_mitm_proxy() is True
 
-        # docker.errors.NotFound is mocked as Exception at module level
-        mock_client.containers.get.side_effect = sys.modules["docker"].errors.NotFound("not found")
-        assert restart_mitm_proxy() is False
+    def test_touch_missing_dir(self):
+        from config_sync import reload_mitm_proxy
 
-    @patch("config_sync.docker_client")
-    def test_restart_generic_error(self, mock_client):
-        from config_sync import restart_mitm_proxy
-
-        mock_client.containers.get.side_effect = RuntimeError("boom")
-        assert restart_mitm_proxy() is False
+        with patch("config_sync.DLP_CONFIG_PATH", "/nonexistent/dir/dlp_config.json"):
+            assert reload_mitm_proxy() is False
