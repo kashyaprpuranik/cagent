@@ -38,6 +38,14 @@ ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
 # Config generator instance (shared with main.py via this module)
 config_generator = ConfigGenerator(CAGENT_CONFIG_PATH)
 
+# Synced domain policies with credentials (populated by sync_config in connected mode)
+_synced_domain_policies: list[dict] = []
+
+
+def get_synced_domain_policies() -> list[dict]:
+    """Return the last-synced domain policies (including credentials)."""
+    return _synced_domain_policies
+
 
 # ---------------------------------------------------------------------------
 # Service restart helpers
@@ -128,6 +136,7 @@ class ConfigState:
         self.email_hash: Optional[str] = None
         self.dlp_hash: Optional[str] = None
         self.last_policy_version: Optional[int] = None
+        self.domain_policy_hash: Optional[str] = None
 
 
 config_state = ConfigState()
@@ -204,12 +213,14 @@ def regenerate_configs(
 
         if corefile_changed or envoy_changed or email_changed or dlp_changed:
             logger.info("Regenerated configs from cagent.yaml")
-            # Invalidate caches when config changes
-            from routers.domain_policy import invalidate_cache
-            from routers.ext_authz import invalidate_cache as invalidate_ext_authz_cache
+            # Invalidate domain policy caches only when domain configs changed
+            domain_configs_changed = corefile_changed or envoy_changed
+            if domain_configs_changed:
+                from routers.domain_policy import invalidate_cache
+                from routers.ext_authz import invalidate_cache as invalidate_ext_authz_cache
 
-            invalidate_cache()
-            invalidate_ext_authz_cache()
+                invalidate_cache()
+                invalidate_ext_authz_cache()
             return True
         else:
             logger.debug("Generated configs unchanged, skipping restart")
@@ -314,15 +325,18 @@ def sync_config() -> bool:
         logger.warning("Control plane not configured, falling back to cagent.yaml")
         return regenerate_configs()
 
+    global _synced_domain_policies
+
     cp_domain_entries = []
     cp_email_entries = []
     cp_dlp_config = None
     headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
 
     try:
-        # Fetch domain policies from control plane (agent tokens are profile-scoped)
+        # Fetch domain policies with credentials for local ext_authz lookups
         response = requests.get(
             f"{CONTROL_PLANE_URL}/api/v1/domain-policies",
+            params={"include_credentials": "true"},
             headers=headers,
             timeout=10,
         )
@@ -330,7 +344,9 @@ def sync_config() -> bool:
         if response.status_code == 200:
             data = response.json()
             policies = data.get("items", data) if isinstance(data, dict) else data
-            cp_domain_entries = [_cp_policy_to_domain_entry(p) for p in policies if p.get("enabled", True)]
+            # Store full policies (with credentials) for local ext_authz lookups
+            _synced_domain_policies = [p for p in policies if p.get("enabled", True)]
+            cp_domain_entries = [_cp_policy_to_domain_entry(p) for p in _synced_domain_policies]
             logger.info(f"Fetched {len(cp_domain_entries)} domain policies from control plane")
         else:
             logger.warning(f"Failed to fetch domain policies: {response.status_code}")
