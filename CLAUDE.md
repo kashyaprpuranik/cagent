@@ -186,14 +186,13 @@ In standalone mode, `cagent.yaml` is the sole config source. In connected mode, 
 
 | Config Section | Source | Notes |
 |----------------|--------|-------|
-| `domains[]` | yaml + CP (merged) | CP domains synced via `GET /api/v1/domain-policies`; yaml entries take precedence. Credentials are NOT in config — ext_authz resolves them per-request. |
+| `domains[]` | CP-owned (connected) / yaml (standalone) | Connected: CP is sole source via `GET /api/v1/domain-policies`. Standalone: yaml only. Credentials resolved per-request by ext_authz. |
 | `dns` (upstream, cache_ttl) | yaml only | No CP equivalent |
-| `internal_services[]` | yaml only | devbox.local, etc. |
 | `circuit_breakers` | yaml only | No CP equivalent |
 | `rate_limits.default` | yaml only | Global fallback; per-domain overrides come from domains[] |
 | `security.seccomp_profile` | CP via heartbeat | Pushed in heartbeat response, not config generation |
-| `resources` (cpu/mem) | CP via heartbeat | Pushed in heartbeat response, not config generation |
-| `email.accounts[]` | yaml only (**gap**) | CP has `/api/v1/email-policies` but warden doesn't sync them yet |
+| `resources` (cpu/mem) | CP via heartbeat + cloud-init | Written at boot from default SecurityProfile, updated via heartbeat |
+| `email.accounts[]` | CP-owned (connected) / yaml (standalone) | Connected: CP is sole source via `GET /api/v1/email-policies`. Standalone: yaml only. |
 
 ## Important Files
 

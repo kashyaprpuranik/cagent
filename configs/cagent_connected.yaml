@@ -1,0 +1,29 @@
+# =============================================================================
+# Cagent Data Plane Configuration — Connected Mode
+# =============================================================================
+# Minimal config for connected mode. The control plane manages domains,
+# resources, security, and email policies — only infrastructure settings
+# that the CP doesn't manage live here.
+#
+# For standalone mode, see cagent.yaml.
+# =============================================================================
+
+# Upstream DNS servers for resolving allowed domains
+dns:
+  upstream:
+    - 8.8.8.8
+    - 8.8.4.4
+  cache_ttl: 300  # seconds
+
+# Default rate limit for domains without specific limits
+rate_limits:
+  default:
+    requests_per_minute: 120
+    burst_size: 20
+
+# Circuit breaker defaults for Envoy clusters
+circuit_breakers:
+  max_connections: 1000
+  max_pending_requests: 1000
+  max_requests: 1000
+  max_retries: 3

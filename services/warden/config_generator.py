@@ -7,29 +7,23 @@ Outputs:
 
 Config Sources (standalone vs connected mode):
   In standalone mode, cagent.yaml is the sole source of truth.
-  In connected mode, warden syncs additional data from the control plane
-  and merges it with cagent.yaml (yaml entries take precedence).
+  In connected mode, cagent_connected.yaml provides infra-only settings
+  (dns, rate_limits, circuit_breakers) and the CP is the sole source for
+  domains, email, and resources.
 
   Yaml-only (no CP equivalent):
     - dns (upstream servers, cache_ttl)
-    - internal_services[] (devbox.local, etc.)
     - circuit_breakers (max_connections, max_requests, etc.)
     - rate_limits.default (global fallback rate limit)
 
-  CP-synced (connected mode merges with yaml):
-    - domains[] — synced via GET /api/v1/domain-policies, merged here
-      via set_additional_domains(). Includes allowed_paths, rate_limit,
-      timeout, read_only. Credentials are NOT included — ext_authz
-      resolves them dynamically per-request.
+  CP-owned (connected mode — CP is sole source, yaml ignored):
+    - domains[] — synced via GET /api/v1/domain-policies.
+      Credentials are NOT in config — ext_authz resolves per-request.
+    - email.accounts[] — synced via GET /api/v1/email-policies.
+    - resources (cpu/memory limits) — pushed via heartbeat response.
 
   CP-synced via heartbeat (not config generation):
     - security.seccomp_profile — pushed via heartbeat response
-    - resources (cpu/memory limits) — pushed via heartbeat response
-
-  CP-synced (connected mode merges with yaml):
-    - email.accounts[] — synced via GET /api/v1/email-policies?include_credentials=true,
-      merged here via set_additional_email_accounts(). Includes credentials
-      directly (unlike domains, which use ext_authz per-request injection).
 """
 
 import hashlib
@@ -64,8 +58,9 @@ DEFAULT_DLP_PATTERNS = [
 
 
 class ConfigGenerator:
-    def __init__(self, config_path: str = "/etc/cagent/cagent.yaml"):
+    def __init__(self, config_path: str = "/etc/cagent/cagent.yaml", mode: str = "standalone"):
         self.config_path = Path(config_path)
+        self.mode = mode
         self.config = {}
         self.last_hash = None
         self._additional_domains = []  # CP-provided domain entries
@@ -102,11 +97,18 @@ class ConfigGenerator:
         return True
 
     def get_domains(self) -> list:
-        """Get list of domain configs, merged with any additional domains."""
+        """Get list of domain configs, merged with any additional domains.
+
+        In connected mode, CP domains are the sole source of truth — yaml
+        domains are ignored so that CP policy changes (disable, delete, create)
+        propagate without being shadowed by hardcoded yaml entries.
+        """
+        if self.mode == "connected" and self._additional_domains:
+            return self._additional_domains
         yaml_domains = self.config.get("domains", [])
         if not self._additional_domains:
             return yaml_domains
-        # Merge: cagent.yaml takes precedence, additional fills in new domains
+        # Standalone merge: cagent.yaml takes precedence, additional fills in new domains
         yaml_names = {d.get("domain", "").lower() for d in yaml_domains}
         merged = list(yaml_domains)
         for entry in self._additional_domains:
@@ -114,16 +116,17 @@ class ConfigGenerator:
                 merged.append(entry)
         return merged
 
-    def get_internal_services(self) -> list:
-        """Get list of internal service names."""
-        return self.config.get("internal_services", [])
-
     def get_email_accounts(self) -> list:
-        """Get list of email account configs, merged with any additional accounts."""
+        """Get list of email account configs, merged with any additional accounts.
+
+        In connected mode, CP email accounts are the sole source of truth.
+        """
+        if self.mode == "connected" and self._additional_email_accounts:
+            return self._additional_email_accounts
         yaml_accounts = self.config.get("email", {}).get("accounts", [])
         if not self._additional_email_accounts:
             return yaml_accounts
-        # Merge: cagent.yaml takes precedence, additional fills in new accounts
+        # Standalone merge: cagent.yaml takes precedence, additional fills in new accounts
         yaml_names = {a.get("name", "").lower() for a in yaml_accounts}
         merged = list(yaml_accounts)
         for entry in self._additional_email_accounts:
@@ -140,7 +143,13 @@ class ConfigGenerator:
         return self.config.get("rate_limits", {}).get("default", {"requests_per_minute": 120, "burst_size": 20})
 
     def get_resources(self) -> Optional[dict]:
-        """Get resource limits config, or None if not configured."""
+        """Get resource limits config, or None if not configured.
+
+        In connected mode, resources are pushed via heartbeat response,
+        not read from the yaml.
+        """
+        if self.mode == "connected":
+            return None
         return self.config.get("resources")
 
     def get_circuit_breaker_defaults(self) -> dict:
@@ -206,19 +215,6 @@ class ConfigGenerator:
                     f"{domain} {{",
                     f"    forward . {upstream}",
                     f"    cache {cache_ttl}",
-                    "    log",
-                    "}",
-                    "",
-                ]
-            )
-
-        # Internal services (Docker DNS)
-        lines.append("# Internal services (Docker DNS)")
-        for service in self.get_internal_services():
-            lines.extend(
-                [
-                    f"{service} {{",
-                    "    forward . 127.0.0.11",
                     "    log",
                     "}",
                     "",

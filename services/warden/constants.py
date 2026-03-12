@@ -27,9 +27,20 @@ EMAIL_PROXY_CONTAINER_NAME = "email-proxy"
 WARDEN_CONTAINER_NAME = "warden"
 
 # ---------------------------------------------------------------------------
+# Mode (must be defined before CAGENT_CONFIG_PATH)
+# ---------------------------------------------------------------------------
+DATAPLANE_MODE = os.environ.get("DATAPLANE_MODE", "standalone")
+
+# ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-CAGENT_CONFIG_PATH = os.environ.get("CAGENT_CONFIG_PATH", "/etc/cagent/cagent.yaml")
+_explicit_config = os.environ.get("CAGENT_CONFIG_PATH")
+if _explicit_config:
+    CAGENT_CONFIG_PATH = _explicit_config
+elif DATAPLANE_MODE == "connected":
+    CAGENT_CONFIG_PATH = "/etc/cagent/cagent_connected.yaml"
+else:
+    CAGENT_CONFIG_PATH = "/etc/cagent/cagent.yaml"
 COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Corefile")
 ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
 EMAIL_CONFIG_PATH = os.environ.get("EMAIL_CONFIG_PATH", "/etc/cagent/email/accounts.json")
@@ -93,9 +104,8 @@ RUNTIME_POLICIES = {
 }
 
 # ---------------------------------------------------------------------------
-# Mode & connectivity
+# Connectivity
 # ---------------------------------------------------------------------------
-DATAPLANE_MODE = os.environ.get("DATAPLANE_MODE", "standalone")
 CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://backend:8000")
 CONTROL_PLANE_TOKEN = os.environ.get("CONTROL_PLANE_TOKEN", "")
 # Separate heartbeat URL — allows routing heartbeats to a lightweight Cloud Run
