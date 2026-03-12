@@ -30,7 +30,7 @@ from config_sync import (
     regenerate_configs,
     reload_envoy,
     restart_coredns,
-    restart_email_proxy,
+    reload_email_proxy,
     sync_config,
     _stable_hash,
     ENV_FILE_PATH,

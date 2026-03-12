@@ -169,7 +169,7 @@ class TestRegenerateConfigsDlp:
         self.env_path = tmp_path / ".env"
 
     @patch("config_sync.restart_mitm_proxy")
-    @patch("config_sync.restart_email_proxy")
+    @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
     def test_dlp_config_triggers_mitm_restart(self, mock_dns, mock_envoy, mock_email, mock_mitm):
@@ -199,7 +199,7 @@ class TestRegenerateConfigsDlp:
             assert written["mode"] == "block"
 
     @patch("config_sync.restart_mitm_proxy")
-    @patch("config_sync.restart_email_proxy")
+    @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
     def test_dlp_no_restart_when_unchanged(self, mock_dns, mock_envoy, mock_email, mock_mitm):
@@ -230,7 +230,7 @@ class TestRegenerateConfigsDlp:
             mock_mitm.assert_not_called()
 
     @patch("config_sync.restart_mitm_proxy")
-    @patch("config_sync.restart_email_proxy")
+    @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
     def test_standalone_mode_no_dlp_override(self, mock_dns, mock_envoy, mock_email, mock_mitm):

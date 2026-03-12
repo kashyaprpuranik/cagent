@@ -113,6 +113,26 @@ def health():
     return {"status": "ok", "accounts": len(providers)}
 
 
+@app.post("/reload")
+def reload_config():
+    """Reload email config from disk (called by warden after config sync)."""
+    account_list = load_email_config()
+    accounts.clear()
+    providers.clear()
+    errors = []
+    for acct in account_list:
+        accounts[acct.name] = acct
+        try:
+            providers[acct.name] = create_provider(acct)
+        except Exception as e:
+            errors.append(f"{acct.name}: {e}")
+            logger.error(f"Failed to initialize provider for {acct.name}: {e}")
+    logger.info(f"Reloaded config: {len(providers)} account(s)")
+    if errors:
+        return {"status": "partial", "accounts": len(providers), "errors": errors}
+    return {"status": "ok", "accounts": len(providers)}
+
+
 @app.get("/accounts")
 def list_accounts():
     """List configured accounts (no credentials exposed)."""
