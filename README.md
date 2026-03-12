@@ -211,6 +211,7 @@ For centralized management of multiple data planes, connect to a [control plane]
 graph TD
     subgraph cp["CONTROL PLANE"]
         UI["Admin UI"] --- API["API"] --- DB["Postgres"]
+        HBS["Heartbeat Service<br/>(less critical reqs)"]
     end
 
     subgraph dp["DATA PLANE"]
@@ -232,7 +233,8 @@ graph TD
         Warden --> cellnet
     end
 
-    Warden -- "heartbeat / config sync / alerts<br/>(outbound)" --> API
+    Warden -- "config sync / credential lookups<br/>(outbound)" --> API
+    Warden -- "heartbeat / alerts<br/>(outbound)" --> HBS
     API -- "log queries / commands / config pushes<br/>(inbound via mTLS)" --> Warden
 ```
 
