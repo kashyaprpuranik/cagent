@@ -1075,7 +1075,7 @@ class TestDeepHealth:
                     break
                 time.sleep(2)
             if data["health"]["checks"]["openobserve"]["status"] != "healthy":
-                pytest.skip("OpenObserve did not become healthy within 90s")
+                pytest.fail("OpenObserve did not become healthy within 90s")
 
     def test_metrics_health_has_core_checks(self, admin_url, data_plane_running):
         """Metrics health should include core infrastructure checks."""
@@ -1102,9 +1102,9 @@ class TestLogIngestionPipeline:
 
     @pytest.fixture(autouse=True)
     def _require_oo(self, admin_url, data_plane_running):
-        """Skip if OpenObserve is not running; wait for it to be healthy."""
+        """Fail if OpenObserve is not running; wait for it to be healthy."""
         if not is_openobserve_running():
-            pytest.skip("OpenObserve not running (--profile auditing required)")
+            pytest.fail("OpenObserve not running (--profile auditing required)")
         # Wait for OO to be healthy before running log ingestion tests
         deadline = time.time() + 90
         while time.time() < deadline:
@@ -1118,7 +1118,7 @@ class TestLogIngestionPipeline:
             except Exception:
                 pass
             time.sleep(2)
-        pytest.skip("OpenObserve did not become healthy within 90s")
+        pytest.fail("OpenObserve did not become healthy within 90s")
 
     def test_envoy_logs_ingested_into_oo(self, admin_url, data_plane_running):
         """Proxy traffic should appear in OpenObserve via warden search.
