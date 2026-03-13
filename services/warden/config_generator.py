@@ -99,15 +99,21 @@ class ConfigGenerator:
     def get_domains(self) -> list:
         """Get list of domain configs, merged with any additional domains.
 
-        In connected mode, CP domains are the sole source of truth — yaml
-        domains are ignored so that CP policy changes (disable, delete, create)
-        propagate without being shadowed by hardcoded yaml entries.
+        In connected mode, CP domains take precedence for overlapping domains,
+        but yaml-only domains are preserved (e.g. local services with tls: false).
+        In standalone mode, yaml takes precedence and additional fills gaps.
         """
-        if self.mode == "connected" and self._additional_domains:
-            return self._additional_domains
         yaml_domains = self.config.get("domains", [])
         if not self._additional_domains:
             return yaml_domains
+        if self.mode == "connected":
+            # CP entries take precedence; yaml-only entries preserved
+            cp_names = {d.get("domain", "").lower() for d in self._additional_domains}
+            merged = list(self._additional_domains)
+            for entry in yaml_domains:
+                if entry.get("domain", "").lower() not in cp_names:
+                    merged.append(entry)
+            return merged
         # Standalone merge: cagent.yaml takes precedence, additional fills in new domains
         yaml_names = {d.get("domain", "").lower() for d in yaml_domains}
         merged = list(yaml_domains)
