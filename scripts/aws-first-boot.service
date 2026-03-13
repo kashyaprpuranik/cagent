@@ -1,0 +1,15 @@
+[Unit]
+Description=Cagent AWS Marketplace first-boot setup
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+ConditionPathExists=!/opt/cagent/.env
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cagent/scripts/aws-first-boot.sh
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
