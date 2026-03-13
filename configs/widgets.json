@@ -96,7 +96,7 @@
       {"name": "mode", "type": "string", "role": "info"},
       {"name": "last_seen", "type": "datetime", "role": "info"}
     ],
-    "sql": "SELECT dlp_host as domain, json_extract(dlp_findings, '$[0].pattern') as pattern, COUNT(*) as count, dlp_mode as mode, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY dlp_host, pattern, dlp_mode ORDER BY count DESC LIMIT {limit}"
+    "sql": "SELECT dlp_host as domain, dlp_pattern as pattern, COUNT(*) as count, dlp_mode as mode, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY dlp_host, dlp_pattern, dlp_mode ORDER BY count DESC LIMIT {limit}"
   },
   "dlp_timeseries": {
     "name": "DLP Detections Over Time",
