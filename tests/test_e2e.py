@@ -569,17 +569,17 @@ class TestLocalAdminAPI:
         assert "timestamp" in data
 
     def test_detailed_health(self, admin_url):
-        """Detailed health should report on managed containers."""
-        r = requests.get(f"{admin_url}/api/health/detailed", timeout=10)
+        """Metrics health should report on managed containers."""
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
-        data = r.json()
-        assert data["status"] in ("healthy", "degraded")
-        assert "checks" in data
+        health = r.json()["health"]
+        assert health["status"] in ("healthy", "degraded")
+        assert "checks" in health
         # Agent containers have dynamic names (e.g. cagent-cell-dev-1)
-        agent_checks = [k for k in data["checks"] if "cell" in k and "manager" not in k]
-        assert len(agent_checks) >= 1, f"No cell container in checks: {list(data['checks'])}"
-        assert "dns-filter" in data["checks"]
-        assert "http-proxy" in data["checks"]
+        agent_checks = [k for k in health["checks"] if "cell" in k and "manager" not in k]
+        assert len(agent_checks) >= 1, f"No cell container in checks: {list(health['checks'])}"
+        assert "dns-filter" in health["checks"]
+        assert "http-proxy" in health["checks"]
 
     def test_info(self, admin_url):
         """Info endpoint should return container names and paths."""
@@ -1217,10 +1217,10 @@ class TestStatusEndpoints:
     """Test system status/metrics endpoints (requires --profile admin)."""
 
     def test_status_returns_system_info(self, admin_url, data_plane_running):
-        """GET /api/status should return CPU, memory, disk stats."""
-        r = requests.get(f"{admin_url}/api/status", timeout=10)
+        """GET /api/metrics should return CPU, memory, disk stats."""
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
-        data = r.json()
+        data = r.json()["system"]
         assert "cpu_percent" in data
         assert isinstance(data["cpu_percent"], (int, float))
         assert "memory_mb" in data
@@ -1233,7 +1233,7 @@ class TestStatusEndpoints:
         """GET /api/metrics should return detailed system metrics."""
         r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
-        data = r.json()
+        data = r.json()["system"]
         assert "cpu_count" in data
         assert data["cpu_count"] >= 1
         assert "memory_percent" in data
@@ -1241,43 +1241,40 @@ class TestStatusEndpoints:
         assert "cpu_freq_mhz" in data
 
     def test_disk_returns_mount_info(self, admin_url, data_plane_running):
-        """GET /api/disk should return disk usage per mount point."""
-        r = requests.get(f"{admin_url}/api/disk", timeout=10)
+        """GET /api/metrics should include disk usage per mount point."""
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
-        data = r.json()
-        assert "disks" in data
-        assert isinstance(data["disks"], list)
-        assert len(data["disks"]) >= 1
-        disk = data["disks"][0]
+        disks = r.json()["disks"]
+        assert isinstance(disks, list)
+        assert len(disks) >= 1
+        disk = disks[0]
         assert "path" in disk
         assert "total_bytes" in disk
         assert "used_bytes" in disk
         assert "percent_used" in disk
 
     def test_processes_returns_top_procs(self, admin_url, data_plane_running):
-        """GET /api/processes should return process list."""
-        r = requests.get(f"{admin_url}/api/processes", timeout=10)
+        """GET /api/metrics should include process list."""
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
-        data = r.json()
-        assert "processes" in data
-        assert isinstance(data["processes"], list)
+        processes = r.json()["processes"]
+        assert isinstance(processes, list)
         # Warden container should have at least a few processes
-        assert len(data["processes"]) >= 1
-        proc = data["processes"][0]
+        assert len(processes) >= 1
+        proc = processes[0]
         assert "pid" in proc
         assert "name" in proc
         assert "cpu_percent" in proc
 
     def test_network_returns_interface_stats(self, admin_url, data_plane_running):
-        """GET /api/network should return network interface statistics."""
-        r = requests.get(f"{admin_url}/api/network", timeout=10)
+        """GET /api/metrics should include network interface statistics."""
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
-        data = r.json()
-        assert "interfaces" in data
-        assert isinstance(data["interfaces"], list)
+        interfaces = r.json()["network"]
+        assert isinstance(interfaces, list)
         # Should have at least one non-loopback interface
-        if data["interfaces"]:
-            iface = data["interfaces"][0]
+        if interfaces:
+            iface = interfaces[0]
             assert "interface" in iface
             assert "bytes_sent" in iface
             assert "bytes_recv" in iface
@@ -1407,7 +1404,7 @@ class TestWardenAuthE2E:
         assert r.status_code == 200
 
         # Protected endpoints should also work without auth in standard mode
-        r = requests.get(f"{admin_url}/api/status", timeout=10)
+        r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
 
         r = requests.get(f"{admin_url}/api/policies/active", timeout=10)
@@ -1415,7 +1412,7 @@ class TestWardenAuthE2E:
 
     def test_health_always_public(self, admin_url, data_plane_running):
         """Health and ext-authz endpoints should never require auth."""
-        for path in ("/api/health", "/api/health/detailed", "/api/health/deep"):
+        for path in ("/api/health", "/api/metrics"):
             r = requests.get(f"{admin_url}{path}", timeout=10)
             assert r.status_code == 200, f"{path} returned {r.status_code}"
 
