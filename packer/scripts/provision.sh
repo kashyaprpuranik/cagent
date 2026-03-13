@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Packer provisioning script for the GCP Marketplace VM image.
+# Packer provisioning script for Marketplace VM images (GCP and AWS).
 # Runs during image build: installs packages, clones repo, pulls images,
 # installs the first-boot systemd service.
 set -euo pipefail
 
-echo "=== Cagent GCP Marketplace image provisioning ==="
+CLOUD_PROVIDER="${CLOUD_PROVIDER:-gcp}"
+echo "=== Cagent ${CLOUD_PROVIDER} Marketplace image provisioning ==="
 
 # Wait for cloud-init to finish (Packer base image may still be running it)
 cloud-init status --wait || true
@@ -38,11 +39,11 @@ cd /opt/cagent
 sudo docker compose --profile dev --profile managed --profile auditing pull
 
 # --- Install first-boot systemd service ---
-sudo cp /tmp/gcp-first-boot.sh /opt/cagent/scripts/gcp-first-boot.sh
-sudo chmod +x /opt/cagent/scripts/gcp-first-boot.sh
-sudo cp /tmp/gcp-first-boot.service /etc/systemd/system/gcp-first-boot.service
+sudo cp "/tmp/${CLOUD_PROVIDER}-first-boot.sh" "/opt/cagent/scripts/${CLOUD_PROVIDER}-first-boot.sh"
+sudo chmod +x "/opt/cagent/scripts/${CLOUD_PROVIDER}-first-boot.sh"
+sudo cp "/tmp/${CLOUD_PROVIDER}-first-boot.service" "/etc/systemd/system/${CLOUD_PROVIDER}-first-boot.service"
 sudo systemctl daemon-reload
-sudo systemctl enable gcp-first-boot.service
+sudo systemctl enable "${CLOUD_PROVIDER}-first-boot.service"
 
 # --- Cleanup ---
 sudo apt-get clean
