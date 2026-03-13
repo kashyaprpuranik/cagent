@@ -35,9 +35,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from heartbeat_loop import main_loop
 
-# Backward-compat re-exports: tests import these from services.warden.main
-from heartbeat_loop import _detect_public_ip  # noqa: F401
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

@@ -337,41 +337,7 @@ def _check_standalone_resources(agents):
         logger.error(f"Error checking standalone resource limits: {e}")
 
 
-def _detect_public_ip() -> Optional[str]:
-    """Detect public IPv4 address via cloud metadata service.
-
-    Uses CLOUD_PROVIDER env var to determine which metadata endpoint to query:
-    - "hetzner" -> Hetzner metadata
-    - "gce"     -> GCE metadata (with Metadata-Flavor header)
-    - unset     -> returns None (unknown cloud)
-    """
-    cloud = os.environ.get("CLOUD_PROVIDER", "").lower()
-    if cloud == "hetzner":
-        try:
-            resp = requests.get("http://169.254.169.254/hetzner/v1/metadata/public-ipv4", timeout=3)
-            if resp.status_code == 200:
-                text = resp.text.strip()
-                if "." in text and len(text) <= 15:
-                    return text
-        except Exception as e:
-            logger.debug("Failed to detect public IP from Hetzner metadata: %s", e)
-    elif cloud == "gce":
-        try:
-            resp = requests.get(
-                "http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip",
-                headers={"Metadata-Flavor": "Google"},
-                timeout=3,
-            )
-            if resp.status_code == 200:
-                text = resp.text.strip()
-                if "." in text and len(text) <= 15:
-                    return text
-        except Exception as e:
-            logger.debug("Failed to detect public IP from GCE metadata: %s", e)
-    return None
-
-
-def send_online_ping(public_ip: Optional[str] = None):
+def send_online_ping():
     """Notify the control plane that this data plane is online.
 
     POSTs to /api/v1/cell/online with retry logic:
@@ -382,13 +348,12 @@ def send_online_ping(public_ip: Optional[str] = None):
     """
     url = f"{CONTROL_PLANE_URL}/api/v1/cell/online"
     headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
-    body = {"public_ip": public_ip} if public_ip else None
     deadline = time.time() + 15 * 60  # 15 minutes
 
-    logger.info("Sending online ping to %s (public_ip=%s)", url, public_ip)
+    logger.info("Sending online ping to %s", url)
     while time.time() < deadline:
         try:
-            resp = requests.post(url, json=body, headers=headers, timeout=10)
+            resp = requests.post(url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 logger.info("Online ping accepted — provisioning complete")
                 return
@@ -453,10 +418,7 @@ def main_loop(stop_event: Optional[threading.Event] = None):
             logger.info("Infra containers not ready yet, rechecking in 5s")
             time.sleep(5)
         logger.info("Infra containers ready")
-        public_ip = _detect_public_ip()
-        if public_ip:
-            logger.info("Detected public IP: %s", public_ip)
-        send_online_ping(public_ip=public_ip)
+        send_online_ping()
 
     # Use wall-clock monotonic time for config sync scheduling so that
     # slow heartbeat cycles (e.g. Docker stats across many containers)
