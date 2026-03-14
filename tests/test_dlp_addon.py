@@ -55,9 +55,22 @@ from dlp_addon import (  # noqa: E402
     _try_base64_decode,
 )
 
-# Load the shipped default config and compile its patterns for use in tests
-_DEFAULT_CONFIG = _load_config(MITM_DIR / "dlp_config.json")
-_DEFAULT_RAW = _DEFAULT_CONFIG["custom_patterns"]
+# Hardcoded test patterns — must NOT depend on the live dlp_config.json which
+# warden may overwrite at runtime when running in connected mode.
+_DEFAULT_RAW = [
+    {"name": "aws_access_key", "regex": "AKIA[0-9A-Z]{16}"},
+    {"name": "github_token", "regex": "(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}"},
+    {"name": "openai_api_key", "regex": "sk-[A-Za-z0-9_-]{20,}"},
+    {"name": "anthropic_api_key", "regex": "sk-ant-[A-Za-z0-9_-]{20,}"},
+    {"name": "private_key", "regex": "-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"},
+    {"name": "jwt", "regex": "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"},
+    {"name": "generic_api_key", "regex": "(?i)(?:api_key|apikey|api-key|access_token|auth_token|secret_key)[\\s]*[=:]\\s*['\"]?[A-Za-z0-9_\\-/.]{20,}['\"]?"},
+    {"name": "connection_string", "regex": "(?:mongodb(?:\\+srv)?|postgres(?:ql)?|mysql|redis|amqp)://[^\\s'\"]{10,}"},
+    {"name": "ssn", "regex": "\\b\\d{3}-\\d{2}-\\d{4}\\b"},
+    {"name": "credit_card", "regex": "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b"},
+    {"name": "email_bulk", "regex": "[a-zA-Z0-9_.+-]{1,64}@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+", "threshold": 5},
+    {"name": "phone_bulk", "regex": "\\+?1?[-.\\s]?\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}", "threshold": 5},
+]
 _DEFAULT_COMPILED = _compile_custom_patterns(_DEFAULT_RAW)
 
 
@@ -564,9 +577,22 @@ class TestSelectivePatterns:
 # ---------------------------------------------------------------------------
 
 class TestDefaultConfig:
+    """Validate the shipped dlp_config.json (reads from git HEAD, not the live file
+    which warden may overwrite in connected mode)."""
+
+    @pytest.fixture(autouse=True)
+    def _load_shipped_config(self):
+        """Load the committed default config from git to avoid warden overwrites."""
+        import subprocess
+        raw = subprocess.check_output(
+            ["git", "show", "HEAD:configs/mitm/dlp_config.json"],
+            cwd=MITM_DIR.parent.parent,
+        )
+        self.shipped_config = json.loads(raw)
+        self.shipped_patterns = self.shipped_config["custom_patterns"]
 
     def test_shipped_config_has_all_patterns(self):
-        names = [p["name"] for p in _DEFAULT_RAW]
+        names = [p["name"] for p in self.shipped_patterns]
         assert "aws_access_key" in names
         assert "github_token" in names
         assert "ssn" in names
@@ -576,5 +602,5 @@ class TestDefaultConfig:
 
     def test_shipped_config_compiles_all_patterns(self):
         """All patterns in shipped config compile successfully with re2."""
-        compiled = _compile_custom_patterns(_DEFAULT_RAW)
-        assert len(compiled) == len(_DEFAULT_RAW)
+        compiled = _compile_custom_patterns(self.shipped_patterns)
+        assert len(compiled) == len(self.shipped_patterns)
