@@ -11,9 +11,9 @@ import requests
 from constants import (
     ALERT_CHECK_INTERVAL,
     CONTROL_PLANE_TOKEN,
+    CONTROL_PLANE_URL,
     DATA_PLANE_DIR,
     DATAPLANE_MODE,
-    HEARTBEAT_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ def alert_loop(stop_event: Optional[threading.Event] = None):
     logger.info(
         "Alert loop starting (interval=%ds, heartbeat_url=%s)",
         ALERT_CHECK_INTERVAL,
-        HEARTBEAT_URL,
+        CONTROL_PLANE_URL,
     )
 
     # Start from 60 minutes ago on first run
@@ -83,7 +83,7 @@ def alert_loop(stop_event: Optional[threading.Event] = None):
             if alerts:
                 try:
                     resp = requests.post(
-                        f"{HEARTBEAT_URL}/api/v1/cell/alerts",
+                        f"{CONTROL_PLANE_URL}/api/v1/cell/alerts",
                         json={"alerts": alerts},
                         headers={"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"},
                         timeout=10,
