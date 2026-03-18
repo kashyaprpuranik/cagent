@@ -1487,3 +1487,196 @@ class TestMITMProxyHTTPS:
         assert "10.200.1.15:8080" in result.stdout, (
             f"HTTPS_PROXY should point to mitmproxy, got: {result.stdout.strip()}"
         )
+
+
+# =============================================================================
+# Runtime Config Push
+# =============================================================================
+
+
+@pytest.mark.e2e
+class TestRuntimeConfig:
+    """Test runtime config push via warden command endpoint."""
+
+    def test_get_runtime_config(self, admin_url, data_plane_running):
+        """GET runtime config returns expected structure."""
+        r = requests.get(f"{admin_url}/api/commands/runtime-config", timeout=5)
+        assert r.status_code == 200
+        data = r.json()
+        assert "effective" in data
+        assert "overrides" in data
+        assert "updatable_keys" in data
+        assert "HEARTBEAT_INTERVAL" in data["effective"]
+        assert "HEARTBEAT_INTERVAL" in data["updatable_keys"]
+
+    def test_push_heartbeat_interval(self, admin_url, data_plane_running):
+        """Push HEARTBEAT_INTERVAL and verify it takes effect."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"HEARTBEAT_INTERVAL": 45}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "completed"
+        assert data["applied"]["HEARTBEAT_INTERVAL"] == 45
+
+        # Verify it's reflected in runtime config
+        r = requests.get(f"{admin_url}/api/commands/runtime-config", timeout=5)
+        assert r.json()["effective"]["HEARTBEAT_INTERVAL"] == 45
+        assert r.json()["overrides"]["HEARTBEAT_INTERVAL"] == 45
+
+    def test_push_config_sync_interval(self, admin_url, data_plane_running):
+        """Push CONFIG_SYNC_INTERVAL and verify it takes effect."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"CONFIG_SYNC_INTERVAL": 120}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert r.json()["applied"]["CONFIG_SYNC_INTERVAL"] == 120
+
+    def test_push_alert_check_interval(self, admin_url, data_plane_running):
+        """Push ALERT_CHECK_INTERVAL and verify it takes effect."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"ALERT_CHECK_INTERVAL": 30}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert r.json()["applied"]["ALERT_CHECK_INTERVAL"] == 30
+
+    def test_push_openobserve_url(self, admin_url, data_plane_running):
+        """Push OPENOBSERVE_URL and verify it takes effect."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"OPENOBSERVE_URL": "http://custom-log-store:5080"}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert r.json()["applied"]["OPENOBSERVE_URL"] == "http://custom-log-store:5080"
+
+        r = requests.get(f"{admin_url}/api/commands/runtime-config", timeout=5)
+        assert r.json()["effective"]["OPENOBSERVE_URL"] == "http://custom-log-store:5080"
+
+    def test_push_beta_features(self, admin_url, data_plane_running):
+        """Push BETA_FEATURES and verify it takes effect."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"BETA_FEATURES": "email,mcp"}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert r.json()["applied"]["BETA_FEATURES"] == "email,mcp"
+
+    def test_push_warden_api_token(self, admin_url, data_plane_running):
+        """Push WARDEN_API_TOKEN and verify it's accepted (standalone mode — no auth enforced)."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"WARDEN_API_TOKEN": "new-test-token"}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert r.json()["applied"]["WARDEN_API_TOKEN"] == "new-test-token"
+
+        # Verify runtime-config reports token is set (doesn't leak value)
+        r = requests.get(f"{admin_url}/api/commands/runtime-config", timeout=5)
+        assert r.json()["effective"]["WARDEN_API_TOKEN"] == "(set)"
+
+        # Clean up: remove the token override so subsequent tests aren't blocked
+        # (in standalone mode auth is skipped, but clean up anyway)
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"WARDEN_API_TOKEN": ""}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+
+    def test_push_ssh_authorized_keys(self, admin_url, data_plane_running):
+        """Push SSH_AUTHORIZED_KEYS and verify the file is written to the cell."""
+        test_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAATEST e2e-test@cagent"
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"SSH_AUTHORIZED_KEYS": test_key}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert r.json()["applied"]["SSH_AUTHORIZED_KEYS"] == test_key
+
+        # Verify the key was written into the cell container
+        result = exec_in_cell("cat /home/cell/.ssh/authorized_keys 2>/dev/null || echo MISSING")
+        assert "e2e-test@cagent" in result.stdout, (
+            f"SSH key not found in cell container: {result.stdout}"
+        )
+
+    def test_reject_unknown_key(self, admin_url, data_plane_running):
+        """Unknown keys should be rejected."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"UNKNOWN_KEY": "value"}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["applied"]) == 0
+        assert any("not in allowlist" in msg for msg in data["rejected"])
+
+    def test_reject_out_of_bounds_min(self, admin_url, data_plane_running):
+        """Values below minimum should be rejected."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"HEARTBEAT_INTERVAL": 1}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert any("min" in msg for msg in r.json()["rejected"])
+
+    def test_reject_out_of_bounds_max(self, admin_url, data_plane_running):
+        """Values above maximum should be rejected."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"HEARTBEAT_INTERVAL": 99999}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert any("max" in msg for msg in r.json()["rejected"])
+
+    def test_reject_wrong_type(self, admin_url, data_plane_running):
+        """Wrong types should be rejected."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"HEARTBEAT_INTERVAL": "not_a_number"}},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert any("expected int" in msg for msg in r.json()["rejected"])
+
+    def test_mixed_valid_and_invalid(self, admin_url, data_plane_running):
+        """Mix of valid and invalid keys — valid ones apply, invalid rejected."""
+        r = requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {
+                "ALERT_CHECK_INTERVAL": 45,
+                "FAKE_KEY": "nope",
+                "HEARTBEAT_INTERVAL": 0,  # below min
+            }},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert "ALERT_CHECK_INTERVAL" in data["applied"]
+        assert len(data["rejected"]) == 2
+
+    def test_config_persists_across_reads(self, admin_url, data_plane_running):
+        """Config overrides persist to disk and survive re-reads."""
+        # Push a value
+        requests.post(
+            f"{admin_url}/api/commands/update-config",
+            json={"config": {"ALERT_CHECK_INTERVAL": 55}},
+            timeout=10,
+        )
+
+        # Read multiple times — should be consistent
+        for _ in range(3):
+            r = requests.get(f"{admin_url}/api/commands/runtime-config", timeout=5)
+            assert r.json()["overrides"]["ALERT_CHECK_INTERVAL"] == 55

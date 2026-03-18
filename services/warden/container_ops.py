@@ -438,6 +438,19 @@ def execute_command(command: str, container, args: Optional[dict] = None) -> tup
             container.start()
             return True, f"Cell {name} wiped (workspace={'wiped' if wipe_workspace else 'preserved'})"
 
+        elif command == "update_config":
+            import runtime_config
+            config = args.get("config", {}) if args else {}
+            applied, rejected = runtime_config.validate_and_merge(config)
+            # Handle SSH_AUTHORIZED_KEYS specially
+            if "SSH_AUTHORIZED_KEYS" in applied:
+                from routers.commands import _apply_ssh_keys
+                _apply_ssh_keys(applied["SSH_AUTHORIZED_KEYS"])
+            msg = f"Applied {len(applied)} key(s)"
+            if rejected:
+                msg += f", rejected {len(rejected)}: {'; '.join(rejected)}"
+            return True, msg
+
         else:
             return False, f"Unknown command: {command}"
 
