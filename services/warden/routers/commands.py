@@ -180,21 +180,30 @@ def update_config(body: UpdateConfigRequest):
 
 
 def _apply_ssh_keys(keys: str):
-    """Write SSH authorized_keys into the cell container."""
-    try:
-        container = _get_cell_container()
-        keys_content = keys.encode("utf-8")
-        tar_stream = io.BytesIO()
-        with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-            info = tarfile.TarInfo(name="authorized_keys")
-            info.size = len(keys_content)
-            info.mode = 0o600
-            tar.addfile(info, io.BytesIO(keys_content))
-        tar_stream.seek(0)
-        container.put_archive("/home/cell/.ssh", tar_stream)
-        logger.info("SSH authorized_keys updated in cell container")
-    except Exception as e:
-        logger.error("Failed to update SSH authorized_keys: %s", e)
+    """Write SSH authorized_keys into all cell containers.
+
+    Uses docker exec instead of put_archive because cell containers
+    have a read-only rootfs with /home/cell as a tmpfs mount.
+    """
+    containers = discover_cell_containers()
+    for container in containers:
+        try:
+            # Use base64 to safely transport the key content without shell escaping issues
+            import base64
+            encoded = base64.b64encode(keys.encode()).decode()
+            exit_code, output = container.exec_run(
+                ["sh", "-c",
+                 f"echo '{encoded}' | base64 -d > /home/cell/.ssh/authorized_keys"
+                 " && chmod 600 /home/cell/.ssh/authorized_keys"
+                 " && chown cell:cell /home/cell/.ssh/authorized_keys"],
+                user="root",
+            )
+            if exit_code == 0:
+                logger.info("SSH authorized_keys updated in %s", container.name)
+            else:
+                logger.error("Failed to update SSH keys in %s (exit %d): %s", container.name, exit_code, output)
+        except Exception as e:
+            logger.error("Failed to update SSH authorized_keys in %s: %s", container.name, e)
 
 
 def _apply_mtls_certs(applied: dict):
