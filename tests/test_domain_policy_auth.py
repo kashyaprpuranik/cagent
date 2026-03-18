@@ -2,8 +2,8 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-# Add services/warden to python path
-sys.path.append(os.path.join(os.getcwd(), "services/warden"))
+# Add services/warden to python path so warden modules are importable
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "warden"))
 
 # Mock docker before importing warden modules
 mock_docker = MagicMock()
@@ -17,14 +17,14 @@ mock_container = MagicMock()
 mock_container.name = "cell"
 mock_client.containers.list.return_value = [mock_container]
 
-from services.warden.routers.domain_policy import get_domain_policy
+from routers.domain_policy import get_domain_policy
 
 
 def test_domain_policy_auth_success():
     """Test that valid token returns full policy."""
     with (
-        patch("services.warden.routers.domain_policy.CONTROL_PLANE_TOKEN", "secret-token"),
-        patch("services.warden.routers.domain_policy._cache_get") as mock_cache_get,
+        patch("routers.domain_policy.CONTROL_PLANE_TOKEN", "secret-token"),
+        patch("routers.domain_policy._cache_get") as mock_cache_get,
     ):
         # Mock policy with sensitive fields
         mock_policy = {
@@ -47,8 +47,8 @@ def test_domain_policy_auth_success():
 def test_domain_policy_auth_failure():
     """Test that invalid token returns redacted policy."""
     with (
-        patch("services.warden.routers.domain_policy.CONTROL_PLANE_TOKEN", "secret-token"),
-        patch("services.warden.routers.domain_policy._cache_get") as mock_cache_get,
+        patch("routers.domain_policy.CONTROL_PLANE_TOKEN", "secret-token"),
+        patch("routers.domain_policy._cache_get") as mock_cache_get,
     ):
         # Mock policy with sensitive fields
         mock_policy = {
@@ -73,8 +73,8 @@ def test_domain_policy_auth_failure():
 def test_domain_policy_auth_missing_header():
     """Test that missing authorization header returns redacted policy."""
     with (
-        patch("services.warden.routers.domain_policy.CONTROL_PLANE_TOKEN", "secret-token"),
-        patch("services.warden.routers.domain_policy._cache_get") as mock_cache_get,
+        patch("routers.domain_policy.CONTROL_PLANE_TOKEN", "secret-token"),
+        patch("routers.domain_policy._cache_get") as mock_cache_get,
     ):
         # Mock policy with sensitive fields
         mock_policy = {
