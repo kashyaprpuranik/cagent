@@ -29,6 +29,10 @@ UPDATABLE_KEYS: dict[str, dict] = {
     "OPENOBSERVE_PASSWORD": {"type": str},
     "BETA_FEATURES": {"type": str},
     "SSH_AUTHORIZED_KEYS": {"type": str},
+    "WARDEN_API_TOKEN": {"type": str},
+    "WARDEN_TLS_CERT": {"type": str},
+    "WARDEN_TLS_KEY": {"type": str},
+    "WARDEN_MTLS_CA_CERT": {"type": str},
 }
 
 

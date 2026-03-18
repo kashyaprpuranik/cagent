@@ -7,6 +7,7 @@ in the DB for the next heartbeat poll.
 import io
 import logging
 import tarfile
+from pathlib import Path
 from typing import Optional
 
 import docker
@@ -161,12 +162,20 @@ def update_config(body: UpdateConfigRequest):
     if "SSH_AUTHORIZED_KEYS" in applied:
         _apply_ssh_keys(applied["SSH_AUTHORIZED_KEYS"])
 
+    # Handle mTLS cert updates: overwrite PEM files and restart warden
+    mtls_keys = {"WARDEN_TLS_CERT", "WARDEN_TLS_KEY", "WARDEN_MTLS_CA_CERT"}
+    needs_restart = bool(mtls_keys & applied.keys())
+    if needs_restart:
+        _apply_mtls_certs(applied)
+
     return {
         "status": "completed",
         "command": "update_config",
-        "message": f"Applied {len(applied)} key(s)" + (f", rejected {len(rejected)}" if rejected else ""),
-        "applied": applied,
+        "message": f"Applied {len(applied)} key(s)" + (f", rejected {len(rejected)}" if rejected else "")
+        + ("; warden restart scheduled for cert update" if needs_restart else ""),
+        "applied": {k: v for k, v in applied.items() if k not in mtls_keys},
         "rejected": rejected,
+        "restart_scheduled": needs_restart,
     }
 
 
@@ -188,11 +197,52 @@ def _apply_ssh_keys(keys: str):
         logger.error("Failed to update SSH authorized_keys: %s", e)
 
 
+def _apply_mtls_certs(applied: dict):
+    """Overwrite mTLS PEM files and schedule warden container restart.
+
+    New certs are base64-encoded in the applied dict. We decode and overwrite
+    the existing temp PEM files, then restart the warden container so uvicorn
+    picks up the new SSL context.
+    """
+    import base64
+    import threading
+    from constants import MTLS_CERT_PATH, MTLS_KEY_PATH, MTLS_CA_CERT_PATH, WARDEN_CONTAINER_NAME
+
+    cert_map = {
+        "WARDEN_TLS_CERT": MTLS_CERT_PATH,
+        "WARDEN_TLS_KEY": MTLS_KEY_PATH,
+        "WARDEN_MTLS_CA_CERT": MTLS_CA_CERT_PATH,
+    }
+
+    for key, path in cert_map.items():
+        if key in applied and path:
+            try:
+                raw = base64.b64decode(applied[key])
+                Path(path).write_bytes(raw)
+                logger.info("Updated mTLS cert file: %s", path)
+            except Exception as e:
+                logger.error("Failed to write %s to %s: %s", key, path, e)
+
+    # Schedule a delayed self-restart so we can return the response first
+    def _restart_warden():
+        import time
+        time.sleep(2)
+        try:
+            container = docker_client.containers.get(WARDEN_CONTAINER_NAME)
+            container.restart(timeout=10)
+            logger.info("Warden container restarted for mTLS cert update")
+        except Exception as e:
+            logger.error("Failed to restart warden: %s", e)
+
+    threading.Thread(target=_restart_warden, daemon=True).start()
+
+
 @router.get("/commands/runtime-config")
 def get_runtime_config():
     """Return current effective runtime config (overrides + defaults)."""
     from constants import HEARTBEAT_INTERVAL, CONFIG_SYNC_INTERVAL, ALERT_CHECK_INTERVAL
     from constants import OPENOBSERVE_URL, OPENOBSERVE_USER, BETA_FEATURES
+    from constants import WARDEN_API_TOKEN, MTLS_ENABLED
 
     overrides = runtime_config.load()
     effective = {
@@ -202,6 +252,11 @@ def get_runtime_config():
         "OPENOBSERVE_URL": runtime_config.get("OPENOBSERVE_URL", OPENOBSERVE_URL),
         "OPENOBSERVE_USER": runtime_config.get("OPENOBSERVE_USER", OPENOBSERVE_USER),
         "BETA_FEATURES": runtime_config.get("BETA_FEATURES", ",".join(BETA_FEATURES)),
+        "WARDEN_API_TOKEN": "(set)" if runtime_config.get("WARDEN_API_TOKEN", WARDEN_API_TOKEN) else "(not set)",
+        "MTLS_ENABLED": MTLS_ENABLED,
+        "WARDEN_TLS_CERT": "(overridden)" if "WARDEN_TLS_CERT" in overrides else "(default)",
+        "WARDEN_TLS_KEY": "(overridden)" if "WARDEN_TLS_KEY" in overrides else "(default)",
+        "WARDEN_MTLS_CA_CERT": "(overridden)" if "WARDEN_MTLS_CA_CERT" in overrides else "(default)",
     }
     return {
         "overrides": overrides,
