@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+import runtime_config
 import yaml
 from config_sync import (
     config_generator,
@@ -450,9 +451,10 @@ def main_loop(stop_event: Optional[threading.Event] = None):
 
             # Version-driven config sync: only fetch policies when CP signals a change
             now = time.monotonic()
+            sync_interval = int(runtime_config.get("CONFIG_SYNC_INTERVAL", CONFIG_SYNC_INTERVAL))
             if policy_version is None:
                 # No Redis on CP or old CP — fall back to interval polling
-                if (now - last_sync_time) >= CONFIG_SYNC_INTERVAL:
+                if (now - last_sync_time) >= sync_interval:
                     sync_config()
                     last_sync_time = now
             elif policy_version != config_state.last_policy_version:
@@ -474,8 +476,9 @@ def main_loop(stop_event: Optional[threading.Event] = None):
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
 
-        # Wait for next cycle (use stop_event.wait for clean shutdown)
+        # Wait for next cycle — re-read interval from runtime overrides
+        interval = int(runtime_config.get("HEARTBEAT_INTERVAL", HEARTBEAT_INTERVAL))
         if stop_event:
-            stop_event.wait(HEARTBEAT_INTERVAL)
+            stop_event.wait(interval)
         else:
-            time.sleep(HEARTBEAT_INTERVAL)
+            time.sleep(interval)

@@ -4,10 +4,13 @@ The CP pushes commands via mTLS instead of queuing them
 in the DB for the next heartbeat poll.
 """
 
+import io
 import logging
+import tarfile
 from typing import Optional
 
 import docker
+import runtime_config
 from constants import docker_client
 from fastapi import APIRouter, HTTPException
 from constants import discover_cell_containers
@@ -143,3 +146,65 @@ def start_cell():
         return {"status": "completed", "command": "start", "message": f"Container {container.name} started"}
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=f"Start failed: {e}")
+
+
+class UpdateConfigRequest(BaseModel):
+    config: dict
+
+
+@router.post("/commands/update-config")
+def update_config(body: UpdateConfigRequest):
+    """Apply runtime config overrides pushed from the control plane."""
+    applied, rejected = runtime_config.validate_and_merge(body.config)
+
+    # Handle SSH_AUTHORIZED_KEYS specially: write to cell container
+    if "SSH_AUTHORIZED_KEYS" in applied:
+        _apply_ssh_keys(applied["SSH_AUTHORIZED_KEYS"])
+
+    return {
+        "status": "completed",
+        "command": "update_config",
+        "message": f"Applied {len(applied)} key(s)" + (f", rejected {len(rejected)}" if rejected else ""),
+        "applied": applied,
+        "rejected": rejected,
+    }
+
+
+def _apply_ssh_keys(keys: str):
+    """Write SSH authorized_keys into the cell container."""
+    try:
+        container = _get_cell_container()
+        keys_content = keys.encode("utf-8")
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+            info = tarfile.TarInfo(name="authorized_keys")
+            info.size = len(keys_content)
+            info.mode = 0o600
+            tar.addfile(info, io.BytesIO(keys_content))
+        tar_stream.seek(0)
+        container.put_archive("/home/cell/.ssh", tar_stream)
+        logger.info("SSH authorized_keys updated in cell container")
+    except Exception as e:
+        logger.error("Failed to update SSH authorized_keys: %s", e)
+
+
+@router.get("/commands/runtime-config")
+def get_runtime_config():
+    """Return current effective runtime config (overrides + defaults)."""
+    from constants import HEARTBEAT_INTERVAL, CONFIG_SYNC_INTERVAL, ALERT_CHECK_INTERVAL
+    from constants import OPENOBSERVE_URL, OPENOBSERVE_USER, BETA_FEATURES
+
+    overrides = runtime_config.load()
+    effective = {
+        "HEARTBEAT_INTERVAL": int(runtime_config.get("HEARTBEAT_INTERVAL", HEARTBEAT_INTERVAL)),
+        "CONFIG_SYNC_INTERVAL": int(runtime_config.get("CONFIG_SYNC_INTERVAL", CONFIG_SYNC_INTERVAL)),
+        "ALERT_CHECK_INTERVAL": int(runtime_config.get("ALERT_CHECK_INTERVAL", ALERT_CHECK_INTERVAL)),
+        "OPENOBSERVE_URL": runtime_config.get("OPENOBSERVE_URL", OPENOBSERVE_URL),
+        "OPENOBSERVE_USER": runtime_config.get("OPENOBSERVE_USER", OPENOBSERVE_USER),
+        "BETA_FEATURES": runtime_config.get("BETA_FEATURES", ",".join(BETA_FEATURES)),
+    }
+    return {
+        "overrides": overrides,
+        "effective": effective,
+        "updatable_keys": list(runtime_config.UPDATABLE_KEYS.keys()),
+    }
