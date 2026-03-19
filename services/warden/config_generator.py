@@ -989,15 +989,21 @@ class ConfigGenerator:
 
     def write_envoy_config(self, output_path: str) -> bool:
         """Write generated Envoy config (monolithic format)."""
-        yaml_content = yaml.dump(self.generate_envoy_config(), default_flow_style=False, sort_keys=False)
-        content = self._yaml_header("Envoy Configuration") + yaml_content
-        return self._write_file(output_path, content, "Envoy config")
+        try:
+            yaml_content = yaml.dump(self.generate_envoy_config(), default_flow_style=False, sort_keys=False)
+        except Exception as e:
+            logger.error(f"Failed to generate Envoy config: {e}")
+            return False
+        return self._write_file(output_path, self._yaml_header("Envoy Configuration") + yaml_content, "Envoy config")
 
     def write_envoy_bootstrap(self, output_path: str) -> bool:
         """Write Envoy bootstrap config (xDS mode)."""
-        yaml_content = yaml.dump(self.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False)
-        content = self._yaml_header("Envoy Bootstrap (xDS mode)") + yaml_content
-        return self._write_file(output_path, content, "Envoy bootstrap")
+        try:
+            yaml_content = yaml.dump(self.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False)
+        except Exception as e:
+            logger.error(f"Failed to generate Envoy bootstrap: {e}")
+            return False
+        return self._write_file(output_path, self._yaml_header("Envoy Bootstrap (xDS mode)") + yaml_content, "Envoy bootstrap")
 
     def write_resource_env(self, env_path: str) -> bool:
         """Write resource limits from cagent.yaml to .env file.

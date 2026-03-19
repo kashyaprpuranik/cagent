@@ -381,15 +381,6 @@ def _fetch_cp_resource(path: str, label: str, params: dict = None) -> Optional[d
     return None
 
 
-def _extract_items(data) -> list:
-    """Normalise a CP response to a list of items."""
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return data.get("items", [data] if "domain" in data or "enabled" in data else [])
-    return []
-
-
 def sync_config() -> bool:
     """Sync configuration and regenerate CoreDNS, Envoy, and email configs.
 
@@ -426,7 +417,7 @@ def sync_config() -> bool:
         "/api/v1/email-policies", "email policies", params={"include_credentials": "true"}
     )
     if data is not None:
-        policies = _extract_items(data)
+        policies = data.get("items", []) if isinstance(data, dict) else data
         cp_email_entries = [_cp_email_policy_to_account_entry(p) for p in policies if p.get("enabled", True)]
         logger.info(f"Fetched {len(cp_email_entries)} email policies from control plane")
 
