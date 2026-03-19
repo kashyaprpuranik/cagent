@@ -578,6 +578,7 @@ services:
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       # Local admin settings
       - DATA_PLANE_DIR=/app/cagent
+      - RUNTIME_CONFIG_PATH=${RUNTIME_CONFIG_PATH:-}
 
     volumes:
       # Docker socket for container management

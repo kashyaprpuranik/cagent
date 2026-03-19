@@ -13,10 +13,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Location: inside the mounted DP dir so it persists across container restarts
-_CONFIG_PATH = os.path.join(
-    os.environ.get("DATA_PLANE_DIR", "/app/cagent"),
-    "runtime_config.json",
+# Location: inside the mounted DP dir so it persists across container restarts.
+# Override with RUNTIME_CONFIG_PATH for testing (avoids polluting the repo checkout).
+_CONFIG_PATH = os.environ.get(
+    "RUNTIME_CONFIG_PATH",
+    os.path.join(os.environ.get("DATA_PLANE_DIR", "/app/cagent"), "runtime_config.json"),
 )
 
 # Allowlist of keys that can be hot-updated, with type and bounds
