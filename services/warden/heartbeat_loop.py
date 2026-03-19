@@ -12,6 +12,7 @@ import requests
 import runtime_config
 import yaml
 from config_sync import (
+    _atomic_write,
     config_generator,
     config_state,
     reload_envoy,
@@ -28,7 +29,9 @@ from constants import (
     CONTROL_PLANE_URL,
     COREDNS_COREFILE_PATH,
     DATAPLANE_MODE,
+    ENVOY_CDS_PATH,
     ENVOY_CONFIG_PATH,
+    ENVOY_RDS_PATH,
     HEARTBEAT_INTERVAL,
     HEARTBEAT_URL,
     MAX_HEARTBEAT_WORKERS,
@@ -379,6 +382,11 @@ def main_loop(stop_event: Optional[threading.Event] = None):
     logger.info("Generating initial configs from cagent.yaml...")
     config_generator.load_config()
     config_generator.write_corefile(COREDNS_COREFILE_PATH)
+    # Write CDS + RDS before bootstrap so Envoy finds them on startup
+    cds_yaml = yaml.dump(config_generator.generate_envoy_cds(), default_flow_style=False, sort_keys=False)
+    _atomic_write(ENVOY_CDS_PATH, cds_yaml)
+    rds_yaml = yaml.dump(config_generator.generate_envoy_rds(), default_flow_style=False, sort_keys=False)
+    _atomic_write(ENVOY_RDS_PATH, rds_yaml)
     config_generator.write_envoy_bootstrap(ENVOY_CONFIG_PATH)
     config_generator.write_resource_env(ENV_FILE_PATH)
     restart_coredns()
@@ -389,9 +397,7 @@ def main_loop(stop_event: Optional[threading.Event] = None):
         config_generator.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False
     )
     config_state.envoy_bootstrap_hash = _stable_hash(bootstrap_yaml)
-    cds_yaml = yaml.dump(config_generator.generate_envoy_cds(), default_flow_style=False, sort_keys=False)
     config_state.envoy_cds_hash = _stable_hash(cds_yaml)
-    rds_yaml = yaml.dump(config_generator.generate_envoy_rds(), default_flow_style=False, sort_keys=False)
     config_state.envoy_rds_hash = _stable_hash(rds_yaml)
     config_state.email_hash = _stable_hash(config_generator.generate_email_config())
     config_state.dlp_hash = _stable_hash(config_generator.generate_dlp_config())
