@@ -122,6 +122,9 @@ if [ "$RUN_E2E" = true ]; then
     cp configs/cagent.yaml configs/.cagent.yaml.bak
     cp configs/coredns/Corefile configs/coredns/.Corefile.bak
 
+    # Use a temp path for runtime config so e2e never reads/writes the repo checkout
+    export RUNTIME_CONFIG_PATH=/tmp/runtime_config.json
+
     if [ "$NEED_RESTART" = true ]; then
         echo "Stopping any existing containers first..."
         # Use -v to remove volumes (proxy-config may have stale envoy config from
