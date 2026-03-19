@@ -29,9 +29,11 @@ Config Sources (standalone vs connected mode):
 import hashlib
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+_UTC = timezone.utc
 
 import yaml
 
@@ -96,6 +98,16 @@ class ConfigGenerator:
         logger.info(f"Loaded config from {self.config_path}")
         return True
 
+    @staticmethod
+    def _merge_by_key(primary: list, secondary: list, key: str) -> list:
+        """Merge two lists of dicts, keeping *primary* entries on conflict.
+
+        Entries from *secondary* whose key (case-insensitive) is not in
+        *primary* are appended.
+        """
+        seen = {d.get(key, "").lower() for d in primary}
+        return list(primary) + [e for e in secondary if e.get(key, "").lower() not in seen]
+
     def get_domains(self) -> list:
         """Get list of domain configs, merged with any additional domains.
 
@@ -107,20 +119,8 @@ class ConfigGenerator:
         if not self._additional_domains:
             return yaml_domains
         if self.mode == "connected":
-            # CP entries take precedence; yaml-only entries preserved
-            cp_names = {d.get("domain", "").lower() for d in self._additional_domains}
-            merged = list(self._additional_domains)
-            for entry in yaml_domains:
-                if entry.get("domain", "").lower() not in cp_names:
-                    merged.append(entry)
-            return merged
-        # Standalone merge: cagent.yaml takes precedence, additional fills in new domains
-        yaml_names = {d.get("domain", "").lower() for d in yaml_domains}
-        merged = list(yaml_domains)
-        for entry in self._additional_domains:
-            if entry.get("domain", "").lower() not in yaml_names:
-                merged.append(entry)
-        return merged
+            return self._merge_by_key(self._additional_domains, yaml_domains, "domain")
+        return self._merge_by_key(yaml_domains, self._additional_domains, "domain")
 
     def get_email_accounts(self) -> list:
         """Get list of email account configs, merged with any additional accounts.
@@ -132,13 +132,7 @@ class ConfigGenerator:
         yaml_accounts = self.config.get("email", {}).get("accounts", [])
         if not self._additional_email_accounts:
             return yaml_accounts
-        # Standalone merge: cagent.yaml takes precedence, additional fills in new accounts
-        yaml_names = {a.get("name", "").lower() for a in yaml_accounts}
-        merged = list(yaml_accounts)
-        for entry in self._additional_email_accounts:
-            if entry.get("name", "").lower() not in yaml_names:
-                merged.append(entry)
-        return merged
+        return self._merge_by_key(yaml_accounts, self._additional_email_accounts, "name")
 
     def get_dns_config(self) -> dict:
         """Get DNS configuration."""
@@ -183,7 +177,7 @@ class ConfigGenerator:
         lines = [
             "# =============================================================================",
             "# CoreDNS Configuration - Auto-generated from cagent.yaml",
-            f"# Generated: {datetime.utcnow().isoformat()}Z",
+            f"# Generated: {datetime.now(tz=_UTC).isoformat()}Z",
             "# DO NOT EDIT - changes will be overwritten",
             "# =============================================================================",
             "",
@@ -936,15 +930,7 @@ class ConfigGenerator:
 
     def write_email_config(self, output_path: str) -> bool:
         """Write generated email accounts config as JSON."""
-        try:
-            content = self.generate_email_config()
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            Path(output_path).write_text(content)
-            logger.info(f"Wrote email config to {output_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to write email config: {e}")
-            return False
+        return self._write_file(output_path, self.generate_email_config(), "email config")
 
     # =========================================================================
     # DLP Config Generation
@@ -968,76 +954,56 @@ class ConfigGenerator:
 
     def write_dlp_config(self, output_path: str) -> bool:
         """Write generated DLP config as JSON."""
-        try:
-            content = self.generate_dlp_config()
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            Path(output_path).write_text(content)
-            logger.info(f"Wrote DLP config to {output_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to write DLP config: {e}")
-            return False
+        return self._write_file(output_path, self.generate_dlp_config(), "DLP config")
 
     # =========================================================================
     # Output Methods
     # =========================================================================
 
-    def write_corefile(self, output_path: str) -> bool:
-        """Write generated Corefile."""
+    @staticmethod
+    def _write_file(output_path: str, content: str, label: str) -> bool:
+        """Write content to a file with mkdir -p, logging, and error handling."""
         try:
-            content = self.generate_corefile()
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             Path(output_path).write_text(content)
-            logger.info(f"Wrote CoreDNS config to {output_path}")
+            logger.info(f"Wrote {label} to {output_path}")
             return True
         except Exception as e:
-            logger.error(f"Failed to write Corefile: {e}")
+            logger.error(f"Failed to write {label}: {e}")
             return False
+
+    def _yaml_header(self, title: str) -> str:
+        """Generate a YAML file header comment."""
+        ts = datetime.now(tz=_UTC).isoformat()
+        return (
+            f"# =============================================================================\n"
+            f"# {title} - Auto-generated from cagent.yaml\n"
+            f"# Generated: {ts}\n"
+            f"# DO NOT EDIT - changes will be overwritten\n"
+            f"# =============================================================================\n\n"
+        )
+
+    def write_corefile(self, output_path: str) -> bool:
+        """Write generated Corefile."""
+        return self._write_file(output_path, self.generate_corefile(), "CoreDNS config")
 
     def write_envoy_config(self, output_path: str) -> bool:
         """Write generated Envoy config (monolithic format)."""
         try:
-            config = self.generate_envoy_config()
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-            # Write as YAML for readability
-            yaml_content = yaml.dump(config, default_flow_style=False, sort_keys=False)
-
-            # Add header
-            header = f"""# =============================================================================
-# Envoy Configuration - Auto-generated from cagent.yaml
-# Generated: {datetime.utcnow().isoformat()}Z
-# DO NOT EDIT - changes will be overwritten
-# =============================================================================
-
-"""
-            Path(output_path).write_text(header + yaml_content)
-            logger.info(f"Wrote Envoy config to {output_path}")
-            return True
+            yaml_content = yaml.dump(self.generate_envoy_config(), default_flow_style=False, sort_keys=False)
         except Exception as e:
-            logger.error(f"Failed to write Envoy config: {e}")
+            logger.error(f"Failed to generate Envoy config: {e}")
             return False
+        return self._write_file(output_path, self._yaml_header("Envoy Configuration") + yaml_content, "Envoy config")
 
     def write_envoy_bootstrap(self, output_path: str) -> bool:
         """Write Envoy bootstrap config (xDS mode)."""
         try:
-            config = self.generate_envoy_bootstrap()
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            yaml_content = yaml.dump(config, default_flow_style=False, sort_keys=False)
-            header = f"""# =============================================================================
-# Envoy Bootstrap - Auto-generated (xDS mode)
-# Generated: {datetime.utcnow().isoformat()}Z
-# Routes and clusters are loaded dynamically via CDS/RDS files
-# DO NOT EDIT - changes will be overwritten
-# =============================================================================
-
-"""
-            Path(output_path).write_text(header + yaml_content)
-            logger.info(f"Wrote Envoy bootstrap to {output_path}")
-            return True
+            yaml_content = yaml.dump(self.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False)
         except Exception as e:
-            logger.error(f"Failed to write Envoy bootstrap: {e}")
+            logger.error(f"Failed to generate Envoy bootstrap: {e}")
             return False
+        return self._write_file(output_path, self._yaml_header("Envoy Bootstrap (xDS mode)") + yaml_content, "Envoy bootstrap")
 
     def write_resource_env(self, env_path: str) -> bool:
         """Write resource limits from cagent.yaml to .env file.

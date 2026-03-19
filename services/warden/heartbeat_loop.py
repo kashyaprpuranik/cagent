@@ -36,6 +36,7 @@ from constants import (
     discover_cell_containers,
 )
 from container_ops import (
+    _docker_container_update,
     _get_current_policy_label,
     _get_current_resource_limits,
     _infra_containers_ready,
@@ -46,6 +47,17 @@ from container_ops import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _resources_need_update(current: dict, desired_cpu, desired_mem, desired_pids) -> bool:
+    """Return True if any desired resource limit differs from current."""
+    if desired_cpu is not None and current["cpu_limit"] != desired_cpu:
+        return True
+    if desired_mem is not None and current["memory_limit_mb"] != desired_mem:
+        return True
+    if desired_pids is not None and current["pids_limit"] != desired_pids:
+        return True
+    return False
 
 # Thread-safe command result tracking (written from ThreadPoolExecutor workers,
 # read from the heartbeat sender on the next cycle).
@@ -221,16 +233,8 @@ def _heartbeat_and_handle(container):
         if desired_cpu is not None or desired_mem is not None or desired_pids is not None:
             # Profile has resource limits — apply them
             current = _get_current_resource_limits(container)
-            needs_update = False
 
-            if desired_cpu is not None and current["cpu_limit"] != desired_cpu:
-                needs_update = True
-            if desired_mem is not None and current["memory_limit_mb"] != desired_mem:
-                needs_update = True
-            if desired_pids is not None and current["pids_limit"] != desired_pids:
-                needs_update = True
-
-            if needs_update:
+            if _resources_need_update(current, desired_cpu, desired_mem, desired_pids):
                 # Snapshot original values before first profile update
                 if container.name not in _container_original_resources:
                     container.reload()
@@ -259,27 +263,17 @@ def _heartbeat_and_handle(container):
             # Docker's update API ignores NanoCPUs=0, so we must restore
             # the original value (e.g. the compose-defined CPU limit).
             restore_data = _container_original_resources[container.name]
-            try:
-                logger.info(f"Restoring resource limits on {container.name}: {restore_data}")
-                url = container.client.api._url("/containers/{0}/update", container.id)
-                res = container.client.api._post_json(url, data=restore_data)
-                container.client.api._result(res, True)
-                logger.info(f"Resource limits restored on {container.name}")
-            except Exception as e:
-                logger.error(f"Failed to restore resource limits on {container.name}: {e}")
+            logger.info(f"Restoring resource limits on {container.name}: {restore_data}")
+            _docker_container_update(container, restore_data)
             _container_original_resources.pop(container.name, None)
 
     return policy_version
 
 
-def _check_standalone_policy(agents):
-    """In standalone mode, check cagent.yaml runtime policy against containers.
+def _check_standalone_config(agents):
+    """In standalone mode, check runtime policy and resource limits from cagent.yaml.
 
-    Reads ``security.runtime_policy`` first, falls back to
-    ``security.seccomp_profile`` for backward compatibility.
-
-    Only recreates containers that already have a policy/seccomp label
-    (skips unlabelled/gVisor containers).
+    Reads the config file once and applies both policy and resource checks.
     """
     try:
         config_path = Path(CAGENT_CONFIG_PATH)
@@ -287,55 +281,39 @@ def _check_standalone_policy(agents):
             return
         with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
+
+        # --- Runtime policy ---
         security = config.get("security", {})
-        desired = security.get("runtime_policy") or security.get("seccomp_profile", "hardened")
-        if desired not in VALID_RUNTIME_POLICIES:
-            logger.warning(f"Invalid runtime_policy in cagent.yaml: {desired}")
-            return
+        desired_policy = security.get("runtime_policy") or security.get("seccomp_profile", "hardened")
+        if desired_policy in VALID_RUNTIME_POLICIES:
+            for container in agents:
+                current_label = _get_current_policy_label(container)
+                if current_label is not None and current_label != desired_policy:
+                    logger.info(
+                        f"Standalone policy mismatch on {container.name}: "
+                        f"current={current_label}, desired={desired_policy}"
+                    )
+                    recreate_container_with_policy(container, desired_policy)
+        elif desired_policy:
+            logger.warning(f"Invalid runtime_policy in cagent.yaml: {desired_policy}")
 
-        for container in agents:
-            current_label = _get_current_policy_label(container)
-            if current_label is not None and current_label != desired:
-                logger.info(
-                    f"Standalone policy mismatch on {container.name}: current={current_label}, desired={desired}"
-                )
-                recreate_container_with_policy(container, desired)
-    except Exception as e:
-        logger.error(f"Error checking standalone runtime policies: {e}")
-
-
-def _check_standalone_resources(agents):
-    """In standalone mode, apply resource limits from cagent.yaml resources section."""
-    try:
-        config_path = Path(CAGENT_CONFIG_PATH)
-        if not config_path.exists():
-            return
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f) or {}
+        # --- Resource limits ---
         resources = config.get("resources", {})
         if not resources:
             return
-
         desired_cpu = resources.get("cpu_limit")
         desired_mem = resources.get("memory_limit_mb")
         desired_pids = resources.get("pids_limit")
-
         if desired_cpu is None and desired_mem is None and desired_pids is None:
             return
 
         for container in agents:
             current = _get_current_resource_limits(container)
-            needs_update = False
-            if desired_cpu is not None and current["cpu_limit"] != desired_cpu:
-                needs_update = True
-            if desired_mem is not None and current["memory_limit_mb"] != desired_mem:
-                needs_update = True
-            if desired_pids is not None and current["pids_limit"] != desired_pids:
-                needs_update = True
+            needs_update = _resources_need_update(current, desired_cpu, desired_mem, desired_pids)
             if needs_update:
                 update_container_resources(container, desired_cpu, desired_mem, desired_pids)
     except Exception as e:
-        logger.error(f"Error checking standalone resource limits: {e}")
+        logger.error(f"Error checking standalone config: {e}")
 
 
 def send_online_ping():
@@ -397,19 +375,26 @@ def main_loop(stop_event: Optional[threading.Event] = None):
     logger.info(f"  Discovered {len(agents)} cell container(s): {[c.name for c in agents]}")
 
     # Initial config generation from cagent.yaml (always write on startup)
+    # Uses xDS mode (bootstrap + CDS/RDS) consistent with regenerate_configs().
     logger.info("Generating initial configs from cagent.yaml...")
     config_generator.load_config()
     config_generator.write_corefile(COREDNS_COREFILE_PATH)
-    config_generator.write_envoy_config(ENVOY_CONFIG_PATH)
+    config_generator.write_envoy_bootstrap(ENVOY_CONFIG_PATH)
     config_generator.write_resource_env(ENV_FILE_PATH)
     restart_coredns()
     reload_envoy()
     # Snapshot current state so regenerate_configs() can detect changes
     config_state.corefile_hash = _stable_hash(config_generator.generate_corefile())
-    config_state.envoy_hash = _stable_hash(
-        yaml.dump(config_generator.generate_envoy_config(), default_flow_style=False, sort_keys=False)
+    bootstrap_yaml = yaml.dump(
+        config_generator.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False
     )
+    config_state.envoy_bootstrap_hash = _stable_hash(bootstrap_yaml)
+    cds_yaml = yaml.dump(config_generator.generate_envoy_cds(), default_flow_style=False, sort_keys=False)
+    config_state.envoy_cds_hash = _stable_hash(cds_yaml)
+    rds_yaml = yaml.dump(config_generator.generate_envoy_rds(), default_flow_style=False, sort_keys=False)
+    config_state.envoy_rds_hash = _stable_hash(rds_yaml)
     config_state.email_hash = _stable_hash(config_generator.generate_email_config())
+    config_state.dlp_hash = _stable_hash(config_generator.generate_dlp_config())
     logger.info("Initial config generation complete")
 
     # Wait for infra containers before notifying CP that this DP is online
@@ -470,8 +455,7 @@ def main_loop(stop_event: Optional[threading.Event] = None):
 
             # Standalone mode: check runtime policy and resource limits from cagent.yaml
             if DATAPLANE_MODE == "standalone" and agents:
-                _check_standalone_policy(agents)
-                _check_standalone_resources(agents)
+                _check_standalone_config(agents)
 
         except Exception as e:
             logger.error(f"Error in main loop: {e}")

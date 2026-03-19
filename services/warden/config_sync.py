@@ -358,6 +358,29 @@ def _cp_email_policy_to_account_entry(policy: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _fetch_cp_resource(path: str, label: str, params: dict = None) -> Optional[dict]:
+    """Fetch a resource from the control plane API.
+
+    Returns the parsed JSON on success, None on failure.
+    """
+    headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
+    try:
+        response = requests.get(
+            f"{CONTROL_PLANE_URL}{path}",
+            params=params,
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return response.json()
+        logger.warning(f"Failed to fetch {label}: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Could not fetch {label}: {e}")
+    except Exception as e:
+        logger.error(f"Error parsing {label}: {e}")
+    return None
+
+
 def sync_config() -> bool:
     """Sync configuration and regenerate CoreDNS, Envoy, and email configs.
 
@@ -367,10 +390,8 @@ def sync_config() -> bool:
     Returns True if configs were updated, False otherwise.
     """
     if DATAPLANE_MODE == "standalone":
-        # Standalone mode: just use cagent.yaml
         return regenerate_configs()
 
-    # Connected mode: fetch from control plane and merge
     if not CONTROL_PLANE_URL or not CONTROL_PLANE_TOKEN:
         logger.warning("Control plane not configured, falling back to cagent.yaml")
         return regenerate_configs()
@@ -380,71 +401,31 @@ def sync_config() -> bool:
     cp_domain_entries = []
     cp_email_entries = []
     cp_dlp_config = None
-    headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
 
-    try:
-        # Fetch domain policies with credentials for local ext_authz lookups
-        response = requests.get(
-            f"{CONTROL_PLANE_URL}/api/v1/domain-policies",
-            params={"include_credentials": "true"},
-            headers=headers,
-            timeout=10,
-        )
+    # Fetch domain policies
+    data = _fetch_cp_resource(
+        "/api/v1/domain-policies", "domain policies", params={"include_credentials": "true"}
+    )
+    if data is not None:
+        policies = data.get("items", data) if isinstance(data, dict) else data
+        _synced_domain_policies = [p for p in policies if p.get("enabled", True)]
+        cp_domain_entries = [_cp_policy_to_domain_entry(p) for p in _synced_domain_policies]
+        logger.info(f"Fetched {len(cp_domain_entries)} domain policies from control plane")
 
-        if response.status_code == 200:
-            data = response.json()
-            policies = data.get("items", data) if isinstance(data, dict) else data
-            # Store full policies (with credentials) for local ext_authz lookups
-            _synced_domain_policies = [p for p in policies if p.get("enabled", True)]
-            cp_domain_entries = [_cp_policy_to_domain_entry(p) for p in _synced_domain_policies]
-            logger.info(f"Fetched {len(cp_domain_entries)} domain policies from control plane")
-        else:
-            logger.warning(f"Failed to fetch domain policies: {response.status_code}")
+    # Fetch email policies
+    data = _fetch_cp_resource(
+        "/api/v1/email-policies", "email policies", params={"include_credentials": "true"}
+    )
+    if data is not None:
+        policies = data.get("items", []) if isinstance(data, dict) else data
+        cp_email_entries = [_cp_email_policy_to_account_entry(p) for p in policies if p.get("enabled", True)]
+        logger.info(f"Fetched {len(cp_email_entries)} email policies from control plane")
 
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"Could not fetch domain policies: {e}")
-
-    try:
-        # Fetch email policies with credentials (requires agent token)
-        response = requests.get(
-            f"{CONTROL_PLANE_URL}/api/v1/email-policies?include_credentials=true",
-            headers=headers,
-            timeout=10,
-        )
-
-        if response.status_code == 200:
-            policies = response.json()
-            if isinstance(policies, dict):
-                policies = policies.get("items", [])
-            cp_email_entries = [_cp_email_policy_to_account_entry(p) for p in policies if p.get("enabled", True)]
-            logger.info(f"Fetched {len(cp_email_entries)} email policies from control plane")
-        else:
-            logger.warning(f"Failed to fetch email policies: {response.status_code}")
-
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"Could not fetch email policies: {e}")
-    except Exception as e:
-        logger.error(f"Error parsing email policies: {e}")
-
-    try:
-        # Fetch DLP policy from control plane
-        response = requests.get(
-            f"{CONTROL_PLANE_URL}/api/v1/dlp-policies",
-            headers=headers,
-            timeout=10,
-        )
-
-        if response.status_code == 200:
-            policy = response.json()
-            cp_dlp_config = _cp_dlp_policy_to_config(policy)
-            logger.info("Fetched DLP policy from control plane")
-        else:
-            logger.warning(f"Failed to fetch DLP policy: {response.status_code}")
-
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"Could not fetch DLP policy: {e}")
-    except Exception as e:
-        logger.error(f"Error parsing DLP policy: {e}")
+    # Fetch DLP policy
+    data = _fetch_cp_resource("/api/v1/dlp-policies", "DLP policy")
+    if data is not None:
+        cp_dlp_config = _cp_dlp_policy_to_config(data)
+        logger.info("Fetched DLP policy from control plane")
 
     try:
         return regenerate_configs(

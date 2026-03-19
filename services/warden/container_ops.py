@@ -318,6 +318,18 @@ def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, 
     if not data:
         return True, "No resource changes needed"
 
+    return _docker_container_update(container, data)
+
+
+def _docker_container_update(container, data: dict) -> tuple:
+    """Call Docker's /containers/{id}/update API directly.
+
+    The Python SDK's container.update() is missing support for NanoCPUs
+    and PidsLimit, so we use the low-level API.
+
+    Returns (success: bool, message: str).
+    """
+    name = container.name
     try:
         logger.info(f"Updating resource limits on {name}: {data}")
         url = container.client.api._url("/containers/{0}/update", container.id)
