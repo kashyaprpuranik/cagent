@@ -52,12 +52,8 @@ from container_ops import (
 logger = logging.getLogger(__name__)
 
 
-def _resources_need_update(current: dict, desired_cpu, desired_mem, desired_pids) -> bool:
-    """Return True if any desired resource limit differs from current."""
-    if desired_cpu is not None and current["cpu_limit"] != desired_cpu:
-        return True
-    if desired_mem is not None and current["memory_limit_mb"] != desired_mem:
-        return True
+def _resources_need_update(current: dict, desired_pids) -> bool:
+    """Return True if desired PIDs limit differs from current."""
     if desired_pids is not None and current["pids_limit"] != desired_pids:
         return True
     return False
@@ -228,31 +224,25 @@ def _heartbeat_and_handle(container):
                 }
 
     # Check resource limits (skip if policy change just triggered a recreation)
+    # Only PIDs limit is propagated from CP; CPU/memory are hardcoded in docker-compose.yml.
     if not policy_changed:
-        desired_cpu = response.get("cpu_limit")
-        desired_mem = response.get("memory_limit_mb")
         desired_pids = response.get("pids_limit")
 
-        if desired_cpu is not None or desired_mem is not None or desired_pids is not None:
+        if desired_pids is not None:
             # Profile has resource limits — apply them
             current = _get_current_resource_limits(container)
 
-            if _resources_need_update(current, desired_cpu, desired_mem, desired_pids):
+            if _resources_need_update(current, desired_pids):
                 # Snapshot original values before first profile update
                 if container.name not in _container_original_resources:
                     container.reload()
                     hc = container.attrs.get("HostConfig", {})
                     _container_original_resources[container.name] = {
-                        "NanoCPUs": hc.get("NanoCpus", 0) or 0,
-                        "Memory": hc.get("Memory", 0) or 0,
-                        "MemorySwap": hc.get("MemorySwap", 0) or 0,
                         "PidsLimit": hc.get("PidsLimit", 0) or 0,
                     }
 
                 success, message = update_container_resources(
                     container,
-                    cpu_limit=desired_cpu,
-                    memory_limit_mb=desired_mem,
                     pids_limit=desired_pids,
                 )
                 with _command_results_lock:
@@ -262,9 +252,7 @@ def _heartbeat_and_handle(container):
                         "message": message,
                     }
         elif container.name in _container_original_resources:
-            # Profile unassigned — restore original resource limits.
-            # Docker's update API ignores NanoCPUs=0, so we must restore
-            # the original value (e.g. the compose-defined CPU limit).
+            # Profile unassigned — restore original PIDs limit.
             restore_data = _container_original_resources[container.name]
             logger.info(f"Restoring resource limits on {container.name}: {restore_data}")
             _docker_container_update(container, restore_data)
@@ -300,21 +288,19 @@ def _check_standalone_config(agents):
         elif desired_policy:
             logger.warning(f"Invalid runtime_policy in cagent.yaml: {desired_policy}")
 
-        # --- Resource limits ---
+        # --- Resource limits (PIDs only; CPU/memory are hardcoded in docker-compose.yml) ---
         resources = config.get("resources", {})
         if not resources:
             return
-        desired_cpu = resources.get("cpu_limit")
-        desired_mem = resources.get("memory_limit_mb")
         desired_pids = resources.get("pids_limit")
-        if desired_cpu is None and desired_mem is None and desired_pids is None:
+        if desired_pids is None:
             return
 
         for container in agents:
             current = _get_current_resource_limits(container)
-            needs_update = _resources_need_update(current, desired_cpu, desired_mem, desired_pids)
+            needs_update = _resources_need_update(current, desired_pids)
             if needs_update:
-                update_container_resources(container, desired_cpu, desired_mem, desired_pids)
+                update_container_resources(container, pids_limit=desired_pids)
     except Exception as e:
         logger.error(f"Error checking standalone config: {e}")
 

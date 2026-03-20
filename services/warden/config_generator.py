@@ -20,7 +20,7 @@ Config Sources (standalone vs connected mode):
     - domains[] — synced via GET /api/v1/domain-policies.
       Credentials are NOT in config — ext_authz resolves per-request.
     - email.accounts[] — synced via GET /api/v1/email-policies.
-    - resources (cpu/memory limits) — pushed via heartbeat response.
+    - resources (pids limit) — pushed via heartbeat response.
 
   CP-synced via heartbeat (not config generation):
     - security.seccomp_profile — pushed via heartbeat response
@@ -143,14 +143,22 @@ class ConfigGenerator:
         return self.config.get("rate_limits", {}).get("default", {"requests_per_minute": 120, "burst_size": 20})
 
     def get_resources(self) -> Optional[dict]:
-        """Get resource limits config, or None if not configured.
+        """Get resource limits config (PIDs only), or None if not configured.
 
+        CPU and memory limits are hardcoded in docker-compose.yml and not propagated.
         In connected mode, resources are pushed via heartbeat response,
         not read from the yaml.
         """
         if self.mode == "connected":
             return None
-        return self.config.get("resources")
+        resources = self.config.get("resources")
+        if not resources:
+            return None
+        # Only return pids_limit; CPU/memory are not propagated
+        pids = resources.get("pids_limit")
+        if pids is None:
+            return None
+        return {"pids_limit": pids}
 
     def get_circuit_breaker_defaults(self) -> dict:
         """Get default circuit breaker config."""
@@ -1006,26 +1014,18 @@ class ConfigGenerator:
         return self._write_file(output_path, self._yaml_header("Envoy Bootstrap (xDS mode)") + yaml_content, "Envoy bootstrap")
 
     def write_resource_env(self, env_path: str) -> bool:
-        """Write resource limits from cagent.yaml to .env file.
+        """Write PIDs limit from cagent.yaml to .env file.
 
-        Merges CELL_CPU_LIMIT, CELL_MEMORY_LIMIT, CELL_PIDS_LIMIT into the
-        existing .env file (preserves other variables).  If resources section
-        is absent or null in cagent.yaml, does nothing.
+        Merges CELL_PIDS_LIMIT into the existing .env file (preserves other
+        variables).  CPU and memory limits are hardcoded in docker-compose.yml
+        and not propagated.  If resources section is absent or null in
+        cagent.yaml, does nothing.
         """
         resources = self.get_resources()
         if not resources:
             return True  # Nothing to write
 
         env_vars = {}
-        if resources.get("cpu_limit") is not None:
-            env_vars["CELL_CPU_LIMIT"] = str(resources["cpu_limit"])
-        if resources.get("memory_limit_mb") is not None:
-            mb = int(resources["memory_limit_mb"])
-            # Convert MB to Docker format (e.g., 4096 -> 4G, 512 -> 512M)
-            if mb >= 1024 and mb % 1024 == 0:
-                env_vars["CELL_MEMORY_LIMIT"] = f"{mb // 1024}G"
-            else:
-                env_vars["CELL_MEMORY_LIMIT"] = f"{mb}M"
         if resources.get("pids_limit") is not None:
             env_vars["CELL_PIDS_LIMIT"] = str(int(resources["pids_limit"]))
 

@@ -46,6 +46,25 @@
 #     1. cell-net is internal:true — no default gateway, no route to link-local
 #     2. Envoy catch-all returns 403 for any non-allowlisted domain/IP
 #
+# Resource Budget (target: 2 vCPU / 4GB, e.g. Hetzner cax11):
+#   Infra containers are sized to the minimum that passes a full health
+#   check (DNS resolution, HTTP/HTTPS proxy chain, warden API, OpenObserve
+#   ingestion, 30s stability with no OOM kills or restarts). Limits were
+#   determined by binary-searching across 19 automated trials using
+#   scripts/resource_test.sh. The cell gets everything left over.
+#
+#   Container        CPU    Memory   Role
+#   ─────────────    ───    ──────   ──────────────────────────
+#   cell             1.50   3G       Agent sandbox (gVisor/runc)
+#   http-proxy       0.10   96M      Envoy egress gateway
+#   warden           0.10   128M     Config sync, admin API
+#   log-store        0.10   128M     OpenObserve (per-DP logs)
+#   mitm-proxy       0.10   64M      TLS termination (mitmproxy)
+#   log-shipper      0.10   64M      Vector log collection
+#   dns-filter       0.05   48M      CoreDNS domain allowlist
+#   ─────────────    ───    ──────
+#   Total            2.05   3.5G     Fits 2 vCPU / 4GB with OS headroom
+#
 # =============================================================================
 
 services:
@@ -93,12 +112,12 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${CELL_CPU_LIMIT:-2}'
-          memory: ${CELL_MEMORY_LIMIT:-2G}
+          cpus: '1.5'
+          memory: 3G
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.25'
+          memory: 256M
 
     # DNS forced through dns-filter (dns-filter-2 failover via --profile dns-ha)
     dns:
@@ -215,8 +234,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${CELL_CPU_LIMIT:-1}'
-          memory: ${CELL_MEMORY_LIMIT:-2G}
+          cpus: '1.5'
+          memory: 3G
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -348,9 +367,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          cpus: '0.05'
+          memory: 48M
         reservations:
-          memory: 32M
+          cpus: '0.05'
+          memory: 16M
 
     # On BOTH networks - cell-net for cell access, infra-net for upstream
     networks:
@@ -405,11 +426,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 512M
+          cpus: '0.10'
+          memory: 96M
         reservations:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '0.05'
+          memory: 32M
 
     restart: unless-stopped
 
@@ -458,11 +479,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
+          cpus: '0.10'
           memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
 
     depends_on:
       - http-proxy
@@ -519,11 +540,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
+          cpus: '0.10'
           memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
 
     restart: unless-stopped
 
@@ -605,9 +626,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-        reservations:
+          cpus: '0.10'
           memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 48M
 
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/api/health || exit 1"]
@@ -653,9 +676,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-        reservations:
+          cpus: '0.10'
           memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 48M
 
     restart: unless-stopped
 
