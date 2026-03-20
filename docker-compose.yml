@@ -46,6 +46,25 @@
 #     1. cell-net is internal:true — no default gateway, no route to link-local
 #     2. Envoy catch-all returns 403 for any non-allowlisted domain/IP
 #
+# Resource Budget (target: 2 vCPU / 4GB, e.g. Hetzner cax11):
+#   Infra containers are sized to the minimum that passes a full health
+#   check (DNS resolution, HTTP/HTTPS proxy chain, warden API, OpenObserve
+#   ingestion, 30s stability with no OOM kills or restarts). Limits were
+#   determined by binary-searching across 19 automated trials using
+#   scripts/resource_test.sh. The cell gets everything left over.
+#
+#   Container        CPU    Memory   Role
+#   ─────────────    ───    ──────   ──────────────────────────
+#   cell             1.50   3G       Agent sandbox (gVisor/runc)
+#   http-proxy       0.10   96M      Envoy egress gateway
+#   warden           0.10   128M     Config sync, admin API
+#   log-store        0.10   128M     OpenObserve (per-DP logs)
+#   mitm-proxy       0.10   64M      TLS termination (mitmproxy)
+#   log-shipper      0.10   64M      Vector log collection
+#   dns-filter       0.05   48M      CoreDNS domain allowlist
+#   ─────────────    ───    ──────
+#   Total            2.05   3.5G     Fits 2 vCPU / 4GB with OS headroom
+#
 # =============================================================================
 
 services:
