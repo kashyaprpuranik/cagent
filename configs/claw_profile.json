@@ -6,8 +6,6 @@
     "seccomp_profile": "hardened"
   },
   "resource_limits": {
-    "cpu_limit": 2.0,
-    "memory_limit_mb": 4096,
     "pids_limit": 256
   },
   "domain_policies": [
