@@ -243,30 +243,15 @@ def recreate_container_with_policy(container, policy_name: str) -> tuple:
 
 
 def _get_current_resource_limits(container) -> dict:
-    """Read current resource limits from a running container.
+    """Read current PIDs limit from a running container.
 
-    Returns dict with cpu_limit (float, CPUs), memory_limit_mb (int), pids_limit (int).
-    Values are None if not set / unlimited.
+    Returns dict with pids_limit (int).
+    Value is None if not set / unlimited.
+    CPU and memory limits are hardcoded in docker-compose.yml and not propagated.
     """
     try:
         container.reload()
         host_config = container.attrs.get("HostConfig", {})
-
-        # CPU: prefer NanoCpus (set by update and docker-compose --cpus),
-        # fall back to CpuQuota/CpuPeriod
-        nano_cpus = host_config.get("NanoCpus", 0) or 0
-        cpu_quota = host_config.get("CpuQuota", 0) or 0
-        cpu_period = host_config.get("CpuPeriod", 0) or 0
-        if nano_cpus > 0:
-            cpu_limit = round(nano_cpus / 1e9, 2)
-        elif cpu_quota > 0 and cpu_period > 0:
-            cpu_limit = round(cpu_quota / cpu_period, 2)
-        else:
-            cpu_limit = None
-
-        # Memory: bytes → MB (0 means unlimited)
-        memory = host_config.get("Memory", 0)
-        memory_limit_mb = int(memory / (1024 * 1024)) if memory else None
 
         # PIDs
         pids_limit = host_config.get("PidsLimit", 0)
@@ -275,27 +260,23 @@ def _get_current_resource_limits(container) -> dict:
             pids_limit = None
 
         return {
-            "cpu_limit": cpu_limit,
-            "memory_limit_mb": memory_limit_mb,
             "pids_limit": pids_limit,
         }
     except Exception as e:
         logger.warning(f"Could not read resource limits for {container.name}: {e}")
-        return {"cpu_limit": None, "memory_limit_mb": None, "pids_limit": None}
+        return {"pids_limit": None}
 
 
-def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, pids_limit=None) -> tuple:
-    """Update resource limits on a running container without recreation.
+def update_container_resources(container, pids_limit=None) -> tuple:
+    """Update PIDs limit on a running container without recreation.
 
     Uses Docker's low-level /containers/{id}/update API directly because
-    the Python SDK's container.update() is missing support for NanoCPUs
-    and PidsLimit. We use NanoCPUs (not CpuQuota/CpuPeriod) to avoid
-    conflicts with containers created via docker-compose --cpus.
+    the Python SDK's container.update() is missing support for PidsLimit.
+
+    CPU and memory limits are hardcoded in docker-compose.yml and not propagated.
 
     Args:
         container: Docker container object
-        cpu_limit: Number of CPUs (e.g., 1.0, 2.0). None = no change.
-        memory_limit_mb: Memory limit in MB. None = no change.
         pids_limit: Max PIDs. None = no change.
 
     Returns:
@@ -303,14 +284,6 @@ def update_container_resources(container, cpu_limit=None, memory_limit_mb=None, 
     """
     name = container.name
     data = {}
-
-    if cpu_limit is not None:
-        data["NanoCPUs"] = int(cpu_limit * 1e9)
-
-    if memory_limit_mb is not None:
-        mem_bytes = memory_limit_mb * 1024 * 1024
-        data["Memory"] = mem_bytes
-        data["MemorySwap"] = mem_bytes  # Disable swap
 
     if pids_limit is not None:
         data["PidsLimit"] = pids_limit

@@ -68,7 +68,6 @@ The `standard` profile uses [gVisor](https://gvisor.dev) to intercept syscalls i
 | Control | Implementation |
 |---------|----------------|
 | gVisor runtime | `runsc` - syscalls never reach host kernel |
-| Stricter limits | 1 CPU, 2GB memory |
 
 ### Credential Security
 | Control | Implementation |
