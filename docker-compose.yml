@@ -55,11 +55,11 @@
 #
 #   Container        CPU    Memory   Role
 #   ─────────────    ───    ──────   ──────────────────────────
-#   cell             1.50   3G       Agent sandbox (gVisor/runc)
-#   http-proxy       0.10   96M      Envoy egress gateway
+#   cell             1.50   2.7G     Agent sandbox (gVisor/runc)
+#   http-proxy       0.10   192M     Envoy egress gateway
+#   log-store        0.10   256M     OpenObserve (per-DP logs)
 #   warden           0.10   128M     Config sync, admin API
-#   log-store        0.10   128M     OpenObserve (per-DP logs)
-#   mitm-proxy       0.10   64M      TLS termination (mitmproxy)
+#   mitm-proxy       0.10   128M     TLS termination (mitmproxy)
 #   log-shipper      0.10   64M      Vector log collection
 #   dns-filter       0.05   48M      CoreDNS domain allowlist
 #   ─────────────    ───    ──────
@@ -113,7 +113,7 @@ services:
       resources:
         limits:
           cpus: '1.5'
-          memory: 3G
+          memory: 2700M
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -235,7 +235,7 @@ services:
       resources:
         limits:
           cpus: '1.5'
-          memory: 3G
+          memory: 2700M
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -427,10 +427,10 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 96M
+          memory: 192M
         reservations:
           cpus: '0.05'
-          memory: 32M
+          memory: 64M
 
     restart: unless-stopped
 
@@ -480,10 +480,10 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 64M
+          memory: 128M
         reservations:
           cpus: '0.05'
-          memory: 32M
+          memory: 48M
 
     depends_on:
       - http-proxy
@@ -677,10 +677,10 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 128M
+          memory: 256M
         reservations:
           cpus: '0.05'
-          memory: 48M
+          memory: 64M
 
     restart: unless-stopped
 
