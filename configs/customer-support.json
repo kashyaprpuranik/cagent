@@ -1,0 +1,58 @@
+{
+  "name": "customer-support",
+  "description": "Customer support agent — Zendesk, Intercom, Freshdesk, Slack",
+  "security": {
+    "runtime_policy": "hardened",
+    "seccomp_profile": "hardened"
+  },
+  "resource_limits": {
+    "cpu_limit": 1.0,
+    "memory_limit_mb": 1024,
+    "pids_limit": 64
+  },
+  "domain_policies": [
+    {
+      "domain": "*.zendesk.com",
+      "description": "Zendesk API",
+      "requests_per_minute": 60,
+      "burst_size": 15
+    },
+    {
+      "domain": "api.intercom.io",
+      "description": "Intercom API",
+      "requests_per_minute": 60,
+      "burst_size": 15
+    },
+    {
+      "domain": "*.freshdesk.com",
+      "description": "Freshdesk API",
+      "requests_per_minute": 60,
+      "burst_size": 15
+    },
+    {
+      "domain": "api.slack.com",
+      "description": "Slack API",
+      "requests_per_minute": 60,
+      "burst_size": 15
+    },
+    {
+      "domain": "hooks.slack.com",
+      "description": "Slack webhooks",
+      "requests_per_minute": 30,
+      "burst_size": 10
+    }
+  ],
+  "dlp": {
+    "enabled": true,
+    "mode": "block",
+    "skip_domains": [],
+    "custom_patterns": [
+      {
+        "name": "pii_address",
+        "regex": "\\d+\\s+[A-Z][a-z]+\\s+(St|Ave|Blvd|Dr|Rd|Ln|Way)",
+        "threshold": 3
+      }
+    ]
+  },
+  "email_policies": []
+}

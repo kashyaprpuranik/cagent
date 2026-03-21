@@ -1,0 +1,62 @@
+{
+  "name": "data-pipeline",
+  "description": "ETL and data processing — cloud storage, databases, data warehouses",
+  "security": {
+    "runtime_policy": "standard",
+    "seccomp_profile": "standard"
+  },
+  "resource_limits": {
+    "cpu_limit": 4.0,
+    "memory_limit_mb": 8192,
+    "pids_limit": 512
+  },
+  "domain_policies": [
+    {
+      "domain": "*.amazonaws.com",
+      "description": "AWS APIs - S3, DynamoDB, etc.",
+      "timeout": "300s"
+    },
+    {
+      "domain": "storage.googleapis.com",
+      "description": "Google Cloud Storage",
+      "timeout": "300s"
+    },
+    {
+      "domain": "bigquery.googleapis.com",
+      "description": "Google BigQuery",
+      "timeout": "300s"
+    },
+    {
+      "domain": "*.storage.googleapis.com",
+      "description": "Google Cloud Storage buckets"
+    },
+    {
+      "domain": "*.snowflakecomputing.com",
+      "description": "Snowflake data warehouse",
+      "timeout": "300s",
+      "requests_per_minute": 30
+    },
+    {
+      "domain": "*.database.azure.com",
+      "description": "Azure Database services",
+      "timeout": "120s"
+    },
+    {
+      "domain": "pypi.org",
+      "description": "Python Package Index",
+      "read_only": true
+    },
+    {
+      "domain": "files.pythonhosted.org",
+      "description": "Python package downloads",
+      "read_only": true
+    }
+  ],
+  "dlp": {
+    "enabled": true,
+    "mode": "log",
+    "skip_domains": [],
+    "custom_patterns": []
+  },
+  "email_policies": []
+}

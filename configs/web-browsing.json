@@ -1,0 +1,67 @@
+{
+  "name": "web-browsing",
+  "description": "Web research agent — search, scraping, and browsing",
+  "security": {
+    "runtime_policy": "hardened",
+    "seccomp_profile": "hardened"
+  },
+  "resource_limits": {
+    "cpu_limit": 1.0,
+    "memory_limit_mb": 2048,
+    "pids_limit": 128
+  },
+  "domain_policies": [
+    {
+      "domain": "api.search.brave.com",
+      "description": "Brave web search",
+      "read_only": true,
+      "requests_per_minute": 30,
+      "burst_size": 5
+    },
+    {
+      "domain": "api.firecrawl.dev",
+      "description": "Firecrawl web scraping",
+      "read_only": true,
+      "requests_per_minute": 10,
+      "burst_size": 3,
+      "timeout": "120s"
+    },
+    {
+      "domain": "www.google.com",
+      "description": "Google search",
+      "read_only": true
+    },
+    {
+      "domain": "www.googleapis.com",
+      "description": "Google API services",
+      "read_only": true
+    },
+    {
+      "domain": "en.wikipedia.org",
+      "description": "Wikipedia English",
+      "read_only": true
+    },
+    {
+      "domain": "*.wikipedia.org",
+      "description": "Wikipedia all languages",
+      "read_only": true
+    },
+    {
+      "domain": "api.duckduckgo.com",
+      "description": "DuckDuckGo search API",
+      "read_only": true
+    },
+    {
+      "domain": "news.ycombinator.com",
+      "description": "Hacker News",
+      "read_only": true
+    }
+  ],
+  "dlp": {
+    "enabled": true,
+    "mode": "block",
+    "skip_domains": [],
+    "custom_patterns": []
+  },
+  "email_policies": []
+}

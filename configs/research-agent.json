@@ -1,0 +1,67 @@
+{
+  "name": "research-agent",
+  "description": "Academic research — arxiv, Google Scholar, HuggingFace, Semantic Scholar, PubMed",
+  "security": {
+    "runtime_policy": "hardened",
+    "seccomp_profile": "hardened"
+  },
+  "resource_limits": {
+    "cpu_limit": 1.0,
+    "memory_limit_mb": 2048,
+    "pids_limit": 128
+  },
+  "domain_policies": [
+    {
+      "domain": "arxiv.org",
+      "description": "arxiv preprints",
+      "read_only": true
+    },
+    {
+      "domain": "*.arxiv.org",
+      "description": "arxiv subdomains",
+      "read_only": true
+    },
+    {
+      "domain": "scholar.google.com",
+      "description": "Google Scholar",
+      "read_only": true
+    },
+    {
+      "domain": "huggingface.co",
+      "description": "HuggingFace models and datasets",
+      "read_only": true,
+      "allowed_paths": ["/api/*", "/models/*", "/datasets/*"]
+    },
+    {
+      "domain": "*.huggingface.co",
+      "description": "HuggingFace subdomains",
+      "read_only": true
+    },
+    {
+      "domain": "api.semanticscholar.org",
+      "description": "Semantic Scholar API",
+      "read_only": true,
+      "requests_per_minute": 30,
+      "burst_size": 5
+    },
+    {
+      "domain": "pubmed.ncbi.nlm.nih.gov",
+      "description": "PubMed biomedical literature",
+      "read_only": true
+    },
+    {
+      "domain": "api.unpaywall.org",
+      "description": "Unpaywall open access lookup",
+      "read_only": true,
+      "requests_per_minute": 10,
+      "burst_size": 3
+    }
+  ],
+  "dlp": {
+    "enabled": true,
+    "mode": "block",
+    "skip_domains": [],
+    "custom_patterns": []
+  },
+  "email_policies": []
+}
