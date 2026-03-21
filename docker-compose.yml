@@ -55,15 +55,15 @@
 #
 #   Container        CPU    Memory   Role
 #   ─────────────    ───    ──────   ──────────────────────────
-#   cell             1.50   2.7G     Agent sandbox (gVisor/runc)
+#   cell             1.50   2.5G     Agent sandbox (gVisor/runc)
+#   warden           0.25   256M     Config sync, admin API, mTLS proxy
 #   http-proxy       0.10   192M     Envoy egress gateway
 #   log-store        0.10   256M     OpenObserve (per-DP logs)
-#   warden           0.10   128M     Config sync, admin API
 #   mitm-proxy       0.10   128M     TLS termination (mitmproxy)
 #   log-shipper      0.10   64M      Vector log collection
 #   dns-filter       0.05   48M      CoreDNS domain allowlist
 #   ─────────────    ───    ──────
-#   Total            2.05   3.5G     Fits 2 vCPU / 4GB with OS headroom
+#   Total            2.20   3.4G     Fits 2 vCPU / 4GB with OS headroom
 #
 # =============================================================================
 
@@ -113,7 +113,7 @@ services:
       resources:
         limits:
           cpus: '1.5'
-          memory: 2700M
+          memory: 2500M
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -235,7 +235,7 @@ services:
       resources:
         limits:
           cpus: '1.5'
-          memory: 2700M
+          memory: 2500M
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -626,11 +626,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.10'
-          memory: 128M
+          cpus: '0.25'
+          memory: 256M
         reservations:
-          cpus: '0.05'
-          memory: 48M
+          cpus: '0.10'
+          memory: 64M
 
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/api/health || exit 1"]
