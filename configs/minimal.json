@@ -1,0 +1,21 @@
+{
+  "name": "minimal",
+  "description": "Locked-down baseline — no domains allowed, start from scratch",
+  "security": {
+    "runtime_policy": "hardened",
+    "seccomp_profile": "hardened"
+  },
+  "resource_limits": {
+    "cpu_limit": 0.5,
+    "memory_limit_mb": 512,
+    "pids_limit": 64
+  },
+  "domain_policies": [],
+  "dlp": {
+    "enabled": true,
+    "mode": "block",
+    "skip_domains": [],
+    "custom_patterns": []
+  },
+  "email_policies": []
+}

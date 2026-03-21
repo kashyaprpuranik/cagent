@@ -1,0 +1,67 @@
+{
+  "name": "devops",
+  "description": "Infrastructure and DevOps agent — cloud providers, monitoring, CI/CD",
+  "security": {
+    "runtime_policy": "standard",
+    "seccomp_profile": "standard"
+  },
+  "resource_limits": {
+    "cpu_limit": 2.0,
+    "memory_limit_mb": 4096,
+    "pids_limit": 256
+  },
+  "domain_policies": [
+    {
+      "domain": "*.amazonaws.com",
+      "description": "AWS APIs",
+      "timeout": "120s"
+    },
+    {
+      "domain": "*.googleapis.com",
+      "description": "Google Cloud APIs",
+      "timeout": "120s"
+    },
+    {
+      "domain": "management.azure.com",
+      "description": "Azure Resource Manager",
+      "timeout": "120s"
+    },
+    {
+      "domain": "api.github.com",
+      "description": "GitHub API - repos, issues, PRs",
+      "requests_per_minute": 100,
+      "burst_size": 20
+    },
+    {
+      "domain": "api.datadoghq.com",
+      "description": "Datadog monitoring API",
+      "requests_per_minute": 60,
+      "burst_size": 15
+    },
+    {
+      "domain": "app.terraform.io",
+      "description": "Terraform Cloud",
+      "requests_per_minute": 30,
+      "burst_size": 10
+    },
+    {
+      "domain": "api.pagerduty.com",
+      "description": "PagerDuty incident management",
+      "requests_per_minute": 30,
+      "burst_size": 10
+    },
+    {
+      "domain": "*.grafana.net",
+      "description": "Grafana Cloud dashboards",
+      "read_only": true,
+      "requests_per_minute": 30
+    }
+  ],
+  "dlp": {
+    "enabled": true,
+    "mode": "block",
+    "skip_domains": [],
+    "custom_patterns": []
+  },
+  "email_policies": []
+}

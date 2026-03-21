@@ -1,0 +1,58 @@
+[
+  {
+    "file": "claw_profile.json",
+    "name": "claw-default",
+    "description": "Default — LLM providers, GitHub, registries, messaging platforms",
+    "domains": 42,
+    "tags": ["llm", "messaging", "general"]
+  },
+  {
+    "file": "research-agent.json",
+    "name": "research-agent",
+    "description": "Academic research — arxiv, Scholar, HuggingFace, Semantic Scholar",
+    "domains": 8,
+    "tags": ["research", "academic", "read-only"]
+  },
+  {
+    "file": "code-review.json",
+    "name": "code-review",
+    "description": "Code review and PR agent — GitHub, GitLab, package registries",
+    "domains": 9,
+    "tags": ["code", "github", "development"]
+  },
+  {
+    "file": "customer-support.json",
+    "name": "customer-support",
+    "description": "Customer support — Zendesk, Intercom, Freshdesk, Slack",
+    "domains": 5,
+    "tags": ["support", "crm", "messaging"]
+  },
+  {
+    "file": "data-pipeline.json",
+    "name": "data-pipeline",
+    "description": "ETL and data processing — cloud storage, databases, data warehouses",
+    "domains": 8,
+    "tags": ["data", "etl", "cloud"]
+  },
+  {
+    "file": "web-browsing.json",
+    "name": "web-browsing",
+    "description": "Web research — search engines, scraping, browsing",
+    "domains": 8,
+    "tags": ["web", "search", "research"]
+  },
+  {
+    "file": "devops.json",
+    "name": "devops",
+    "description": "Infrastructure and DevOps — cloud providers, monitoring, CI/CD",
+    "domains": 8,
+    "tags": ["devops", "cloud", "infrastructure"]
+  },
+  {
+    "file": "minimal.json",
+    "name": "minimal",
+    "description": "Locked-down baseline — no domains, start from scratch",
+    "domains": 0,
+    "tags": ["minimal", "security", "baseline"]
+  }
+]
