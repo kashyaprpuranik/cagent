@@ -468,6 +468,9 @@ class ConfigGenerator:
         return {
             "node": {"id": "cagent-proxy", "cluster": "cagent"},
             "admin": {"address": {"socket_address": {"address": "127.0.0.1", "port_value": 9901}}},
+            "stats_config": {
+                "stats_matcher": {"reject_all": True},
+            },
             "static_resources": {
                 "listeners": [self._build_xds_listener(default_rate_limit)],
                 "clusters": [self._build_control_plane_cluster()],

@@ -17,4 +17,4 @@ if [ ! -f "$CONFIG_PATH" ]; then
 fi
 
 echo "Starting Envoy with config: $CONFIG_PATH"
-exec /usr/local/bin/envoy -c "$CONFIG_PATH" "$@"
+exec /usr/local/bin/envoy -c "$CONFIG_PATH" --concurrency 1 "$@"
