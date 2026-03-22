@@ -6,6 +6,7 @@ sync_config / regenerate_configs without circular imports.
 
 import hashlib
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -41,6 +42,12 @@ config_generator = ConfigGenerator(CAGENT_CONFIG_PATH, mode=DATAPLANE_MODE)
 
 # Synced domain policies with credentials (populated by sync_config in connected mode)
 _synced_domain_policies: list[dict] = []
+
+# Lock to prevent concurrent config syncs.  sync_config() is called from
+# the heartbeat thread (on policy_version change) and the /config/sync API
+# endpoint (uvicorn thread).  Without this lock, concurrent calls race on
+# _atomic_write temp files (cds.tmp, rds.tmp) and corrupt each other.
+_sync_lock = threading.Lock()
 
 
 def get_synced_domain_policies() -> list[dict]:
@@ -188,6 +195,9 @@ def regenerate_configs(
     Returns:
         True if configs were regenerated, False otherwise.
     """
+    if not _sync_lock.acquire(blocking=False):
+        logger.debug("Config regeneration already in progress, skipping")
+        return False
     try:
         config_changed = config_generator.load_config()
         config_generator.set_additional_domains(additional_domains or [])
@@ -277,6 +287,8 @@ def regenerate_configs(
     except Exception as e:
         logger.error(f"Error regenerating configs: {e}")
         return False
+    finally:
+        _sync_lock.release()
 
 
 # ---------------------------------------------------------------------------
