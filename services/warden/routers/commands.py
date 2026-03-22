@@ -121,7 +121,7 @@ def restart_cell():
     """Restart the cell container."""
     container = _get_cell_container()
     try:
-        container.restart(timeout=30)
+        container.restart(timeout=10)
         return {"status": "completed", "command": "restart", "message": f"Container {container.name} restarted"}
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=f"Restart failed: {e}")
@@ -132,7 +132,7 @@ def stop_cell():
     """Stop the cell container."""
     container = _get_cell_container()
     try:
-        container.stop(timeout=30)
+        container.stop(timeout=10)
         return {"status": "completed", "command": "stop", "message": f"Container {container.name} stopped"}
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=f"Stop failed: {e}")
