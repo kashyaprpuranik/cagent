@@ -280,29 +280,30 @@ run_trial() {
 # Args: envoy_cpu envoy_mem mitm_cpu mitm_mem vector_cpu vector_mem
 #       warden_cpu warden_mem ozo_cpu ozo_mem dns_mem cell_cpu cell_mem
 
-# Generous (50% of original defaults)
-run_trial "generous" \
-    0.50 256    0.25 128    0.25 128    0.25 256    0.25 256    64    0.50 2752 \
+# Post-tuning trials (Envoy --concurrency 1 + stats off, mitmproxy flow_detail=0,
+# OpenObserve 2 workers). Cell fixed at 3G. Finding minimum infra limits.
+#
+# Args: envoy_cpu envoy_mem mitm_cpu mitm_mem vector_cpu vector_mem
+#       warden_cpu warden_mem ozo_cpu ozo_mem dns_mem cell_cpu cell_mem
+
+# Current defaults
+run_trial "current" \
+    0.10 96     0.10 96     0.10 64     0.25 256    0.10 192    48    1.50 3072 \
     || true
 
-# Moderate (25% of original defaults)
-run_trial "moderate" \
-    0.25 128    0.15 96     0.15 96     0.15 192    0.15 192    48    1.15 3088 \
-    || true
-
-# Tight (proven minimum with safety margin — current docker-compose defaults)
+# Tight — squeeze envoy+mitm to 64M, ozo to 128M, warden to 192M
 run_trial "tight" \
-    0.10 96     0.10 64     0.10 64     0.10 128    0.10 128    48    1.55 3328 \
+    0.10 64     0.10 64     0.10 48     0.25 192    0.10 128    32    1.50 3072 \
     || true
 
-# Floor (absolute minimum that passed in testing)
+# Floor — squeeze everything to minimums
 run_trial "floor" \
-    0.05 48     0.05 48     0.05 48     0.10 96     0.10 96     32    1.70 3472 \
+    0.05 48     0.05 48     0.05 32     0.15 128    0.05 96     24    1.50 3072 \
     || true
 
-# Below floor (expected to fail — warden/ozo at 64M)
+# Below floor — expected to fail
 run_trial "below-floor" \
-    0.05 48     0.05 48     0.05 48     0.05 64     0.05 64     32    1.80 3568 \
+    0.05 32     0.05 32     0.05 24     0.10 96     0.05 64     16    1.50 3072 \
     || true
 
 echo ""

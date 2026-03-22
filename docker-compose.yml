@@ -55,15 +55,15 @@
 #
 #   Container        CPU    Memory   Role
 #   ─────────────    ───    ──────   ──────────────────────────
-#   cell             1.50   2.5G     Agent sandbox (gVisor/runc)
+#   cell             1.50   3G       Agent sandbox (gVisor/runc)
 #   warden           0.25   256M     Config sync, admin API, mTLS proxy
-#   http-proxy       0.10   192M     Envoy egress gateway
-#   log-store        0.10   256M     OpenObserve (per-DP logs)
-#   mitm-proxy       0.10   128M     TLS termination (mitmproxy)
-#   log-shipper      0.10   64M      Vector log collection
-#   dns-filter       0.05   48M      CoreDNS domain allowlist
+#   http-proxy       0.10   80M      Envoy egress gateway (--concurrency 1, stats off)
+#   log-store        0.10   160M     OpenObserve (per-DP logs, 2 workers)
+#   mitm-proxy       0.10   80M      TLS termination (mitmproxy, no flow retention)
+#   log-shipper      0.10   48M      Vector log collection
+#   dns-filter       0.05   32M      CoreDNS domain allowlist
 #   ─────────────    ───    ──────
-#   Total            2.20   3.4G     Fits 2 vCPU / 4GB with OS headroom
+#   Total            2.20   3.7G     Fits 2 vCPU / 4GB with ~300M OS headroom
 #
 # =============================================================================
 
@@ -113,7 +113,7 @@ services:
       resources:
         limits:
           cpus: '1.5'
-          memory: 2500M
+          memory: 3G
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -235,7 +235,7 @@ services:
       resources:
         limits:
           cpus: '1.5'
-          memory: 2500M
+          memory: 3G
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -368,7 +368,7 @@ services:
       resources:
         limits:
           cpus: '0.05'
-          memory: 48M
+          memory: 32M
         reservations:
           cpus: '0.05'
           memory: 16M
@@ -427,10 +427,10 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 192M
+          memory: 80M
         reservations:
           cpus: '0.05'
-          memory: 64M
+          memory: 32M
 
     restart: unless-stopped
 
@@ -464,6 +464,7 @@ services:
       --set stream_large_bodies=1m
       --set upstream_cert=false
       --set connection_strategy=lazy
+      --set flow_detail=0
       -s /etc/mitmproxy/mitm_addon.py
       -s /etc/mitmproxy/dlp_addon.py
 
@@ -480,10 +481,10 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 128M
+          memory: 80M
         reservations:
           cpus: '0.05'
-          memory: 48M
+          memory: 32M
 
     depends_on:
       - http-proxy
@@ -541,10 +542,10 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 64M
+          memory: 48M
         reservations:
           cpus: '0.05'
-          memory: 32M
+          memory: 16M
 
     restart: unless-stopped
 
@@ -663,8 +664,8 @@ services:
       - ZO_COMPACT_DATA_RETENTION_DAYS=${LOG_RETENTION_DAYS:-30}
       - ZO_DATA_DIR=/data
       # Cap worker threads to avoid OOM on high-core machines (default = num CPUs)
-      - ZO_HTTP_WORKER_NUM=4
-      - ZO_HTTP_WORKER_MAX_BLOCKING=4
+      - ZO_HTTP_WORKER_NUM=2
+      - ZO_HTTP_WORKER_MAX_BLOCKING=2
 
     volumes:
       - log-store-data:/data
@@ -677,10 +678,10 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 256M
+          memory: 160M
         reservations:
           cpus: '0.05'
-          memory: 64M
+          memory: 48M
 
     restart: unless-stopped
 
