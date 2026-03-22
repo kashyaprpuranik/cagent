@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     from cagent.client import CagentClient
 
 COMMUNITY_BASE_URL = (
-    "https://raw.githubusercontent.com/kashyaprpuranik/cagent/main/configs"
+    "https://raw.githubusercontent.com/kashyaprpuranik/cagent/main/configs/profiles"
 )
-MANIFEST_URL = f"{COMMUNITY_BASE_URL}/profiles-manifest.json"
+MANIFEST_URL = f"{COMMUNITY_BASE_URL}/manifest.json"
 
 
 class ProfilesResource:
