@@ -1,0 +1,46 @@
+name: Publish SDK to PyPI
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install SDK with dev deps
+        run: pip install -e "sdk[dev]"
+
+      - name: Lint
+        run: cd sdk && ruff check src/ tests/
+
+      - name: Test
+        run: cd sdk && pytest -v
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/sdk-v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build package
+        run: pip install build && cd sdk && python -m build
+
+      - name: Publish to PyPI
+        run: pip install twine && cd sdk && twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
