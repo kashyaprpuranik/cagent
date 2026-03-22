@@ -53,6 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     sudo \
     locales \
+    bash-completion \
     # Build essentials
     build-essential \
     cmake \
@@ -194,6 +195,9 @@ WORKDIR /workspace
 # =============================================================================
 # Tmux configuration
 COPY configs/cell/tmux.conf /etc/tmux.conf
+
+# Shell defaults (history, prompt, aliases, colors)
+COPY configs/cell/profile.d/shell.sh /etc/profile.d/50-shell.sh
 
 # Auto-attach to tmux on SSH login
 COPY configs/cell/profile.d/tmux_session.sh /etc/profile.d/99-tmux-session.sh
