@@ -85,6 +85,8 @@ Run with local configuration - ideal for local use of one cell.
 
 Lightweight setup with just 3 containers. Edit `cagent.yaml` and run the config generator, or edit raw `coredns/Corefile` and `envoy/envoy.yaml` directly for advanced use. Ideal for simple static domain policies on one cell.
 
+> **Limitation:** Credential injection is not available in minimal mode. It requires warden (add `--profile admin` or `--profile managed`). Without warden, Envoy's ext_authz fails open — requests pass through but credentials defined in `cagent.yaml` are not injected.
+
 ```mermaid
 graph TD
     subgraph cellnet["cell-net (isolated)"]
