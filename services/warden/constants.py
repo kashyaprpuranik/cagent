@@ -121,6 +121,11 @@ READ_ONLY = DATAPLANE_MODE == "connected"
 # Warden API auth (connected mode — CP sends requests via mTLS)
 WARDEN_API_TOKEN = os.environ.get("WARDEN_API_TOKEN", "").strip()
 
+# Public URL where the CP can reach this warden instance (e.g., https://cagent.mycompany.com:8443).
+# Reported to CP in the online ping so the CP knows how to proxy commands and terminal.
+# For self-hosted/connected DPs where the user manages their own DNS/tunnel.
+WARDEN_PUBLIC_URL = os.environ.get("WARDEN_PUBLIC_URL", "").strip()
+
 # Local OpenObserve (per-DP log store)
 OPENOBSERVE_URL = os.environ.get("OPENOBSERVE_URL", "http://log-store:5080")
 OPENOBSERVE_USER = os.environ.get("OPENOBSERVE_USER", "admin@cagent.local")

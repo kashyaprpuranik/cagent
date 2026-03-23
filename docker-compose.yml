@@ -586,6 +586,8 @@ services:
       - CONFIG_SYNC_INTERVAL=${CONFIG_SYNC_INTERVAL:-300}
       # CP-to-DP auth (connected mode, via mTLS)
       - WARDEN_API_TOKEN=${WARDEN_API_TOKEN:-}
+      # Public URL where CP can reach this warden (self-hosted DPs)
+      - WARDEN_PUBLIC_URL=${WARDEN_PUBLIC_URL:-}
       # Cloud provider (for public IP detection in heartbeat)
       - CLOUD_PROVIDER=${CLOUD_PROVIDER:-}
       # mTLS (base64-encoded PEM, provisioned by CP via cloud-init)
