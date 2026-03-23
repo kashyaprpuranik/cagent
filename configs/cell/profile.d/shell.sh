@@ -4,6 +4,7 @@ export HISTSIZE=1000
 export HISTFILESIZE=2000
 export HISTCONTROL=ignoreboth
 shopt -s histappend
+PROMPT_COMMAND="history -a; history -r; $PROMPT_COMMAND"
 
 # Color prompt: user@host:cwd$
 if [ "$(id -u)" -eq 0 ]; then
