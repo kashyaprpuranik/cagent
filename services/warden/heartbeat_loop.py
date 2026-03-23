@@ -36,6 +36,7 @@ from constants import (
     HEARTBEAT_URL,
     MAX_HEARTBEAT_WORKERS,
     VALID_RUNTIME_POLICIES,
+    WARDEN_PUBLIC_URL,
     discover_cell_containers,
 )
 from container_ops import (
@@ -316,12 +317,15 @@ def send_online_ping():
     """
     url = f"{CONTROL_PLANE_URL}/api/v1/cell/online"
     headers = {"Authorization": f"Bearer {CONTROL_PLANE_TOKEN}"}
+    body = {}
+    if WARDEN_PUBLIC_URL:
+        body["warden_public_url"] = WARDEN_PUBLIC_URL
     deadline = time.time() + 15 * 60  # 15 minutes
 
     logger.info("Sending online ping to %s", url)
     while time.time() < deadline:
         try:
-            resp = requests.post(url, headers=headers, timeout=10)
+            resp = requests.post(url, headers=headers, json=body, timeout=10)
             if resp.status_code == 200:
                 logger.info("Online ping accepted — provisioning complete")
                 return
