@@ -53,17 +53,13 @@ def _load_seccomp_profile(name: str) -> dict:
 def _get_current_policy_label(container) -> Optional[str]:
     """Read the runtime policy label from a container.
 
-    Checks ``cagent.runtime_policy`` first, falls back to
-    ``cagent.seccomp_profile`` for backward compatibility with
-    containers created before the runtime-policy rename.
-
     Returns None for unlabelled containers (including all existing ones
     before this feature was added).
     """
     try:
         container.reload()
         labels = container.labels or {}
-        return labels.get("cagent.runtime_policy") or labels.get("cagent.seccomp_profile")
+        return labels.get("cagent.runtime_policy")
     except Exception as e:
         logger.debug("Failed to get runtime policy for container: %s", e)
         return None
@@ -119,9 +115,8 @@ def recreate_container_with_policy(container, policy_name: str) -> tuple:
         env = config.get("Env", [])
         old_labels = dict(config.get("Labels", {}))
 
-        # Update labels with new policy (set both for backward compat)
+        # Update labels with new policy
         old_labels["cagent.runtime_policy"] = policy_name
-        old_labels["cagent.seccomp_profile"] = policy_name
 
         # Use attrs.Mounts as the single source of truth for ALL mount types.
         # This avoids duplicates when HostConfig.Binds and attrs.Mounts overlap

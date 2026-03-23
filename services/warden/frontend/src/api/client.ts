@@ -90,7 +90,7 @@ export interface Config {
   mode?: string;
   dns?: { upstream: string[]; cache_ttl: number };
   rate_limits?: { default: { requests_per_minute: number; burst_size: number } };
-  security?: { seccomp_profile?: string };
+  security?: { runtime_policy?: string };
   domains?: DomainEntry[];
   email?: { accounts?: EmailAccount[] };
   internal_services?: string[];

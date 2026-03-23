@@ -15,7 +15,6 @@ OPTIONAL_PROFILE_KEYS = {"security", "resource_limits", "dlp", "email_policies"}
 ALL_PROFILE_KEYS = REQUIRED_PROFILE_KEYS | OPTIONAL_PROFILE_KEYS
 
 VALID_RUNTIME_POLICIES = {"standard", "hardened", "permissive"}
-VALID_SECCOMP_PROFILES = {"standard", "hardened", "permissive"}
 
 REQUIRED_MANIFEST_ENTRY_KEYS = {"file", "name", "description", "icon", "domains", "tags"}
 
@@ -161,10 +160,6 @@ class TestProfileSchema:
         if "runtime_policy" in security:
             assert security["runtime_policy"] in VALID_RUNTIME_POLICIES, (
                 f"{filename}: invalid runtime_policy '{security['runtime_policy']}'"
-            )
-        if "seccomp_profile" in security:
-            assert security["seccomp_profile"] in VALID_SECCOMP_PROFILES, (
-                f"{filename}: invalid seccomp_profile '{security['seccomp_profile']}'"
             )
 
     def test_resource_limits_are_positive(self, profile):

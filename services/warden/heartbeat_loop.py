@@ -207,9 +207,8 @@ def _heartbeat_and_handle(container):
         return policy_version
 
     # No command — check if runtime policy needs updating
-    # Accept runtime_policy (new) or seccomp_profile (backward compat from old CPs)
     policy_changed = False
-    desired_policy = response.get("runtime_policy") or response.get("seccomp_profile")
+    desired_policy = response.get("runtime_policy")
     if desired_policy and desired_policy in VALID_RUNTIME_POLICIES:
         current_label = _get_current_policy_label(container)
         # Skip unlabelled containers (existing deployments) and gVisor containers
@@ -276,7 +275,7 @@ def _check_standalone_config(agents):
 
         # --- Runtime policy ---
         security = config.get("security", {})
-        desired_policy = security.get("runtime_policy") or security.get("seccomp_profile", "hardened")
+        desired_policy = security.get("runtime_policy", "hardened")
         if desired_policy in VALID_RUNTIME_POLICIES:
             for container in agents:
                 current_label = _get_current_policy_label(container)

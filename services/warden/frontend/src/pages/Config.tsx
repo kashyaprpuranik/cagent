@@ -622,11 +622,11 @@ function SettingsEditor({
         <div>
           <label className="block text-sm text-gray-400 mb-1">Seccomp Profile</label>
           <select
-            value={config.security?.seccomp_profile || 'hardened'}
+            value={config.security?.runtime_policy || 'hardened'}
             onChange={(e) =>
               onChange({
                 ...config,
-                security: { ...config.security, seccomp_profile: e.target.value },
+                security: { ...config.security, runtime_policy: e.target.value },
               })
             }
             className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white disabled:opacity-50"
@@ -636,7 +636,7 @@ function SettingsEditor({
             <option value="hardened">Hardened (no mount, ptrace, unshare - production)</option>
             <option value="permissive">Permissive (allows all, blocks raw sockets - debug only)</option>
           </select>
-          {config.security?.seccomp_profile === 'permissive' && (
+          {config.security?.runtime_policy === 'permissive' && (
             <p className="text-xs text-yellow-400 mt-2">
               Permissive mode reduces container security. Use only for temporary debugging.
             </p>
@@ -766,7 +766,7 @@ export default function ConfigPage() {
       `    burst_size: ${cfg.rate_limits?.default?.burst_size || 20}`,
       '',
       'security:',
-      `  seccomp_profile: ${cfg.security?.seccomp_profile || 'hardened'}`,
+      `  runtime_policy: ${cfg.security?.runtime_policy || 'hardened'}`,
       '',
       'domains:',
     ];

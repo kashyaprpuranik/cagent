@@ -2,8 +2,7 @@
   "name": "devops",
   "description": "Infrastructure and DevOps agent — cloud providers, monitoring, CI/CD",
   "security": {
-    "runtime_policy": "standard",
-    "seccomp_profile": "standard"
+    "runtime_policy": "standard"
   },
   "resource_limits": {
     "cpu_limit": 2.0,

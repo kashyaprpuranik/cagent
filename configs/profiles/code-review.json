@@ -2,8 +2,7 @@
   "name": "code-review",
   "description": "Code review and PR agent — GitHub, GitLab, package registries",
   "security": {
-    "runtime_policy": "hardened",
-    "seccomp_profile": "hardened"
+    "runtime_policy": "hardened"
   },
   "resource_limits": {
     "cpu_limit": 1.0,
