@@ -28,7 +28,6 @@ SAMPLE_PROFILE = {
     "name": "default",
     "description": "Default profile",
     "runtime_policy": "hardened",
-    "seccomp_profile": "hardened",
     "pids_limit": 256,
     "cell_count": 2,
     "policy_count": 5,
@@ -75,7 +74,7 @@ SAMPLE_CELL_STATUS = {
 SAMPLE_EXPORT = {
     "name": "default",
     "description": "Default profile",
-    "security": {"runtime_policy": "hardened", "seccomp_profile": "hardened"},
+    "security": {"runtime_policy": "hardened"},
     "resource_limits": {"pids_limit": 256},
     "domain_policies": [
         {

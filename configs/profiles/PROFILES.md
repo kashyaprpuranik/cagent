@@ -34,8 +34,7 @@ Add a new profile by creating a JSON file in this directory and submitting a PR.
   "name": "my-profile",
   "description": "Short description of what this profile is for",
   "security": {
-    "runtime_policy": "hardened",
-    "seccomp_profile": "hardened"
+    "runtime_policy": "hardened"
   },
   "resource_limits": {
     "cpu_limit": 1.0,

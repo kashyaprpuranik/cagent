@@ -23,7 +23,6 @@ class SecurityProfile(BaseModel):
     name: str
     description: Optional[str] = None
     runtime_policy: str = "hardened"
-    seccomp_profile: str = "hardened"
     pids_limit: Optional[int] = None
     cell_count: int = 0
     policy_count: int = 0

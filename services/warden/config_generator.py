@@ -23,7 +23,7 @@ Config Sources (standalone vs connected mode):
     - resources (pids limit) — pushed via heartbeat response.
 
   CP-synced via heartbeat (not config generation):
-    - security.seccomp_profile — pushed via heartbeat response
+    - security.runtime_policy — pushed via heartbeat response
 """
 
 import hashlib

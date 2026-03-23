@@ -190,7 +190,7 @@ In standalone mode, `cagent.yaml` is the sole config source. In connected mode, 
 | `dns` (upstream, cache_ttl) | yaml only | No CP equivalent |
 | `circuit_breakers` | yaml only | No CP equivalent |
 | `rate_limits.default` | yaml only | Global fallback; per-domain overrides come from domains[] |
-| `security.seccomp_profile` | CP via heartbeat | Pushed in heartbeat response, not config generation |
+| `security.runtime_policy` | CP via heartbeat | Pushed in heartbeat response, not config generation |
 | `resources` (cpu/mem) | CP via heartbeat + cloud-init | Written at boot from default SecurityProfile, updated via heartbeat |
 | `email.accounts[]` | CP-owned (connected) / yaml (standalone) | Connected: CP is sole source via `GET /api/v1/email-policies`. Standalone: yaml only. |
 

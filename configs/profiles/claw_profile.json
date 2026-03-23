@@ -2,8 +2,7 @@
   "name": "claw-default",
   "description": "Default claw profile — LLM providers, GitHub, package registries, messaging platforms, and common developer tools",
   "security": {
-    "runtime_policy": "hardened",
-    "seccomp_profile": "hardened"
+    "runtime_policy": "hardened"
   },
   "resource_limits": {
     "pids_limit": 256

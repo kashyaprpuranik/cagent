@@ -2,8 +2,7 @@
   "name": "research-agent",
   "description": "Academic research — arxiv, Google Scholar, HuggingFace, Semantic Scholar, PubMed",
   "security": {
-    "runtime_policy": "hardened",
-    "seccomp_profile": "hardened"
+    "runtime_policy": "hardened"
   },
   "resource_limits": {
     "cpu_limit": 1.0,

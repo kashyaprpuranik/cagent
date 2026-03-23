@@ -30,7 +30,7 @@ rate_limits:
 
 # Container security settings
 # runtime_policy controls the full security posture (seccomp, caps, read_only, tmpfs)
-# Accepts: standard, hardened, permissive.  Falls back to seccomp_profile for backward compat.
+# Accepts: standard, hardened, permissive.
 security:
   runtime_policy: standard  # standard (dev), hardened (prod). permissive relaxes all security — debug only
 
