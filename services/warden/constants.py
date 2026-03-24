@@ -266,8 +266,19 @@ def discover_cell_container_names() -> List[str]:
 
     Falls back to the fixed name ``cell`` when no labelled containers exist.
     """
-    containers = discover_cell_containers()
-    return [c.name for c in containers] if containers else [CELL_CONTAINER_FALLBACK]
+    try:
+        filters = {"label": [CELL_LABEL]}
+        if _COMPOSE_PROJECT:
+            filters["label"].append(f"com.docker.compose.project={_COMPOSE_PROJECT}")
+        containers = docker_client.containers.list(
+            all=True,
+            filters=filters,
+        )
+        if containers:
+            return [c.name for c in containers]
+    except Exception as e:
+        _logger.warning("Label-based cell name discovery failed: %s", e)
+    return [CELL_CONTAINER_FALLBACK]
 
 
 def _container_exists(name: str) -> bool:
