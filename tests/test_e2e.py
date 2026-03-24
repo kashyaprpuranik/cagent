@@ -26,6 +26,7 @@ def pytest_configure(config):
 
 _NET_OCTET = os.environ.get("NET_OCTET", "200")
 _CP_PREFIX = os.environ.get("CP_PREFIX", "")
+_COMPOSE_PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "")
 LOCAL_ADMIN_PORT = os.environ.get("LOCAL_ADMIN_PORT", "8081")
 
 # Cell-net IPs (internal network)
@@ -46,8 +47,8 @@ def _discover_cell_container_name() -> str:
     """Discover a cell container by label, falling back to 'cell'."""
     try:
         cmd = ["docker", "ps", "--filter", "label=cagent.role=cell"]
-        if _CP_PREFIX:
-            cmd += ["--filter", f"name={_CP_PREFIX}"]
+        if _COMPOSE_PROJECT:
+            cmd += ["--filter", f"label=com.docker.compose.project={_COMPOSE_PROJECT}"]
         cmd += ["--format", "{{.Names}}"]
         result = subprocess.run(
             cmd,
@@ -652,7 +653,7 @@ class TestLocalAdminAPI:
     def test_container_logs(self, admin_url, data_plane_running):
         """Should return recent logs for a running container."""
         r = requests.get(
-            f"{admin_url}/api/containers/http-proxy/logs",
+            f"{admin_url}/api/containers/{_CP_PREFIX}http-proxy/logs",
             params={"tail": 10},
             timeout=10,
         )
