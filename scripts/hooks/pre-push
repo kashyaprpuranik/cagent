@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Pre-push hook: run DP tests, auto-trigger e2e for large/critical changes.
+# Install:  scripts/hooks/install.sh
+
+set -e
+
+# Skip with SKIP_PREPUSH=1 for emergencies
+if [ "${SKIP_PREPUSH:-0}" = "1" ]; then
+    echo "Pre-push checks skipped (SKIP_PREPUSH=1)"
+    exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REMOTE_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "origin/main")
+CHANGED_FILES=$(git diff --name-only "$REMOTE_REF"...HEAD 2>/dev/null || true)
+
+RUN_E2E=false
+
+# Trigger e2e if critical DP files changed
+CRITICAL=$(echo "$CHANGED_FILES" | grep -E '(docker-compose|config_generator|Corefile|envoy/|warden/main|cell\.Dockerfile|cagent\.yaml|ext_authz|domain_policy)' || true)
+if [ -n "$CRITICAL" ]; then
+    RUN_E2E=true
+fi
+
+# Trigger e2e if >10 files changed
+FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . || true)
+if [ "$FILE_COUNT" -gt 10 ]; then
+    RUN_E2E=true
+fi
+
+# Trigger e2e if >250 lines changed
+LINE_COUNT=$(git diff --stat "$REMOTE_REF"...HEAD 2>/dev/null | tail -1 | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | paste -sd+ | bc 2>/dev/null || echo 0)
+if [ "$LINE_COUNT" -gt 250 ]; then
+    RUN_E2E=true
+fi
+
+if [ "$RUN_E2E" = true ]; then
+    echo "Large or critical change detected — running with e2e tests"
+    "$REPO_ROOT/scripts/test.sh" --e2e
+else
+    "$REPO_ROOT/scripts/test.sh"
+fi
