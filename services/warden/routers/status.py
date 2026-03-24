@@ -20,6 +20,8 @@ from constants import (
 )
 from fastapi import APIRouter
 
+_NET_OCTET = os.environ.get("NET_OCTET", "200")
+
 router = APIRouter()
 
 
@@ -159,8 +161,7 @@ def _collect_health_checks():
             query += b"\x00\x01\x00\x00\x00\x00\x00\x00"  # 1 question
             query += b"\x06google\x03com\x00"  # google.com
             query += b"\x00\x01\x00\x01"  # type A, class IN
-            _net = os.environ.get("NET_OCTET", "200")
-            resolver.sendto(query, (f"10.{_net}.2.5", 53))
+            resolver.sendto(query, (f"10.{_NET_OCTET}.2.5", 53))
             data, _ = resolver.recvfrom(512)
             resolver.close()
             checks["dns_resolution"] = {
@@ -192,7 +193,11 @@ def _collect_health_checks():
         container = docker_client.containers.get(MITM_PROXY_CONTAINER_NAME)
         if container.status == "running":
             result = container.exec_run(
-                ["python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8080)); s.close()"],
+                [
+                    "python3",
+                    "-c",
+                    "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8080)); s.close()",
+                ],
             )
             checks["mitm_proxy_ready"] = {
                 "status": "healthy" if result.exit_code == 0 else "unhealthy",

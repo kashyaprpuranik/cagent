@@ -10,10 +10,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { createTerminal, getContainers } from '../api/client';
 import '@xterm/xterm/css/xterm.css';
 
-const INFRA_SUFFIXES = [
-  'dns-filter', 'http-proxy', 'mitm-proxy', 'email-proxy', 'warden', 'log-shipper', 'log-store',
-];
-const isInfraContainer = (name: string) => INFRA_SUFFIXES.some((s) => name === s || name.endsWith(`-${s}`));
+import { isInfraContainer } from '../utils/containers';
 
 export default function TerminalPage() {
   const terminalRef = useRef<HTMLDivElement>(null);

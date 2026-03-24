@@ -3,13 +3,15 @@ import logging
 import os
 import re
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 from constants import CAGENT_CONFIG_PATH, COREDNS_CONTAINER_NAME, DATA_PLANE_DIR, docker_client
 from fastapi import APIRouter, HTTPException, Query
+
+_NET_OCTET = os.environ.get("NET_OCTET", "200")
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,7 @@ _VALID_DOMAIN_RE = re.compile(r"^[a-zA-Z0-9._][a-zA-Z0-9._-]*$")
 # OpenObserve helpers (lazy import so module loads even without OO)
 # ---------------------------------------------------------------------------
 
+
 def _oo_available() -> bool:
     """Check if OpenObserve client is importable and healthy."""
     try:
@@ -38,7 +41,7 @@ def _oo_available() -> bool:
 def _oo_query(sql: str, window_hours: int) -> list[dict]:
     """Run a SQL query against OpenObserve for the given time window."""
     try:
-        from openobserve_client import datetime_to_us, now_us, query_openobserve
+        from openobserve_client import now_us, query_openobserve
 
         end_us = now_us()
         start_us = end_us - window_hours * 3600 * 1_000_000
@@ -66,6 +69,7 @@ WIDGET_REGISTRY: dict[str, dict[str, Any]] = json.loads(_WIDGETS_JSON_PATH.read_
 # Request / response models
 # ---------------------------------------------------------------------------
 
+
 class WidgetQueryRequest(BaseModel):
     type: str
     params: dict[str, Any] | None = None
@@ -75,19 +79,22 @@ class WidgetQueryRequest(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/analytics/types")
 def get_widget_types():
     """Return list of available widget types."""
     widgets = []
     for widget_id, spec in WIDGET_REGISTRY.items():
-        widgets.append({
-            "type": widget_id,
-            "name": spec["name"],
-            "category": spec["category"],
-            "visualization": spec["visualization"],
-            "default_params": spec["default_params"],
-            "columns": spec["columns"],
-        })
+        widgets.append(
+            {
+                "type": widget_id,
+                "name": spec["name"],
+                "category": spec["category"],
+                "visualization": spec["visualization"],
+                "default_params": spec["default_params"],
+                "columns": spec["columns"],
+            }
+        )
     return {"widgets": widgets}
 
 
@@ -156,6 +163,7 @@ def query_widget(body: WidgetQueryRequest):
 # Diagnose endpoint (kept as-is)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/analytics/diagnose")
 def diagnose_domain(
     domain: str = Query(..., min_length=1),
@@ -181,8 +189,7 @@ def diagnose_domain(
     try:
         docker_client.containers.get(COREDNS_CONTAINER_NAME)
         # Get CoreDNS IP from container networks
-        _net = os.environ.get("NET_OCTET", "200")
-        dns_ip = f"10.{_net}.1.5"
+        dns_ip = f"10.{_NET_OCTET}.1.5"
         result = subprocess.run(
             ["docker", "exec", COREDNS_CONTAINER_NAME, "nslookup", domain, dns_ip],
             capture_output=True,
@@ -209,27 +216,29 @@ def diagnose_domain(
     # Get recent log entries for this domain via OpenObserve
     recent_requests: list[dict] = []
     try:
-        from openobserve_client import _STREAM, datetime_to_us, now_us, query_openobserve
+        from openobserve_client import _STREAM, now_us, query_openobserve
 
         end_us = now_us()
         start_us = end_us - 1 * 3600 * 1_000_000  # last 1 hour
         escaped = domain.replace("'", "''")
         sql = (
-            f'SELECT _timestamp, method, path, response_code, response_flags, duration_ms '
+            f"SELECT _timestamp, method, path, response_code, response_flags, duration_ms "
             f'FROM "{_STREAM}" '
             f"WHERE source = 'envoy' AND log_type = 'access' AND authority = '{escaped}' "
-            f'ORDER BY _timestamp DESC LIMIT 5'
+            f"ORDER BY _timestamp DESC LIMIT 5"
         )
         rows = query_openobserve(sql, start_us, end_us)
         for r in rows:
-            recent_requests.append({
-                "timestamp": r.get("_timestamp", ""),
-                "method": r.get("method", ""),
-                "path": r.get("path", ""),
-                "response_code": int(r.get("response_code", 0)),
-                "response_flags": r.get("response_flags", ""),
-                "duration_ms": int(r.get("duration_ms", 0)),
-            })
+            recent_requests.append(
+                {
+                    "timestamp": r.get("_timestamp", ""),
+                    "method": r.get("method", ""),
+                    "path": r.get("path", ""),
+                    "response_code": int(r.get("response_code", 0)),
+                    "response_flags": r.get("response_flags", ""),
+                    "duration_ms": int(r.get("duration_ms", 0)),
+                }
+            )
     except ImportError:
         logger.warning("openobserve_client not available for diagnose")
     except Exception as e:

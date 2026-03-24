@@ -21,6 +21,7 @@ from constants import (
     CONTROL_PLANE_URL,
     COREDNS_CONTAINER_NAME,
     COREDNS_COREFILE_PATH,
+    DATA_PLANE_DIR,
     DATAPLANE_MODE,
     DLP_CONFIG_PATH,
     EMAIL_CONFIG_PATH,
@@ -28,12 +29,11 @@ from constants import (
     ENVOY_CONFIG_PATH,
     ENVOY_CONTAINER_NAME,
     ENVOY_RDS_PATH,
-    DATA_PLANE_DIR,
     docker_client,
 )
-import os
 
 logger = logging.getLogger(__name__)
+_NET_OCTET = os.environ.get("NET_OCTET", "200")
 
 # Path to .env file for docker-compose resource overrides
 ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
@@ -94,8 +94,7 @@ def reload_envoy():
 def reload_email_proxy():
     """Tell email-proxy to reload its config from disk."""
     try:
-        _net = os.environ.get("NET_OCTET", "200")
-        resp = requests.post(f"http://10.{_net}.2.40:8025/reload", timeout=5)
+        resp = requests.post(f"http://10.{_NET_OCTET}.2.40:8025/reload", timeout=5)
         if resp.status_code == 200:
             logger.info("Email-proxy reloaded config: %s", resp.json())
             return True
@@ -417,9 +416,7 @@ def sync_config() -> bool:
     cp_dlp_config = None
 
     # Fetch domain policies
-    data = _fetch_cp_resource(
-        "/api/v1/domain-policies", "domain policies", params={"include_credentials": "true"}
-    )
+    data = _fetch_cp_resource("/api/v1/domain-policies", "domain policies", params={"include_credentials": "true"})
     if data is not None:
         policies = data.get("items", data) if isinstance(data, dict) else data
         _synced_domain_policies = [p for p in policies if p.get("enabled", True)]
@@ -427,9 +424,7 @@ def sync_config() -> bool:
         logger.info(f"Fetched {len(cp_domain_entries)} domain policies from control plane")
 
     # Fetch email policies
-    data = _fetch_cp_resource(
-        "/api/v1/email-policies", "email policies", params={"include_credentials": "true"}
-    )
+    data = _fetch_cp_resource("/api/v1/email-policies", "email policies", params={"include_credentials": "true"})
     if data is not None:
         policies = data.get("items", []) if isinstance(data, dict) else data
         cp_email_entries = [_cp_email_policy_to_account_entry(p) for p in policies if p.get("enabled", True)]

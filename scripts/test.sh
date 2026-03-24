@@ -28,11 +28,18 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# ── DP Unit / Config Tests ──────────────────────────────────────────────────
+# ── DP Unit / Config Tests (isolated worktree) ────────────────────────────
+# Run from a temporary git worktree so running containers (which modify
+# configs/coredns/Corefile, configs/cagent.yaml, etc.) can't interfere.
 echo "=== DP Unit / Config Tests ==="
 echo ""
-cd "$REPO_ROOT"
 start=$SECONDS
+
+UNIT_WORKTREE="/tmp/dp-unit-tests-$$"
+git -C "$REPO_ROOT" worktree add --quiet "$UNIT_WORKTREE" HEAD 2>/dev/null
+trap 'git -C "$REPO_ROOT" worktree remove --force "$UNIT_WORKTREE" 2>/dev/null || true' EXIT
+
+cd "$UNIT_WORKTREE"
 pip install -q -r requirements-test.txt
 if pytest tests/ -v --ignore=tests/test_e2e.py; then
     echo ""
@@ -49,13 +56,10 @@ echo ""
 echo "=== Frontend Type-Check ==="
 echo ""
 
-# Ensure dependencies are installed
-cd "$REPO_ROOT"
-npm install --workspaces --include-workspace-root --silent 2>/dev/null || true
-
 echo "--- DP local admin UI (tsc) ---"
 start=$SECONDS
-if (cd "$REPO_ROOT/services/warden/frontend" && npx tsc --noEmit 2>&1); then
+# Install deps and type-check from the worktree (clean node_modules)
+if (cd "$UNIT_WORKTREE" && npm install --workspaces --include-workspace-root --silent 2>/dev/null || true; cd services/warden/frontend && npx tsc --noEmit 2>&1); then
     echo -e "  ${GREEN}DP local admin frontend: OK${NC}"
 else
     echo -e "  ${RED}DP local admin frontend: FAILED${NC}"
@@ -63,6 +67,9 @@ else
 fi
 TIMINGS["DP frontend"]=$(( SECONDS - start ))
 echo ""
+
+# Clean up worktree before e2e (which uses the real repo)
+git -C "$REPO_ROOT" worktree remove --force "$UNIT_WORKTREE" 2>/dev/null || true
 
 # ── DP E2E Tests (standalone mode) ──────────────────────────────────────────
 if [ "$RUN_E2E" = true ]; then

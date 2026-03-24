@@ -129,10 +129,7 @@ function HealthPanel() {
   );
 }
 
-const INFRA_SUFFIXES = [
-  'dns-filter', 'http-proxy', 'mitm-proxy', 'email-proxy', 'warden', 'log-shipper', 'log-store',
-];
-const isInfraContainer = (name: string) => INFRA_SUFFIXES.some((s) => name === s || name.endsWith(`-${s}`));
+import { isInfraContainer } from '../utils/containers';
 
 function ContainerCard({ container, readOnly }: { container: ContainerInfo; readOnly?: boolean }) {
   const queryClient = useQueryClient();
