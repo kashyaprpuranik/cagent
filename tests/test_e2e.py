@@ -219,12 +219,12 @@ class TestMultiCellContainers:
     """
 
     def _discover_all(self):
-        result = subprocess.run(
-            ["docker", "ps", "--filter", "label=cagent.role=cell", "--format", "{{.Names}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        cmd = ["docker", "ps", "--filter", "label=cagent.role=cell"]
+        project = _get_compose_project()
+        if project:
+            cmd += ["--filter", f"label=com.docker.compose.project={project}"]
+        cmd += ["--format", "{{.Names}}"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         return sorted(result.stdout.strip().splitlines())
 
     def test_multiple_cells_discovered(self, data_plane_running):
