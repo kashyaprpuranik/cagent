@@ -92,6 +92,9 @@ done
 # Main
 # =============================================================================
 
+export COMPOSE_PROJECT_NAME=cagent-local
+# NET_OCTET=200 (default), no CP_PREFIX, no network name overrides needed
+
 echo "=== Cagent Data Plane Development Environment ==="
 echo "Directory: $ROOT_DIR"
 
@@ -116,7 +119,7 @@ fi
 bash "$ROOT_DIR/scripts/setup.sh"
 
 if [ "$MINIMAL" = false ]; then
-    export HTTPS_PROXY="http://10.200.1.15:8080"
+    export HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.15:8080"
     echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
 fi
 
@@ -156,7 +159,7 @@ echo "  Cell container(s): OK"
 echo "Waiting for HTTP proxy..."
 CELL_CONTAINER=$(docker ps --filter "label=cagent.role=cell" --format "{{.Names}}" | head -1)
 RETRIES=15
-until docker exec "$CELL_CONTAINER" curl -sf -x http://10.200.1.10:8443 --connect-timeout 2 http://api.github.com/ -o /dev/null 2>/dev/null; do
+until docker exec "$CELL_CONTAINER" curl -sf -x http://10.${NET_OCTET:-200}.1.10:8443 --connect-timeout 2 http://api.github.com/ -o /dev/null 2>/dev/null; do
     RETRIES=$((RETRIES - 1))
     if [ $RETRIES -le 0 ]; then
         echo "  WARNING: HTTP proxy health check timed out (continuing anyway)"
@@ -170,7 +173,7 @@ echo "  HTTP proxy: OK"
 if [ "$MINIMAL" = false ]; then
     echo "Waiting for MITM proxy..."
     RETRIES=15
-    until docker exec "$CELL_CONTAINER" curl -sf -x http://10.200.1.15:8080 --connect-timeout 2 https://api.github.com/ -o /dev/null 2>/dev/null; do
+    until docker exec "$CELL_CONTAINER" curl -sf -x http://10.${NET_OCTET:-200}.1.15:8080 --connect-timeout 2 https://api.github.com/ -o /dev/null 2>/dev/null; do
         RETRIES=$((RETRIES - 1))
         if [ $RETRIES -le 0 ]; then
             echo "  WARNING: MITM proxy health check timed out (continuing anyway)"

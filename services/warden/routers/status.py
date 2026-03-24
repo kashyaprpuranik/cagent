@@ -159,7 +159,8 @@ def _collect_health_checks():
             query += b"\x00\x01\x00\x00\x00\x00\x00\x00"  # 1 question
             query += b"\x06google\x03com\x00"  # google.com
             query += b"\x00\x01\x00\x01"  # type A, class IN
-            resolver.sendto(query, ("10.200.2.5", 53))
+            _net = os.environ.get("NET_OCTET", "200")
+            resolver.sendto(query, (f"10.{_net}.2.5", 53))
             data, _ = resolver.recvfrom(512)
             resolver.close()
             checks["dns_resolution"] = {

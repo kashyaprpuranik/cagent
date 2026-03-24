@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -180,7 +181,8 @@ def diagnose_domain(
     try:
         docker_client.containers.get(COREDNS_CONTAINER_NAME)
         # Get CoreDNS IP from container networks
-        dns_ip = "10.200.1.5"
+        _net = os.environ.get("NET_OCTET", "200")
+        dns_ip = f"10.{_net}.1.5"
         result = subprocess.run(
             ["docker", "exec", COREDNS_CONTAINER_NAME, "nslookup", domain, dns_ip],
             capture_output=True,

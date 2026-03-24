@@ -73,6 +73,15 @@ if [ "$RUN_E2E" = true ]; then
     cd "$REPO_ROOT"
     CONTAINERS_STARTED=false
 
+    # Isolate e2e from other compose stacks (local.sh, local_dp.sh)
+    export COMPOSE_PROJECT_NAME=cagent-e2e
+    export NET_OCTET=201
+    export CP_PREFIX=e2e-
+    export CELL_NET_NAME=cagent-e2e-cell-net
+    export INFRA_NET_NAME=cagent-e2e-infra-net
+    export SSH_PORT=3222
+    export LOCAL_ADMIN_PORT=9081
+
     # E2E tests require: cell-dev (profile dev), warden (profile admin),
     # standalone mode. Bring up or restart as needed.
     NEED_RESTART=false
@@ -92,7 +101,7 @@ if [ "$RUN_E2E" = true ]; then
 
     # Check warden and log-shipper are running (admin profile)
     if [ "$NEED_RESTART" = false ]; then
-        for svc in warden log-shipper; do
+        for svc in "${CP_PREFIX}warden" "${CP_PREFIX}log-shipper"; do
             if ! docker ps --filter "name=^${svc}$" --format "{{.Names}}" 2>/dev/null | grep -q "$svc"; then
                 NEED_RESTART=true
                 break
@@ -102,7 +111,7 @@ if [ "$RUN_E2E" = true ]; then
 
     # Check warden is running in standalone mode
     if [ "$NEED_RESTART" = false ]; then
-        ADMIN_MODE=$(curl -sf http://localhost:8081/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
+        ADMIN_MODE=$(curl -sf http://localhost:${LOCAL_ADMIN_PORT}/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
         if [ "$ADMIN_MODE" = "connected" ]; then
             echo "Data plane is running in connected mode, restarting in standalone mode..."
             docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
@@ -112,7 +121,7 @@ if [ "$RUN_E2E" = true ]; then
 
     # Generate certs (MITM CA + mTLS)
     bash "$REPO_ROOT/scripts/setup.sh"
-    export HTTPS_PROXY="http://10.200.1.15:8080"
+    export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
     export WARDEN_TLS_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-key.pem")"
     export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/ca-cert.pem")"
@@ -134,7 +143,7 @@ if [ "$RUN_E2E" = true ]; then
         docker compose --profile standard --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
 
         # Clean up stale networks (may have wrong labels or orphan endpoints)
-        for net in cagent-infra-net cagent-cell-net; do
+        for net in "$INFRA_NET_NAME" "$CELL_NET_NAME"; do
             if docker network inspect "$net" >/dev/null 2>&1; then
                 for cid in $(docker network inspect "$net" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null); do
                     echo "  Removing orphan container $cid from $net..."

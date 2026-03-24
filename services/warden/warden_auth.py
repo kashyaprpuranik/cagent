@@ -7,11 +7,14 @@ Localhost requests (SSH users on the host) bypass auth for convenience.
 When WARDEN_API_TOKEN is empty (standalone mode), all requests are allowed.
 """
 
+import os
+
 import runtime_config
 from constants import WARDEN_API_TOKEN
 from fastapi import HTTPException, Request, WebSocket
 
-_LOCALHOST_PREFIXES = ("127.", "::1", "10.200.2.")
+_NET_OCTET = os.environ.get("NET_OCTET", "200")
+_LOCALHOST_PREFIXES = ("127.", "::1", f"10.{_NET_OCTET}.2.")
 
 
 def _get_warden_token() -> str:

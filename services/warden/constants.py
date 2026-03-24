@@ -20,11 +20,12 @@ CELL_CONTAINER_FALLBACK = "cell"
 # ---------------------------------------------------------------------------
 # Infrastructure container names
 # ---------------------------------------------------------------------------
-COREDNS_CONTAINER_NAME = "dns-filter"
-ENVOY_CONTAINER_NAME = "http-proxy"
-MITM_PROXY_CONTAINER_NAME = "mitm-proxy"
-EMAIL_PROXY_CONTAINER_NAME = "email-proxy"
-WARDEN_CONTAINER_NAME = "warden"
+_CP_PREFIX = os.environ.get("CP_PREFIX", "")
+COREDNS_CONTAINER_NAME = f"{_CP_PREFIX}dns-filter"
+ENVOY_CONTAINER_NAME = f"{_CP_PREFIX}http-proxy"
+MITM_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}mitm-proxy"
+EMAIL_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}email-proxy"
+WARDEN_CONTAINER_NAME = f"{_CP_PREFIX}warden"
 
 # ---------------------------------------------------------------------------
 # Mode (must be defined before CAGENT_CONFIG_PATH)

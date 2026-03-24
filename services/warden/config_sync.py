@@ -6,6 +6,7 @@ sync_config / regenerate_configs without circular imports.
 
 import hashlib
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Optional
@@ -93,7 +94,8 @@ def reload_envoy():
 def reload_email_proxy():
     """Tell email-proxy to reload its config from disk."""
     try:
-        resp = requests.post("http://10.200.2.40:8025/reload", timeout=5)
+        _net = os.environ.get("NET_OCTET", "200")
+        resp = requests.post(f"http://10.{_net}.2.40:8025/reload", timeout=5)
         if resp.status_code == 200:
             logger.info("Email-proxy reloaded config: %s", resp.json())
             return True

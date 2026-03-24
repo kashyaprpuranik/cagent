@@ -29,11 +29,13 @@ Config Sources (standalone vs connected mode):
 import hashlib
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 _UTC = timezone.utc
+_NET_OCTET = os.environ.get("NET_OCTET", "200")
 
 import yaml
 
@@ -189,10 +191,10 @@ class ConfigGenerator:
             "# DO NOT EDIT - changes will be overwritten",
             "# =============================================================================",
             "",
-            "# Devbox.local aliases -> Envoy proxy (10.200.1.10)",
+            f"# Devbox.local aliases -> Envoy proxy (10.{_NET_OCTET}.1.10)",
             "devbox.local {",
             "    template IN A {",
-            '        answer "{{ .Name }} 60 IN A 10.200.1.10"',
+            f'        answer "{{{{ .Name }}}} 60 IN A 10.{_NET_OCTET}.1.10"',
             "    }",
             "    template IN AAAA {",
             "        rcode NOERROR",
@@ -608,7 +610,7 @@ class ConfigGenerator:
                         "lb_endpoints": [
                             {
                                 "endpoint": {
-                                    "address": {"socket_address": {"address": "10.200.2.40", "port_value": 8025}}
+                                    "address": {"socket_address": {"address": f"10.{_NET_OCTET}.2.40", "port_value": 8025}}
                                 }
                             }
                         ]
