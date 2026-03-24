@@ -28,11 +28,18 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# ── DP Unit / Config Tests ──────────────────────────────────────────────────
+# ── DP Unit / Config Tests (isolated worktree) ────────────────────────────
+# Run from a temporary git worktree so running containers (which modify
+# configs/coredns/Corefile, configs/cagent.yaml, etc.) can't interfere.
 echo "=== DP Unit / Config Tests ==="
 echo ""
-cd "$REPO_ROOT"
 start=$SECONDS
+
+UNIT_WORKTREE="/tmp/dp-unit-tests-$$"
+git -C "$REPO_ROOT" worktree add --quiet "$UNIT_WORKTREE" HEAD 2>/dev/null
+trap 'git -C "$REPO_ROOT" worktree remove --force "$UNIT_WORKTREE" 2>/dev/null || true' EXIT
+
+cd "$UNIT_WORKTREE"
 pip install -q -r requirements-test.txt
 if pytest tests/ -v --ignore=tests/test_e2e.py; then
     echo ""
@@ -49,13 +56,10 @@ echo ""
 echo "=== Frontend Type-Check ==="
 echo ""
 
-# Ensure dependencies are installed
-cd "$REPO_ROOT"
-npm install --workspaces --include-workspace-root --silent 2>/dev/null || true
-
 echo "--- DP local admin UI (tsc) ---"
 start=$SECONDS
-if (cd "$REPO_ROOT/services/warden/frontend" && npx tsc --noEmit 2>&1); then
+# Install deps and type-check from the worktree (clean node_modules)
+if (cd "$UNIT_WORKTREE" && npm install --workspaces --include-workspace-root --silent 2>/dev/null || true; cd services/warden/frontend && npx tsc --noEmit 2>&1); then
     echo -e "  ${GREEN}DP local admin frontend: OK${NC}"
 else
     echo -e "  ${RED}DP local admin frontend: FAILED${NC}"
@@ -63,6 +67,9 @@ else
 fi
 TIMINGS["DP frontend"]=$(( SECONDS - start ))
 echo ""
+
+# Clean up worktree before e2e (which uses the real repo)
+git -C "$REPO_ROOT" worktree remove --force "$UNIT_WORKTREE" 2>/dev/null || true
 
 # ── DP E2E Tests (standalone mode) ──────────────────────────────────────────
 if [ "$RUN_E2E" = true ]; then
@@ -72,6 +79,15 @@ if [ "$RUN_E2E" = true ]; then
 
     cd "$REPO_ROOT"
     CONTAINERS_STARTED=false
+
+    # Isolate e2e from other compose stacks (local.sh, local_dp.sh)
+    export COMPOSE_PROJECT_NAME=cagent-e2e
+    export NET_OCTET=201
+    export CP_PREFIX=e2e-
+    export CELL_NET_NAME=cagent-e2e-cell-net
+    export INFRA_NET_NAME=cagent-e2e-infra-net
+    export SSH_PORT=3222
+    export LOCAL_ADMIN_PORT=9081
 
     # E2E tests require: cell-dev (profile dev), warden (profile admin),
     # standalone mode. Bring up or restart as needed.
@@ -92,7 +108,7 @@ if [ "$RUN_E2E" = true ]; then
 
     # Check warden and log-shipper are running (admin profile)
     if [ "$NEED_RESTART" = false ]; then
-        for svc in warden log-shipper; do
+        for svc in "${CP_PREFIX}warden" "${CP_PREFIX}log-shipper"; do
             if ! docker ps --filter "name=^${svc}$" --format "{{.Names}}" 2>/dev/null | grep -q "$svc"; then
                 NEED_RESTART=true
                 break
@@ -102,7 +118,7 @@ if [ "$RUN_E2E" = true ]; then
 
     # Check warden is running in standalone mode
     if [ "$NEED_RESTART" = false ]; then
-        ADMIN_MODE=$(curl -sf http://localhost:8081/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
+        ADMIN_MODE=$(curl -sf http://localhost:${LOCAL_ADMIN_PORT}/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
         if [ "$ADMIN_MODE" = "connected" ]; then
             echo "Data plane is running in connected mode, restarting in standalone mode..."
             docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
@@ -112,7 +128,7 @@ if [ "$RUN_E2E" = true ]; then
 
     # Generate certs (MITM CA + mTLS)
     bash "$REPO_ROOT/scripts/setup.sh"
-    export HTTPS_PROXY="http://10.200.1.15:8080"
+    export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
     export WARDEN_TLS_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-key.pem")"
     export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/ca-cert.pem")"
@@ -134,7 +150,7 @@ if [ "$RUN_E2E" = true ]; then
         docker compose --profile standard --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
 
         # Clean up stale networks (may have wrong labels or orphan endpoints)
-        for net in cagent-infra-net cagent-cell-net; do
+        for net in "$INFRA_NET_NAME" "$CELL_NET_NAME"; do
             if docker network inspect "$net" >/dev/null 2>&1; then
                 for cid in $(docker network inspect "$net" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null); do
                     echo "  Removing orphan container $cid from $net..."

@@ -14,9 +14,12 @@ upgrades back to HTTPS when forwarding to the real upstream server.
 Used with --mode regular (not upstream) to avoid CONNECT tunnel to Envoy.
 """
 
+import os
+
 from mitmproxy import http
 
-ENVOY_HOST = "10.200.1.10"
+_NET_OCTET = os.environ.get("NET_OCTET", "200")
+ENVOY_HOST = f"10.{_NET_OCTET}.1.10"
 ENVOY_PORT = 8443
 
 

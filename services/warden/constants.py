@@ -17,14 +17,28 @@ docker_client = docker.from_env()
 CELL_LABEL = "cagent.role=cell"
 CELL_CONTAINER_FALLBACK = "cell"
 
+# Detect own compose project to scope cell discovery (avoids seeing cells from other stacks)
+def _detect_compose_project() -> str:
+    """Read the compose project label from this container's own metadata."""
+    try:
+        import socket
+        hostname = socket.gethostname()
+        self_container = docker_client.containers.get(hostname)
+        return self_container.labels.get("com.docker.compose.project", "")
+    except Exception:
+        return ""
+
+_COMPOSE_PROJECT = _detect_compose_project()
+
 # ---------------------------------------------------------------------------
 # Infrastructure container names
 # ---------------------------------------------------------------------------
-COREDNS_CONTAINER_NAME = "dns-filter"
-ENVOY_CONTAINER_NAME = "http-proxy"
-MITM_PROXY_CONTAINER_NAME = "mitm-proxy"
-EMAIL_PROXY_CONTAINER_NAME = "email-proxy"
-WARDEN_CONTAINER_NAME = "warden"
+_CP_PREFIX = os.environ.get("CP_PREFIX", "")
+COREDNS_CONTAINER_NAME = f"{_CP_PREFIX}dns-filter"
+ENVOY_CONTAINER_NAME = f"{_CP_PREFIX}http-proxy"
+MITM_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}mitm-proxy"
+EMAIL_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}email-proxy"
+WARDEN_CONTAINER_NAME = f"{_CP_PREFIX}warden"
 
 # ---------------------------------------------------------------------------
 # Mode (must be defined before CAGENT_CONFIG_PATH)
@@ -223,9 +237,12 @@ def discover_cell_containers() -> List:
 
     _logger = logging.getLogger(__name__)
     try:
+        filters = {"label": [CELL_LABEL]}
+        if _COMPOSE_PROJECT:
+            filters["label"].append(f"com.docker.compose.project={_COMPOSE_PROJECT}")
         containers = docker_client.containers.list(
             all=True,
-            filters={"label": CELL_LABEL},
+            filters=filters,
         )
         if containers:
             return containers
@@ -250,15 +267,17 @@ def discover_cell_container_names() -> List[str]:
     Falls back to the fixed name ``cell`` when no labelled containers exist.
     """
     try:
+        filters = {"label": [CELL_LABEL]}
+        if _COMPOSE_PROJECT:
+            filters["label"].append(f"com.docker.compose.project={_COMPOSE_PROJECT}")
         containers = docker_client.containers.list(
             all=True,
-            filters={"label": CELL_LABEL},
+            filters=filters,
         )
         if containers:
             return [c.name for c in containers]
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("Label-based cell name discovery failed: %s", e)
+        _logger.warning("Label-based cell name discovery failed: %s", e)
     return [CELL_CONTAINER_FALLBACK]
 
 

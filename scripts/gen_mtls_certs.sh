@@ -55,7 +55,7 @@ openssl req -newkey rsa:2048 \
     -subj "/CN=localhost/O=Cagent Warden"
 
 cat > "$MTLS_DIR/server-ext.cnf" <<EOF
-subjectAltName = DNS:localhost,IP:127.0.0.1,IP:10.200.2.2
+subjectAltName = DNS:localhost,IP:127.0.0.1,IP:10.${NET_OCTET:-200}.2.2
 EOF
 
 openssl x509 -req \

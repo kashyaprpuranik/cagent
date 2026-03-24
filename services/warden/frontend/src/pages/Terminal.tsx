@@ -10,9 +10,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { createTerminal, getContainers } from '../api/client';
 import '@xterm/xterm/css/xterm.css';
 
-const INFRA_CONTAINERS = new Set([
-  'dns-filter', 'http-proxy', 'email-proxy', 'warden',
-]);
+import { isInfraContainer } from '../utils/containers';
 
 export default function TerminalPage() {
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -40,7 +38,7 @@ export default function TerminalPage() {
   const agentContainers = useMemo(
     () => containersData
       ? Object.values(containersData.containers)
-          .filter((c) => !INFRA_CONTAINERS.has(c.name) && c.status === 'running')
+          .filter((c) => !isInfraContainer(c.name) && c.status === 'running')
           .map((c) => c.name)
       : [],
     [containersData],

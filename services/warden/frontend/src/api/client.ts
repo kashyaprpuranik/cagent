@@ -41,7 +41,10 @@ export interface DetailedHealth {
   checks: Record<string, HealthCheck>;
 }
 
-export const getDetailedHealth = () => request<DetailedHealth>('/health/detailed');
+export const getDetailedHealth = async (): Promise<DetailedHealth> => {
+  const metrics = await request<{ health: DetailedHealth }>('/metrics');
+  return metrics.health;
+};
 
 // Terminal
 export const createTerminal = (containerName: string): WebSocket => {
@@ -154,51 +157,27 @@ export const createLogStream = (name: string): WebSocket => {
   return new WebSocket(`${protocol}//${host}/api/containers/${name}/logs/stream`);
 };
 
-// Analytics
-export interface BlockedDomainEntry {
-  domain: string;
-  count: number;
-  last_seen: string;
+// Analytics (widget query API)
+export interface WidgetColumn {
+  name: string;
+  type: string;
+  role: string;
 }
 
-export interface BlockedDomainsResponse {
-  blocked_domains: BlockedDomainEntry[];
-  window_hours: number;
+export interface WidgetQueryResponse {
+  widget: string;
+  visualization: string;
+  columns: WidgetColumn[];
+  rows: (string | number)[][];
+  meta: Record<string, unknown>;
 }
 
-export const getBlockedDomains = (hours?: number) =>
-  request<BlockedDomainsResponse>(`/analytics/blocked-domains?hours=${hours || 1}`);
-
-export interface TimeseriesBucket {
-  start: string;
-  end: string;
-  count: number;
-}
-
-export interface TimeseriesResponse {
-  buckets: TimeseriesBucket[];
-  window_hours: number;
-  bucket_minutes: number;
-}
-
-export const getBlockedTimeseries = (hours?: number, buckets?: number) =>
-  request<TimeseriesResponse>(`/analytics/blocked-domains/timeseries?hours=${hours || 1}&buckets=${buckets || 12}`);
-
-export interface BandwidthEntry {
-  domain: string;
-  bytes_sent: number;
-  bytes_received: number;
-  total_bytes: number;
-  request_count: number;
-}
-
-export interface BandwidthResponse {
-  domains: BandwidthEntry[];
-  window_hours: number;
-}
-
-export const getBandwidth = (hours?: number) =>
-  request<BandwidthResponse>(`/analytics/bandwidth?hours=${hours || 1}`);
+export const queryWidget = (type: string, params?: Record<string, unknown>) =>
+  request<WidgetQueryResponse>('/analytics/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, params }),
+  });
 
 export interface DiagnoseRequest {
   timestamp: string;
