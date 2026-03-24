@@ -36,6 +36,7 @@ from typing import Optional
 
 _UTC = timezone.utc
 _NET_OCTET = os.environ.get("NET_OCTET", "200")
+_RATELIMIT_PERCENTAGE = {"numerator": 100, "denominator": "HUNDRED"}
 
 import yaml
 
@@ -52,7 +53,10 @@ DEFAULT_DLP_PATTERNS = [
     {"name": "anthropic_api_key", "regex": "sk-ant-[A-Za-z0-9_-]{20,}"},
     {"name": "private_key", "regex": "-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"},
     {"name": "jwt", "regex": "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"},
-    {"name": "generic_api_key", "regex": "(?i)(?:api_key|apikey|api-key|access_token|auth_token|secret_key)[\\s]*[=:]\\s*['\"]?[A-Za-z0-9_\\-/.]{20,}['\"]?"},
+    {
+        "name": "generic_api_key",
+        "regex": "(?i)(?:api_key|apikey|api-key|access_token|auth_token|secret_key)[\\s]*[=:]\\s*['\"]?[A-Za-z0-9_\\-/.]{20,}['\"]?",
+    },
     {"name": "connection_string", "regex": "(?:mongodb(?:\\+srv)?|postgres(?:ql)?|mysql|redis|amqp)://[^\\s'\"]{10,}"},
     {"name": "ssn", "regex": "\\b\\d{3}-\\d{2}-\\d{4}\\b"},
     {"name": "credit_card", "regex": "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b"},
@@ -271,6 +275,11 @@ class ConfigGenerator:
     # Envoy Generation
     # =========================================================================
 
+    @staticmethod
+    def _build_domain_header(domain: str) -> list:
+        """Build X-Real-Domain request header config for Envoy routes."""
+        return [{"header": {"key": "X-Real-Domain", "value": domain}, "append_action": "OVERWRITE_IF_EXISTS_OR_ADD"}]
+
     def _build_virtual_hosts_and_clusters(self):
         """Extract virtual hosts and clusters from domain config.
 
@@ -362,12 +371,7 @@ class ConfigGenerator:
                         "cluster": cluster_name,
                         "timeout": timeout,
                     },
-                    "request_headers_to_add": [
-                        {
-                            "header": {"key": "X-Real-Domain", "value": actual_domain},
-                            "append_action": "OVERWRITE_IF_EXISTS_OR_ADD",
-                        },
-                    ],
+                    "request_headers_to_add": self._build_domain_header(actual_domain),
                 }
                 # Per-route rate limit override if domain has custom rate limit
                 if domain_rl:
@@ -393,12 +397,7 @@ class ConfigGenerator:
                 alias_route = {
                     "match": {"prefix": "/"},
                     "route": {"cluster": cluster_name, "timeout": timeout, "auto_host_rewrite": True},
-                    "request_headers_to_add": [
-                        {
-                            "header": {"key": "X-Real-Domain", "value": actual_domain},
-                            "append_action": "OVERWRITE_IF_EXISTS_OR_ADD",
-                        },
-                    ],
+                    "request_headers_to_add": self._build_domain_header(actual_domain),
                 }
                 # Per-route rate limit for alias too
                 if domain_rl:
@@ -474,7 +473,7 @@ class ConfigGenerator:
                 "stats_matcher": {"reject_all": True},
             },
             "static_resources": {
-                "listeners": [self._build_xds_listener(default_rate_limit)],
+                "listeners": [self._build_listener(default_rate_limit, use_rds=True)],
                 "clusters": [self._build_control_plane_cluster()],
             },
             "dynamic_resources": {
@@ -487,12 +486,14 @@ class ConfigGenerator:
                 },
             },
             "layered_runtime": {
-                "layers": [{
-                    "name": "static_layer",
-                    "static_layer": {
-                        "envoy": {"resource_limits": {"listener": {"egress_https": {"connection_limit": 1000}}}}
-                    },
-                }]
+                "layers": [
+                    {
+                        "name": "static_layer",
+                        "static_layer": {
+                            "envoy": {"resource_limits": {"listener": {"egress_https": {"connection_limit": 1000}}}}
+                        },
+                    }
+                ]
             },
         }
 
@@ -500,21 +501,20 @@ class ConfigGenerator:
         """Generate CDS (Cluster Discovery Service) resources for file-based xDS."""
         _, clusters = self._build_virtual_hosts_and_clusters()
         return {
-            "resources": [
-                {"@type": "type.googleapis.com/envoy.config.cluster.v3.Cluster", **c}
-                for c in clusters
-            ],
+            "resources": [{"@type": "type.googleapis.com/envoy.config.cluster.v3.Cluster", **c} for c in clusters],
         }
 
     def generate_envoy_rds(self) -> dict:
         """Generate RDS (Route Discovery Service) resources for file-based xDS."""
         virtual_hosts, _ = self._build_virtual_hosts_and_clusters()
         return {
-            "resources": [{
-                "@type": "type.googleapis.com/envoy.config.route.v3.RouteConfiguration",
-                "name": "egress_routes",
-                "virtual_hosts": virtual_hosts,
-            }],
+            "resources": [
+                {
+                    "@type": "type.googleapis.com/envoy.config.route.v3.RouteConfiguration",
+                    "name": "egress_routes",
+                    "virtual_hosts": virtual_hosts,
+                }
+            ],
         }
 
     def _build_route_entry(
@@ -543,12 +543,7 @@ class ConfigGenerator:
                 "cluster": cluster_name,
                 "timeout": timeout,
             },
-            "request_headers_to_add": [
-                {
-                    "header": {"key": "X-Real-Domain", "value": actual_domain},
-                    "append_action": "OVERWRITE_IF_EXISTS_OR_ADD",
-                },
-            ],
+            "request_headers_to_add": self._build_domain_header(actual_domain),
         }
 
         if domain_rl:
@@ -573,8 +568,8 @@ class ConfigGenerator:
             "@type": "type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit",
             "stat_prefix": f"{cluster_name}_rl",
             "token_bucket": self._rpm_to_token_bucket(rpm, burst),
-            "filter_enabled": {"default_value": {"numerator": 100, "denominator": "HUNDRED"}},
-            "filter_enforced": {"default_value": {"numerator": 100, "denominator": "HUNDRED"}},
+            "filter_enabled": {"default_value": _RATELIMIT_PERCENTAGE},
+            "filter_enforced": {"default_value": _RATELIMIT_PERCENTAGE},
             "status": {"code": "TooManyRequests"},
         }
 
@@ -610,7 +605,9 @@ class ConfigGenerator:
                         "lb_endpoints": [
                             {
                                 "endpoint": {
-                                    "address": {"socket_address": {"address": f"10.{_NET_OCTET}.2.40", "port_value": 8025}}
+                                    "address": {
+                                        "socket_address": {"address": f"10.{_NET_OCTET}.2.40", "port_value": 8025}
+                                    }
                                 }
                             }
                         ]
@@ -679,10 +676,10 @@ class ConfigGenerator:
             "admin": {"address": {"socket_address": {"address": "127.0.0.1", "port_value": 9901}}},
             "static_resources": {
                 "listeners": [
-                    self._build_https_listener(
-                        virtual_hosts,
+                    self._build_listener(
                         default_rate_limit,
-                        credential_headers,
+                        virtual_hosts=virtual_hosts,
+                        credential_headers=credential_headers,
                     )
                 ],
                 "clusters": [self._build_control_plane_cluster(), *clusters],
@@ -722,8 +719,56 @@ class ConfigGenerator:
             },
         }
 
-    def _build_https_listener(self, virtual_hosts: list, default_rate_limit: dict, credential_headers: set) -> dict:
-        """Build HTTPS egress listener."""
+    def _build_listener(
+        self,
+        default_rate_limit: dict,
+        virtual_hosts: list | None = None,
+        credential_headers: set | None = None,
+        use_rds: bool = False,
+    ) -> dict:
+        """Build HTTPS egress listener.
+
+        When use_rds=False (static config), uses inline route_config with virtual_hosts
+        and credential-specific ext_authz headers.
+        When use_rds=True (xDS mode), uses RDS file reference and permissive ext_authz.
+        """
+        if use_rds:
+            route_section = {
+                "rds": {
+                    "config_source": {
+                        "path_config_source": {
+                            "path": "/etc/envoy/rds.yaml",
+                            "watched_directory": {"path": "/etc/envoy"},
+                        },
+                        "resource_api_version": "V3",
+                    },
+                    "route_config_name": "egress_routes",
+                },
+            }
+        else:
+            route_section = {
+                "route_config": {"name": "egress_routes", "virtual_hosts": virtual_hosts or []},
+            }
+
+        # xDS mode uses permissive ext_authz (credential_headers=None)
+        ext_authz_headers = None if use_rds else credential_headers
+
+        hcm_config = {
+            "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+            "stat_prefix": "egress_https",
+            "codec_type": "AUTO",
+            "access_log": [self._build_access_log()],
+            **route_section,
+            "http_filters": [
+                self._build_ext_authz_filter(ext_authz_headers),
+                self._build_local_ratelimit_filter(default_rate_limit),
+                {
+                    "name": "envoy.filters.http.router",
+                    "typed_config": {"@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"},
+                },
+            ],
+        }
+
         return {
             "name": "egress_https",
             "address": {"socket_address": {"address": "0.0.0.0", "port_value": 8443}},
@@ -732,101 +777,11 @@ class ConfigGenerator:
                     "filters": [
                         {
                             "name": "envoy.filters.network.http_connection_manager",
-                            "typed_config": {
-                                "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
-                                "stat_prefix": "egress_https",
-                                "codec_type": "AUTO",
-                                "access_log": [self._build_access_log()],
-                                "route_config": {"name": "egress_routes", "virtual_hosts": virtual_hosts},
-                                "http_filters": [
-                                    self._build_ext_authz_filter(credential_headers),
-                                    self._build_local_ratelimit_filter(default_rate_limit),
-                                    {
-                                        "name": "envoy.filters.http.router",
-                                        "typed_config": {
-                                            "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
-                                        },
-                                    },
-                                ],
-                            },
+                            "typed_config": hcm_config,
                         }
-                    ]
+                    ],
                 }
             ],
-        }
-
-    def _build_xds_listener(self, default_rate_limit: dict) -> dict:
-        """Build HTTPS egress listener with RDS reference for dynamic route updates."""
-        return {
-            "name": "egress_https",
-            "address": {"socket_address": {"address": "0.0.0.0", "port_value": 8443}},
-            "filter_chains": [{
-                "filters": [{
-                    "name": "envoy.filters.network.http_connection_manager",
-                    "typed_config": {
-                        "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
-                        "stat_prefix": "egress_https",
-                        "codec_type": "AUTO",
-                        "access_log": [self._build_access_log()],
-                        "rds": {
-                            "config_source": {
-                                "path_config_source": {
-                                    "path": "/etc/envoy/rds.yaml",
-                                    "watched_directory": {"path": "/etc/envoy"},
-                                },
-                                "resource_api_version": "V3",
-                            },
-                            "route_config_name": "egress_routes",
-                        },
-                        "http_filters": [
-                            self._build_ext_authz_filter_permissive(),
-                            self._build_local_ratelimit_filter(default_rate_limit),
-                            {
-                                "name": "envoy.filters.http.router",
-                                "typed_config": {
-                                    "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
-                                },
-                            },
-                        ],
-                    },
-                }],
-            }],
-        }
-
-    def _build_ext_authz_filter_permissive(self) -> dict:
-        """Build ext_authz filter with permissive upstream headers.
-
-        Used in the xDS bootstrap where credential headers can't be known
-        statically (they depend on which domains are configured).  Safe because
-        warden's ext_authz endpoint controls exactly which headers to inject.
-        """
-        return {
-            "name": "envoy.filters.http.ext_authz",
-            "typed_config": {
-                "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz",
-                "transport_api_version": "V3",
-                "allowed_headers": {
-                    "patterns": [
-                        {"exact": ":authority"},
-                        {"exact": ":method"},
-                        {"exact": ":path"},
-                    ]
-                },
-                "http_service": {
-                    "server_uri": {
-                        "uri": "warden:8080",
-                        "cluster": "control_plane_api",
-                        "timeout": "5s",
-                    },
-                    "path_prefix": "/api/v1/ext-authz",
-                    "authorization_response": {
-                        "allowed_upstream_headers": {
-                            "patterns": [{"safe_regex": {"google_re2": {}, "regex": ".*"}}],
-                        }
-                    },
-                },
-                "failure_mode_allow": True,
-            },
         }
 
     def _build_access_log(self) -> dict:
@@ -856,14 +811,22 @@ class ConfigGenerator:
             },
         }
 
-    def _build_ext_authz_filter(self, credential_headers: set) -> dict:
-        """Build ext_authz HTTP service filter for credential injection via warden."""
-        # Build allowed upstream header patterns from credential headers
-        upstream_patterns = [
-            {"exact": "x-credential-injected"},  # tracking header
-        ]
-        for header in sorted(credential_headers):
-            upstream_patterns.append({"exact": header})
+    def _build_ext_authz_filter(self, credential_headers: set | None = None) -> dict:
+        """Build ext_authz HTTP service filter for credential injection via warden.
+
+        When credential_headers is None (xDS mode), uses a permissive wildcard
+        pattern since headers can't be known statically. When provided (static
+        config mode), lists the specific credential headers.
+        """
+        if credential_headers is None:
+            # Permissive: let warden control which headers to inject
+            upstream_patterns = [{"safe_regex": {"google_re2": {}, "regex": ".*"}}]
+        else:
+            upstream_patterns = [
+                {"exact": "x-credential-injected"},  # tracking header
+            ]
+            for header in sorted(credential_headers):
+                upstream_patterns.append({"exact": header})
 
         return {
             "name": "envoy.filters.http.ext_authz",
@@ -901,8 +864,8 @@ class ConfigGenerator:
                 "@type": "type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit",
                 "stat_prefix": "local_rate_limiter",
                 "token_bucket": self._rpm_to_token_bucket(rpm, burst),
-                "filter_enabled": {"default_value": {"numerator": 100, "denominator": "HUNDRED"}},
-                "filter_enforced": {"default_value": {"numerator": 100, "denominator": "HUNDRED"}},
+                "filter_enabled": {"default_value": _RATELIMIT_PERCENTAGE},
+                "filter_enforced": {"default_value": _RATELIMIT_PERCENTAGE},
                 "status": {"code": "TooManyRequests"},
                 "response_headers_to_add": [
                     {
@@ -1016,7 +979,9 @@ class ConfigGenerator:
         except Exception as e:
             logger.error(f"Failed to generate Envoy bootstrap: {e}")
             return False
-        return self._write_file(output_path, self._yaml_header("Envoy Bootstrap (xDS mode)") + yaml_content, "Envoy bootstrap")
+        return self._write_file(
+            output_path, self._yaml_header("Envoy Bootstrap (xDS mode)") + yaml_content, "Envoy bootstrap"
+        )
 
     def write_resource_env(self, env_path: str) -> bool:
         """Write PIDs limit from cagent.yaml to .env file.
