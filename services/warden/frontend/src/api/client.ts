@@ -41,7 +41,10 @@ export interface DetailedHealth {
   checks: Record<string, HealthCheck>;
 }
 
-export const getDetailedHealth = () => request<DetailedHealth>('/health/detailed');
+export const getDetailedHealth = async (): Promise<DetailedHealth> => {
+  const metrics = await request<{ health: DetailedHealth }>('/metrics');
+  return metrics.health;
+};
 
 // Terminal
 export const createTerminal = (containerName: string): WebSocket => {
