@@ -131,13 +131,14 @@ function HealthPanel() {
   );
 }
 
-const INFRA_CONTAINERS = new Set([
-  'dns-filter', 'http-proxy', 'email-proxy', 'warden',
-]);
+const INFRA_SUFFIXES = [
+  'dns-filter', 'http-proxy', 'mitm-proxy', 'email-proxy', 'warden', 'log-shipper', 'log-store',
+];
+const isInfraContainer = (name: string) => INFRA_SUFFIXES.some((s) => name === s || name.endsWith(`-${s}`));
 
 function ContainerCard({ container, readOnly }: { container: ContainerInfo; readOnly?: boolean }) {
   const queryClient = useQueryClient();
-  const isInfra = INFRA_CONTAINERS.has(container.name);
+  const isInfra = isInfraContainer(container.name);
 
   const mutation = useMutation({
     mutationFn: ({ name, action }: { name: string; action: 'start' | 'stop' | 'restart' }) =>
