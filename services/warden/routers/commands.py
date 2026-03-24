@@ -4,17 +4,14 @@ The CP pushes commands via mTLS instead of queuing them
 in the DB for the next heartbeat poll.
 """
 
-import io
 import logging
-import tarfile
 from pathlib import Path
 from typing import Optional
 
 import docker
 import runtime_config
-from constants import docker_client
+from constants import discover_cell_containers, docker_client
 from fastapi import APIRouter, HTTPException
-from constants import discover_cell_containers
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -85,35 +82,43 @@ def _wipe_workspace(container) -> None:
     logger.info("Workspace wiped for %s", container.name)
 
 
-class WipeRequest(BaseModel):
-    wipe_workspace: bool = False
-
-
 @router.post("/commands/wipe")
-def wipe_cell(body: Optional[WipeRequest] = None):
-    """Wipe the cell: stop, optionally clear workspace, restart.
-
-    The same container is reused — no rename or recreation needed.
-    """
-    wipe_workspace = body.wipe_workspace if body else False
+def wipe_cell():
+    """Wipe the cell: stop and restart, preserving workspace."""
     container = _get_cell_container()
     name = container.name
     try:
         container.stop(timeout=10)
-
-        if wipe_workspace:
-            _wipe_workspace(container)
-
         container.start()
         return {
             "status": "completed",
             "command": "wipe",
-            "message": f"Container {name} wiped (workspace={'wiped' if wipe_workspace else 'preserved'})",
+            "message": f"Container {name} wiped (workspace preserved)",
         }
     except HTTPException:
         raise
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=f"Wipe failed: {e}")
+
+
+@router.post("/commands/wipe-workspace")
+def wipe_cell_workspace():
+    """Wipe the cell: stop, clear workspace, restart."""
+    container = _get_cell_container()
+    name = container.name
+    try:
+        container.stop(timeout=10)
+        _wipe_workspace(container)
+        container.start()
+        return {
+            "status": "completed",
+            "command": "wipe-workspace",
+            "message": f"Container {name} wiped (workspace wiped)",
+        }
+    except HTTPException:
+        raise
+    except docker.errors.APIError as e:
+        raise HTTPException(status_code=500, detail=f"Wipe workspace failed: {e}")
 
 
 @router.post("/commands/restart")
@@ -171,7 +176,8 @@ def update_config(body: UpdateConfigRequest):
     return {
         "status": "completed",
         "command": "update_config",
-        "message": f"Applied {len(applied)} key(s)" + (f", rejected {len(rejected)}" if rejected else "")
+        "message": f"Applied {len(applied)} key(s)"
+        + (f", rejected {len(rejected)}" if rejected else "")
         + ("; warden restart scheduled for cert update" if needs_restart else ""),
         "applied": {k: v for k, v in applied.items() if k not in mtls_keys},
         "rejected": rejected,
@@ -190,12 +196,16 @@ def _apply_ssh_keys(keys: str):
         try:
             # Use base64 to safely transport the key content without shell escaping issues
             import base64
+
             encoded = base64.b64encode(keys.encode()).decode()
             exit_code, output = container.exec_run(
-                ["sh", "-c",
-                 f"echo '{encoded}' | base64 -d > /home/cell/.ssh/authorized_keys"
-                 " && chmod 600 /home/cell/.ssh/authorized_keys"
-                 " && chown cell:cell /home/cell/.ssh/authorized_keys"],
+                [
+                    "sh",
+                    "-c",
+                    f"echo '{encoded}' | base64 -d > /home/cell/.ssh/authorized_keys"
+                    " && chmod 600 /home/cell/.ssh/authorized_keys"
+                    " && chown cell:cell /home/cell/.ssh/authorized_keys",
+                ],
                 user="root",
             )
             if exit_code == 0:
@@ -215,7 +225,8 @@ def _apply_mtls_certs(applied: dict):
     """
     import base64
     import threading
-    from constants import MTLS_CERT_PATH, MTLS_KEY_PATH, MTLS_CA_CERT_PATH, WARDEN_CONTAINER_NAME
+
+    from constants import MTLS_CA_CERT_PATH, MTLS_CERT_PATH, MTLS_KEY_PATH, WARDEN_CONTAINER_NAME
 
     cert_map = {
         "WARDEN_TLS_CERT": MTLS_CERT_PATH,
@@ -235,6 +246,7 @@ def _apply_mtls_certs(applied: dict):
     # Schedule a delayed self-restart so we can return the response first
     def _restart_warden():
         import time
+
         time.sleep(2)
         try:
             container = docker_client.containers.get(WARDEN_CONTAINER_NAME)
@@ -249,9 +261,16 @@ def _apply_mtls_certs(applied: dict):
 @router.get("/commands/runtime-config")
 def get_runtime_config():
     """Return current effective runtime config (overrides + defaults)."""
-    from constants import HEARTBEAT_INTERVAL, CONFIG_SYNC_INTERVAL, ALERT_CHECK_INTERVAL
-    from constants import OPENOBSERVE_URL, OPENOBSERVE_USER, BETA_FEATURES
-    from constants import WARDEN_API_TOKEN, MTLS_ENABLED
+    from constants import (
+        ALERT_CHECK_INTERVAL,
+        BETA_FEATURES,
+        CONFIG_SYNC_INTERVAL,
+        HEARTBEAT_INTERVAL,
+        MTLS_ENABLED,
+        OPENOBSERVE_URL,
+        OPENOBSERVE_USER,
+        WARDEN_API_TOKEN,
+    )
 
     overrides = runtime_config.load()
     effective = {
