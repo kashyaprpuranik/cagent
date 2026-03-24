@@ -23,9 +23,7 @@ import {
   getContainers,
   controlContainer,
   getDetailedHealth,
-  getBlockedDomains,
-  getBlockedTimeseries,
-  getBandwidth,
+  queryWidget,
   getDiagnosis,
   getConfig,
   getInfo,
@@ -269,19 +267,41 @@ export default function StatusPage() {
 
   const { data: blockedData, isLoading: blockedLoading } = useQuery({
     queryKey: ['blocked-domains'],
-    queryFn: () => getBlockedDomains(),
+    queryFn: async () => {
+      const r = await queryWidget('blocked_domains_top');
+      return {
+        blocked_domains: r.rows.map(row => ({ domain: row[0] as string, count: row[1] as number, last_seen: row[2] as string })),
+        window_hours: (r.meta.window_hours as number) || 24,
+      };
+    },
     refetchInterval: 30_000,
   });
 
   const { data: timeseriesData, isLoading: timeseriesLoading } = useQuery({
     queryKey: ['blocked-timeseries'],
-    queryFn: () => getBlockedTimeseries(),
+    queryFn: async () => {
+      const r = await queryWidget('blocked_timeseries');
+      return {
+        buckets: r.rows.map(row => ({ start: row[0] as string, end: '', count: row[1] as number })),
+        window_hours: (r.meta.window_hours as number) || 24,
+        bucket_minutes: 0,
+      };
+    },
     refetchInterval: 30_000,
   });
 
   const { data: bandwidthData, isLoading: bandwidthLoading } = useQuery({
     queryKey: ['bandwidth'],
-    queryFn: () => getBandwidth(),
+    queryFn: async () => {
+      const r = await queryWidget('bandwidth_by_domain');
+      return {
+        domains: r.rows.map(row => ({
+          domain: row[0] as string, bytes_sent: row[1] as number,
+          bytes_received: row[2] as number, total_bytes: row[3] as number, request_count: 0,
+        })),
+        window_hours: (r.meta.window_hours as number) || 24,
+      };
+    },
     refetchInterval: 30_000,
   });
 
