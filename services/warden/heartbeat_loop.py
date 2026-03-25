@@ -1,7 +1,6 @@
 """Heartbeat loop: send heartbeats, handle commands, sync config."""
 
 import logging
-import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,14 +11,14 @@ import requests
 import runtime_config
 import yaml
 from config_sync import (
+    ENV_FILE_PATH,
     _atomic_write,
+    _stable_hash,
     config_generator,
     config_state,
     reload_envoy,
     restart_coredns,
     sync_config,
-    _stable_hash,
-    ENV_FILE_PATH,
 )
 from constants import (
     CAGENT_CONFIG_PATH,
@@ -58,6 +57,7 @@ def _resources_need_update(current: dict, desired_pids) -> bool:
     if desired_pids is not None and current["pids_limit"] != desired_pids:
         return True
     return False
+
 
 # Thread-safe command result tracking (written from ThreadPoolExecutor workers,
 # read from the heartbeat sender on the next cycle).
@@ -196,7 +196,7 @@ def _heartbeat_and_handle(container):
         # would work but container.stop(timeout=10) can block for up to 10s,
         # making the round-trip too slow for tight e2e timeouts.
         # Send the result immediately via a bare heartbeat for both.
-        if command == "wipe":
+        if command in ("wipe", "wipe-workspace"):
             _send_bare_heartbeat(container.name, command, result_str, message)
             with _command_results_lock:
                 _last_command_results.pop(container.name, None)
@@ -382,9 +382,7 @@ def main_loop(stop_event: Optional[threading.Event] = None):
     reload_envoy()
     # Snapshot current state so regenerate_configs() can detect changes
     config_state.corefile_hash = _stable_hash(config_generator.generate_corefile())
-    bootstrap_yaml = yaml.dump(
-        config_generator.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False
-    )
+    bootstrap_yaml = yaml.dump(config_generator.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False)
     config_state.envoy_bootstrap_hash = _stable_hash(bootstrap_yaml)
     config_state.envoy_cds_hash = _stable_hash(cds_yaml)
     config_state.envoy_rds_hash = _stable_hash(rds_yaml)

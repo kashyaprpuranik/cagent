@@ -18,9 +18,7 @@ class CellsResource:
 
     def list(self, limit: int = 100, offset: int = 0) -> PaginatedResponse[Cell]:
         """List cells."""
-        resp = self._client.request(
-            "GET", "/api/v1/cells", params={"limit": limit, "offset": offset}
-        )
+        resp = self._client.request("GET", "/api/v1/cells", params={"limit": limit, "offset": offset})
         data = resp.json()
         return PaginatedResponse[Cell](
             items=[Cell.model_validate(c) for c in data["items"]],
@@ -34,29 +32,26 @@ class CellsResource:
         resp = self._client.request("GET", f"/api/v1/cells/{cell_id}/status")
         return CellStatus.model_validate(resp.json())
 
+    def command(self, cell_id: str, command: str) -> dict:
+        """Send a command to a cell. Valid: wipe, wipe-workspace, restart, stop, start."""
+        resp = self._client.request("POST", f"/api/v1/cells/{cell_id}/{command}")
+        return resp.json()
+
     def wipe(self, cell_id: str, workspace: bool = False) -> dict:
         """Wipe a cell. Optionally wipe the workspace too."""
-        resp = self._client.request(
-            "POST",
-            f"/api/v1/cells/{cell_id}/wipe",
-            json={"wipe_workspace": workspace},
-        )
-        return resp.json()
+        return self.command(cell_id, "wipe-workspace" if workspace else "wipe")
 
     def restart(self, cell_id: str) -> dict:
         """Restart a cell."""
-        resp = self._client.request("POST", f"/api/v1/cells/{cell_id}/restart")
-        return resp.json()
+        return self.command(cell_id, "restart")
 
     def stop(self, cell_id: str) -> dict:
         """Stop a cell."""
-        resp = self._client.request("POST", f"/api/v1/cells/{cell_id}/stop")
-        return resp.json()
+        return self.command(cell_id, "stop")
 
     def start(self, cell_id: str) -> dict:
         """Start a cell."""
-        resp = self._client.request("POST", f"/api/v1/cells/{cell_id}/start")
-        return resp.json()
+        return self.command(cell_id, "start")
 
     def assign_profile(self, cell_id: str, profile_id: int) -> dict:
         """Assign a security profile to a cell."""
@@ -69,7 +64,5 @@ class CellsResource:
 
     def unassign_profile(self, cell_id: str) -> dict:
         """Unassign the security profile from a cell (revert to baseline)."""
-        resp = self._client.request(
-            "DELETE", f"/api/v1/cells/{cell_id}/profile"
-        )
+        resp = self._client.request("DELETE", f"/api/v1/cells/{cell_id}/profile")
         return resp.json()
