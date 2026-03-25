@@ -28,29 +28,29 @@ _VALID_DOMAIN_RE = re.compile(r"^[a-zA-Z0-9._][a-zA-Z0-9._-]*$")
 # ---------------------------------------------------------------------------
 
 
-def _oo_available() -> bool:
-    """Check if OpenObserve client is importable and healthy."""
+def _log_store_available() -> bool:
+    """Check if a log backend (DuckDB or OpenObserve) is available."""
     try:
-        from openobserve_client import is_openobserve_healthy
+        from log_client import is_log_store_healthy
 
-        return is_openobserve_healthy()
+        return is_log_store_healthy()
     except ImportError:
         return False
 
 
-def _oo_query(sql: str, window_hours: int) -> list[dict]:
-    """Run a SQL query against OpenObserve for the given time window."""
+def _log_query(sql: str, window_hours: int) -> list[dict]:
+    """Run a SQL query against the active log backend for the given time window."""
     try:
-        from openobserve_client import now_us, query_openobserve
+        from log_client import now_us, query_logs
 
         end_us = now_us()
         start_us = end_us - window_hours * 3600 * 1_000_000
-        return query_openobserve(sql, start_us, end_us)
+        return query_logs(sql, start_us, end_us)
     except ImportError:
-        logger.warning("openobserve_client not available")
+        logger.warning("log_client not available")
         return []
     except Exception as e:
-        logger.warning("OpenObserve query failed: %s", e)
+        logger.warning("Log query failed: %s", e)
         return []
 
 
@@ -126,7 +126,7 @@ def query_widget(body: WidgetQueryRequest):
         if key in merged_params:
             meta[key] = merged_params[key]
 
-    if not _oo_available():
+    if not _log_store_available():
         meta["note"] = "OpenObserve unavailable, returning empty results"
         rows: list = []
     else:
@@ -134,7 +134,7 @@ def query_widget(body: WidgetQueryRequest):
         int_params = {k: int(v) for k, v in merged_params.items() if isinstance(v, (int, float))}
         sql = spec["sql"].format(**int_params)
         window_hours = merged_params["window_hours"]
-        raw_rows = _oo_query(sql, window_hours)
+        raw_rows = _log_query(sql, window_hours)
 
         # Generic row mapper: extract column values in order, round floats
         columns = spec["columns"]
@@ -213,10 +213,10 @@ def diagnose_domain(
         logger.debug("DNS resolution failed for domain lookup: %s", e)
         dns_result = "unknown"
 
-    # Get recent log entries for this domain via OpenObserve
+    # Get recent log entries for this domain
     recent_requests: list[dict] = []
     try:
-        from openobserve_client import _STREAM, now_us, query_openobserve
+        from log_client import _STREAM, now_us, query_logs
 
         end_us = now_us()
         start_us = end_us - 1 * 3600 * 1_000_000  # last 1 hour
@@ -227,7 +227,7 @@ def diagnose_domain(
             f"WHERE source = 'envoy' AND log_type = 'access' AND authority = '{escaped}' "
             f"ORDER BY _timestamp DESC LIMIT 5"
         )
-        rows = query_openobserve(sql, start_us, end_us)
+        rows = query_logs(sql, start_us, end_us)
         for r in rows:
             recent_requests.append(
                 {
@@ -240,7 +240,7 @@ def diagnose_domain(
                 }
             )
     except ImportError:
-        logger.warning("openobserve_client not available for diagnose")
+        logger.warning("log_client not available for diagnose")
     except Exception as e:
         logger.warning("Failed to query recent requests: %s", e)
 

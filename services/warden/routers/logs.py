@@ -82,39 +82,35 @@ async def search_logs(
     start: Optional[str] = None,
     end: Optional[str] = None,
 ):
-    """Search logs from local OpenObserve.
-
-    Falls back to Docker logs if OO is unavailable.
-    """
+    """Search logs from local log store (DuckDB or OpenObserve)."""
     try:
-        from openobserve_client import _STREAM, datetime_to_us, now_us, query_openobserve
-
-        # Build time range
-        end_us = now_us()
-        start_us = end_us - 6 * 3600 * 1_000_000  # default 6h
-
-        if end:
-            end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
-            end_us = datetime_to_us(end_dt)
-        if start:
-            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-            start_us = datetime_to_us(start_dt)
-
-        # Build SQL query (escape single quotes to prevent SQL injection)
-        conditions = []
-        if query:
-            conditions.append(f"message LIKE '%{query.replace(chr(39), chr(39) * 2)}%'")
-        if source:
-            conditions.append(f"source = '{source.replace(chr(39), chr(39) * 2)}'")
-        if cell_id:
-            conditions.append(f"cell_id = '{cell_id.replace(chr(39), chr(39) * 2)}'")
-
-        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        sql = f'SELECT * FROM "{_STREAM}"{where} ORDER BY _timestamp DESC LIMIT {limit}'
-
-        hits = query_openobserve(sql, start_us, end_us)
-        return {"hits": hits, "total": len(hits)}
-
+        from log_client import _STREAM, datetime_to_us, now_us, query_logs
     except ImportError:
-        logger.debug("OpenObserve client not available, returning empty results")
+        logger.debug("log_client not available, returning empty results")
         return {"hits": [], "total": 0}
+
+    # Build time range
+    end_us = now_us()
+    start_us = end_us - 6 * 3600 * 1_000_000  # default 6h
+
+    if end:
+        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        end_us = datetime_to_us(end_dt)
+    if start:
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        start_us = datetime_to_us(start_dt)
+
+    # Build SQL query (escape single quotes to prevent SQL injection)
+    conditions = []
+    if query:
+        conditions.append(f"message LIKE '%{query.replace(chr(39), chr(39) * 2)}%'")
+    if source:
+        conditions.append(f"source = '{source.replace(chr(39), chr(39) * 2)}'")
+    if cell_id:
+        conditions.append(f"cell_id = '{cell_id.replace(chr(39), chr(39) * 2)}'")
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f'SELECT * FROM "{_STREAM}"{where} ORDER BY _timestamp DESC LIMIT {limit}'
+
+    hits = query_logs(sql, start_us, end_us)
+    return {"hits": hits, "total": len(hits)}

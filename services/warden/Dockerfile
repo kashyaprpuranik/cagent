@@ -48,7 +48,8 @@ RUN pip install --no-cache-dir \
     "opentelemetry-exporter-otlp-proto-http>=1.20.0" \
     "opentelemetry-instrumentation-fastapi>=0.41b0" \
     "opentelemetry-instrumentation-requests>=0.41b0" \
-    "opentelemetry-instrumentation-logging>=0.41b0"
+    "opentelemetry-instrumentation-logging>=0.41b0" \
+    duckdb>=1.0.0
 
 # Copy warden code
 COPY services/warden/ /app/

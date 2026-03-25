@@ -22,9 +22,6 @@
 #   With auditing (log forwarding):
 #     docker-compose --profile standard --profile auditing up -d
 #
-#   With direct SSH access (port mapping):
-#     SSH_AUTHORIZED_KEYS="ssh-ed25519 AAAA..." docker-compose --profile dev up -d
-#     ssh -p 2222 cell@localhost
 #
 # Network Architecture:
 #   cell-net (isolated, internal)
@@ -112,8 +109,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.5'
-          memory: 3G
+          cpus: '${CELL_CPU_LIMIT:-1.5}'
+          memory: ${CELL_MEMORY_LIMIT:-3G}
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -143,10 +140,6 @@ services:
       - TMUX_AUTO_ATTACH=${TMUX_AUTO_ATTACH:-1}  # Set to 0 to disable auto-attach
       - TMUX_SESSION=${TMUX_SESSION:-main}       # Default session name
 
-    # SSH access (set SSH_AUTHORIZED_KEYS to enable)
-    ports:
-      - "${SSH_PORT:-2222}:22"
-
     # Read-only root filesystem (defense-in-depth)
     read_only: true
     tmpfs:
@@ -160,7 +153,7 @@ services:
     # Volumes
     volumes:
       - cell-logs:/var/log/cell
-      - cell-workspace:/workspace
+      - ${CELL_WORKSPACE_PATH:-cell-workspace}:/workspace
       - ./configs/mitm/mitmproxy-ca-cert.pem:/tmp/mitm-ca.pem:ro
       # Optional: mount SSH keys file
       # - ./ssh-keys:/ssh-keys:ro
@@ -234,8 +227,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.5'
-          memory: 3G
+          cpus: '${CELL_CPU_LIMIT:-1.5}'
+          memory: ${CELL_MEMORY_LIMIT:-3G}
           pids: ${CELL_PIDS_LIMIT:-256}
         reservations:
           cpus: '0.25'
@@ -263,10 +256,6 @@ services:
       - TMUX_AUTO_ATTACH=${TMUX_AUTO_ATTACH:-1}
       - TMUX_SESSION=${TMUX_SESSION:-main}
 
-    # SSH access (set SSH_AUTHORIZED_KEYS to enable)
-    ports:
-      - "${SSH_PORT:-2222}:22"
-
     # Read-only root filesystem (defense-in-depth)
     read_only: true
     tmpfs:
@@ -280,7 +269,7 @@ services:
     # Volumes (more restricted in secure mode)
     volumes:
       - cell-logs:/var/log/cell
-      - cell-workspace:/workspace:rw
+      - ${CELL_WORKSPACE_PATH:-cell-workspace}:/workspace:rw
       - ./configs/mitm/mitmproxy-ca-cert.pem:/tmp/mitm-ca.pem:ro
 
     # ONLY on cell-net
@@ -597,7 +586,11 @@ services:
       - WARDEN_TLS_CERT=${WARDEN_TLS_CERT:-}
       - WARDEN_TLS_KEY=${WARDEN_TLS_KEY:-}
       - WARDEN_MTLS_CA_CERT=${WARDEN_MTLS_CA_CERT:-}
-      # Local OpenObserve (per-DP log analytics)
+      # Log query backend: "duckdb" (default, lightweight) or "openobserve" (auditing profile)
+      - LOG_BACKEND=${LOG_BACKEND:-duckdb}
+      - LOG_BACKUP_DIR=/var/log/vector/backup
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS:-30}
+      # OpenObserve (only used when --profile auditing is active)
       - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://log-store:5080}
       - OPENOBSERVE_USER=${OPENOBSERVE_USER:-admin@cagent.local}
       - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD:-openobserve-local-dev}
@@ -624,6 +617,8 @@ services:
       - ./configs/email:/etc/cagent/email
       # Seccomp profiles for container recreation
       - ./configs/seccomp/profiles:/etc/seccomp/profiles:ro
+      # Log backup files (DuckDB reads these for lightweight log queries)
+      - log-shipper-backup:/var/log/vector:ro
       # Data plane directory (for .env and docker-compose access)
       - .:/app/cagent
 

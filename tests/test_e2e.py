@@ -26,8 +26,12 @@ def pytest_configure(config):
 
 _NET_OCTET = os.environ.get("NET_OCTET", "200")
 _CP_PREFIX = os.environ.get("CP_PREFIX", "")
+
+
 def _get_compose_project() -> str:
     return os.environ.get("COMPOSE_PROJECT_NAME", "")
+
+
 LOCAL_ADMIN_PORT = os.environ.get("LOCAL_ADMIN_PORT", "8081")
 
 # Cell-net IPs (internal network)
@@ -107,7 +111,15 @@ def data_plane_running():
         # Provide diagnostic info on failure
         try:
             diag = subprocess.run(
-                ["docker", "ps", "-a", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Names}} {{.Status}}"],
+                [
+                    "docker",
+                    "ps",
+                    "-a",
+                    "--filter",
+                    f"name={_CP_PREFIX}http-proxy",
+                    "--format",
+                    "{{.Names}} {{.Status}}",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -207,7 +219,9 @@ class TestCellNetworkIsolation:
         """Cell should NOT be able to reach control plane directly."""
         # Control plane is on infra-net, cell should not reach it
         result = exec_in_cell(f"nc -z -w 2 {INFRA_GATEWAY_IP} 8000 && echo FAIL || echo BLOCKED")
-        assert "BLOCKED" in result.stdout, f"Cell can reach infra-net ({INFRA_GATEWAY_IP}:8000) — network isolation broken!"
+        assert "BLOCKED" in result.stdout, (
+            f"Cell can reach infra-net ({INFRA_GATEWAY_IP}:8000) — network isolation broken!"
+        )
 
 
 @pytest.mark.e2e
@@ -323,7 +337,9 @@ class TestCredentialInjection:
     def test_envoy_handles_credential_injection(self, data_plane_running):
         """Envoy should be running (handles credential injection via ext_authz)."""
         result = subprocess.run(
-            ["docker", "ps", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Status}}"], capture_output=True, text=True
+            ["docker", "ps", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Status}}"],
+            capture_output=True,
+            text=True,
         )
         assert "Up" in result.stdout, "Envoy proxy is not running"
 
@@ -355,7 +371,9 @@ class TestLogging:
     def test_vector_running(self, data_plane_running):
         """Vector should be running for log collection."""
         result = subprocess.run(
-            ["docker", "ps", "--filter", f"name={_CP_PREFIX}log-shipper", "--format", "{{.Status}}"], capture_output=True, text=True
+            ["docker", "ps", "--filter", f"name={_CP_PREFIX}log-shipper", "--format", "{{.Status}}"],
+            capture_output=True,
+            text=True,
         )
         assert "Up" in result.stdout, "Log shipper is not running"
 
@@ -541,7 +559,9 @@ def get_admin_url():
     if os.environ.get("LOCAL_ADMIN_PORT"):
         return f"http://localhost:{LOCAL_ADMIN_PORT}"
     try:
-        result = subprocess.run(["docker", "port", f"{_CP_PREFIX}warden", "8080"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(
+            ["docker", "port", f"{_CP_PREFIX}warden", "8080"], capture_output=True, text=True, timeout=5
+        )
         if result.returncode == 0 and result.stdout.strip():
             # Output like "0.0.0.0:8080" or ":::8080"
             mapping = result.stdout.strip().splitlines()[0]
@@ -767,7 +787,9 @@ class TestLocalAdminConfigPipeline:
             assert warden_ready, "Warden API did not become ready within 30s after restart"
             r = requests.post(f"{admin_url}/api/config/reload", timeout=60)
             assert r.status_code == 200
-            assert wait_for_container(f"{_CP_PREFIX}dns-filter", timeout=15), "dns-filter did not come back after reload"
+            assert wait_for_container(f"{_CP_PREFIX}dns-filter", timeout=15), (
+                "dns-filter did not come back after reload"
+            )
             # Wait for CoreDNS to be ready
             time.sleep(2)
 
@@ -1084,26 +1106,25 @@ def is_openobserve_running():
 class TestDeepHealth:
     """Test /api/metrics health checks including OpenObserve liveness."""
 
-    def test_metrics_health_includes_oo_check(self, admin_url, data_plane_running):
-        """Metrics health checks should include an openobserve check."""
+    def test_metrics_health_includes_log_store_check(self, admin_url, data_plane_running):
+        """Metrics health checks should include a log_store check."""
         r = requests.get(f"{admin_url}/api/metrics", timeout=10)
         assert r.status_code == 200
         data = r.json()
         assert "health" in data
         assert "checks" in data["health"]
-        assert "openobserve" in data["health"]["checks"]
-        # OO should be healthy if auditing profile is running.
-        # OpenObserve can take a while to start up, so poll until healthy.
+        assert "log_store" in data["health"]["checks"]
+        # If auditing profile is running, wait for OO to become healthy.
         if is_openobserve_running():
             deadline = time.time() + 90
             while time.time() < deadline:
                 r = requests.get(f"{admin_url}/api/metrics", timeout=10)
                 data = r.json()
-                if data["health"]["checks"]["openobserve"]["status"] == "healthy":
+                if data["health"]["checks"]["log_store"]["status"] == "healthy":
                     break
                 time.sleep(2)
-            if data["health"]["checks"]["openobserve"]["status"] != "healthy":
-                pytest.fail("OpenObserve did not become healthy within 90s")
+            if data["health"]["checks"]["log_store"]["status"] != "healthy":
+                pytest.fail("Log store did not become healthy within 90s")
 
     def test_metrics_health_has_core_checks(self, admin_url, data_plane_running):
         """Metrics health should include core infrastructure checks."""
@@ -1112,8 +1133,7 @@ class TestDeepHealth:
         health = r.json()["health"]
         assert health["status"] in ("healthy", "degraded")
         checks = health["checks"]
-        # Should include OpenObserve and at least one proxy/DNS check
-        assert "openobserve" in checks
+        assert "log_store" in checks
         assert "envoy_ready" in checks
         assert "dns_resolution" in checks
 
@@ -1133,14 +1153,14 @@ class TestLogIngestionPipeline:
         """Fail if OpenObserve is not running; wait for it to be healthy."""
         if not is_openobserve_running():
             pytest.fail("OpenObserve not running (--profile auditing required)")
-        # Wait for OO to be healthy before running log ingestion tests
+        # Wait for log store to be healthy before running log ingestion tests
         deadline = time.time() + 90
         while time.time() < deadline:
             try:
                 r = requests.get(f"{admin_url}/api/metrics", timeout=10)
                 if (
                     r.status_code == 200
-                    and r.json().get("health", {}).get("checks", {}).get("openobserve", {}).get("status") == "healthy"
+                    and r.json().get("health", {}).get("checks", {}).get("log_store", {}).get("status") == "healthy"
                 ):
                     return
             except Exception:
@@ -1454,45 +1474,34 @@ class TestMITMProxyHTTPS:
         """Wait for mitmproxy to be reachable from cell."""
         deadline = time.time() + 30
         while time.time() < deadline:
-            probe = exec_in_cell(
-                "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 "
-                "https://pypi.org/ 2>&1"
-            )
+            probe = exec_in_cell("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 https://pypi.org/ 2>&1")
             if probe.stdout.strip() not in ("", "000"):
                 break
             time.sleep(2)
 
     def test_https_to_allowed_domain_succeeds(self, data_plane_running):
         """HTTPS request to an allowed domain should succeed through mitmproxy."""
-        result = exec_in_cell(
-            "curl -s -o /dev/null -w '%{http_code}' "
-            "--connect-timeout 10 "
-            "https://pypi.org/ 2>&1"
-        )
+        result = exec_in_cell("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 https://pypi.org/ 2>&1")
         http_code = result.stdout.strip()
-        assert http_code in ("200", "301", "302"), (
-            f"HTTPS to allowed domain failed with {http_code}: {result.stderr}"
-        )
+        assert http_code in ("200", "301", "302"), f"HTTPS to allowed domain failed with {http_code}: {result.stderr}"
 
     def test_https_to_blocked_domain_fails(self, data_plane_running):
         """HTTPS request to a blocked domain should be rejected."""
         result = exec_in_cell(
-            "curl -s -o /dev/null -w '%{http_code}' "
-            "--connect-timeout 5 "
-            "https://evil.example.com/ 2>&1"
+            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 https://evil.example.com/ 2>&1"
         )
         http_code = result.stdout.strip()
         # Should get 403 from Envoy or 000 (connection failed, DNS blocked)
-        assert http_code in ("403", "000"), (
-            f"HTTPS to blocked domain should fail but got {http_code}"
-        )
+        assert http_code in ("403", "000"), f"HTTPS to blocked domain should fail but got {http_code}"
 
     def test_https_credential_injection(self, data_plane_running):
         """HTTPS requests should have credentials injected (via mitmproxy -> Envoy ext_authz)."""
         # Verify Envoy ext_authz is running (handles credential injection for both HTTP and HTTPS)
         result = subprocess.run(
             ["docker", "ps", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Status}}"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         assert "Up" in result.stdout, "Envoy proxy must be running for credential injection"
 
@@ -1633,9 +1642,7 @@ class TestRuntimeConfig:
 
         # Verify the key was written into the cell container
         result = exec_in_cell("cat /home/cell/.ssh/authorized_keys 2>/dev/null || echo MISSING")
-        assert "e2e-test@cagent" in result.stdout, (
-            f"SSH key not found in cell container: {result.stdout}"
-        )
+        assert "e2e-test@cagent" in result.stdout, f"SSH key not found in cell container: {result.stdout}"
 
     def test_reject_unknown_key(self, admin_url, data_plane_running):
         """Unknown keys should be rejected."""
@@ -1683,11 +1690,13 @@ class TestRuntimeConfig:
         """Mix of valid and invalid keys — valid ones apply, invalid rejected."""
         r = requests.post(
             f"{admin_url}/api/commands/update-config",
-            json={"config": {
-                "ALERT_CHECK_INTERVAL": 45,
-                "FAKE_KEY": "nope",
-                "HEARTBEAT_INTERVAL": 0,  # below min
-            }},
+            json={
+                "config": {
+                    "ALERT_CHECK_INTERVAL": 45,
+                    "FAKE_KEY": "nope",
+                    "HEARTBEAT_INTERVAL": 0,  # below min
+                }
+            },
             timeout=10,
         )
         assert r.status_code == 200

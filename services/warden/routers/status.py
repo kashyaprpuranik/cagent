@@ -207,17 +207,17 @@ def _collect_health_checks():
     except Exception as e:
         checks["mitm_proxy_ready"] = {"status": "error", "error": str(e)}
 
-    # Check local OpenObserve
+    # Check log store (DuckDB or OpenObserve)
     try:
-        from openobserve_client import is_openobserve_healthy
+        from log_client import is_log_store_healthy
 
-        checks["openobserve"] = {
-            "status": "healthy" if is_openobserve_healthy() else "unhealthy",
+        checks["log_store"] = {
+            "status": "healthy" if is_log_store_healthy() else "unhealthy",
         }
     except ImportError:
-        checks["openobserve"] = {"status": "not_configured"}
+        checks["log_store"] = {"status": "not_configured"}
     except Exception as e:
-        checks["openobserve"] = {"status": "error", "error": str(e)}
+        checks["log_store"] = {"status": "error", "error": str(e)}
 
     all_healthy = all(c.get("status") == "healthy" for c in checks.values())
     return {

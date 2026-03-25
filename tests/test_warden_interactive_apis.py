@@ -47,7 +47,7 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+            patch("log_client.is_log_store_healthy", return_value=True),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
@@ -71,7 +71,7 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+            patch("log_client.is_log_store_healthy", return_value=True),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
@@ -101,7 +101,7 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+            patch("log_client.is_log_store_healthy", return_value=True),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
@@ -122,7 +122,7 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+            patch("log_client.is_log_store_healthy", return_value=True),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
@@ -143,7 +143,7 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+            patch("log_client.is_log_store_healthy", return_value=True),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
@@ -161,7 +161,7 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+            patch("log_client.is_log_store_healthy", return_value=True),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
@@ -178,7 +178,7 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=True),
+            patch("log_client.is_log_store_healthy", return_value=True),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
@@ -186,8 +186,8 @@ class TestMetricsEndpoint:
         assert r.status_code == 200
         health = r.json()["health"]
         assert "checks" in health
-        assert "openobserve" in health["checks"]
-        assert health["checks"]["openobserve"]["status"] == "healthy"
+        assert "log_store" in health["checks"]
+        assert health["checks"]["log_store"]["status"] == "healthy"
 
     def test_metrics_health_with_oo_unhealthy(self):
         """GET /api/metrics health section should show degraded when OO is down."""
@@ -198,14 +198,14 @@ class TestMetricsEndpoint:
 
         with (
             patch("routers.status.docker_client") as mock_dc,
-            patch("openobserve_client.is_openobserve_healthy", return_value=False),
+            patch("log_client.is_log_store_healthy", return_value=False),
         ):
             mock_dc.containers.get.return_value = mock_container
             r = client.get("/api/metrics")
 
         assert r.status_code == 200
         health = r.json()["health"]
-        assert health["checks"]["openobserve"]["status"] == "unhealthy"
+        assert health["checks"]["log_store"]["status"] == "unhealthy"
         assert health["status"] == "degraded"
 
 
@@ -313,19 +313,18 @@ class TestPolicyEndpoints:
 # Log Search
 # ---------------------------------------------------------------------------
 class TestLogSearch:
-    """Test log search endpoint (OO-backed).
+    """Test log search endpoint (DuckDB/OO-backed via log_client).
 
-    The search_logs endpoint uses lazy imports:
-        from openobserve_client import datetime_to_us, now_us, query_openobserve
-    so we must patch at the openobserve_client module level.
+    The search_logs endpoint uses lazy imports from log_client,
+    so we patch at the log_client module level.
     """
 
     def test_search_logs_returns_hits(self):
-        """GET /api/logs/search should return OO query results."""
+        """GET /api/logs/search should return query results."""
         with (
-            patch("openobserve_client.query_openobserve") as mock_query,
-            patch("openobserve_client.now_us", return_value=9999999999),
-            patch("openobserve_client.datetime_to_us", return_value=0),
+            patch("log_client.query_logs") as mock_query,
+            patch("log_client.now_us", return_value=9999999999),
+            patch("log_client.datetime_to_us", return_value=0),
         ):
             mock_query.return_value = [
                 {"message": "test log", "source": "envoy", "_timestamp": 123456},
@@ -341,8 +340,8 @@ class TestLogSearch:
     def test_search_logs_with_source_filter(self):
         """Search with source filter should include WHERE clause."""
         with (
-            patch("openobserve_client.query_openobserve") as mock_query,
-            patch("openobserve_client.now_us", return_value=9999999999),
+            patch("log_client.query_logs") as mock_query,
+            patch("log_client.now_us", return_value=9999999999),
         ):
             mock_query.return_value = []
             r = client.get("/api/logs/search", params={"source": "envoy"})
@@ -356,8 +355,8 @@ class TestLogSearch:
     def test_search_logs_with_time_range(self):
         """Search with explicit time range should use provided values."""
         with (
-            patch("openobserve_client.query_openobserve") as mock_query,
-            patch("openobserve_client.now_us", return_value=9999999999),
+            patch("log_client.query_logs") as mock_query,
+            patch("log_client.now_us", return_value=9999999999),
         ):
             mock_query.return_value = []
             r = client.get(
@@ -370,28 +369,23 @@ class TestLogSearch:
             assert r.status_code == 200
 
     def test_search_logs_oo_import_error_returns_empty(self):
-        """If openobserve_client is not importable, should return empty results.
-
-        The endpoint catches ImportError (OO client not installed/available)
-        and returns empty results gracefully.
-        """
+        """If log_client is not importable, should return empty results."""
         import builtins
 
         original_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
-            if name == "openobserve_client":
-                raise ImportError("No module named 'openobserve_client'")
+            if name == "log_client":
+                raise ImportError("No module named 'log_client'")
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
-            # Clear the cached module so the lazy import re-executes
-            saved = sys.modules.pop("openobserve_client", None)
+            saved = sys.modules.pop("log_client", None)
             try:
                 r = client.get("/api/logs/search", params={"query": "test"})
             finally:
                 if saved is not None:
-                    sys.modules["openobserve_client"] = saved
+                    sys.modules["log_client"] = saved
 
         assert r.status_code == 200
         data = r.json()
@@ -401,8 +395,8 @@ class TestLogSearch:
     def test_search_logs_escapes_sql_injection(self):
         """User input with single quotes should be escaped in SQL."""
         with (
-            patch("openobserve_client.query_openobserve") as mock_query,
-            patch("openobserve_client.now_us", return_value=9999999999),
+            patch("log_client.query_logs") as mock_query,
+            patch("log_client.now_us", return_value=9999999999),
         ):
             mock_query.return_value = []
             r = client.get(

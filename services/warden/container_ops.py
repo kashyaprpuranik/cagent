@@ -2,22 +2,18 @@
 
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import docker
-import yaml
 from constants import (
     COREDNS_CONTAINER_NAME,
     ENVOY_CONTAINER_NAME,
     MITM_PROXY_CONTAINER_NAME,
     RUNTIME_POLICIES,
     SECCOMP_PROFILES_DIR,
-    VALID_RUNTIME_POLICIES,
     VALID_SECCOMP_PROFILES,
-    discover_cell_containers,
     docker_client,
 )
 from utils import calculate_container_stats
@@ -277,7 +273,6 @@ def update_container_resources(container, pids_limit=None) -> tuple:
     Returns:
         (success: bool, message: str)
     """
-    name = container.name
     data = {}
 
     if pids_limit is not None:
@@ -405,26 +400,29 @@ def execute_command(command: str, container, args: Optional[dict] = None) -> tup
             return True, f"Cell container {name} started"
 
         elif command == "wipe":
-            wipe_workspace = args.get("wipe_workspace", False) if args else False
+            if container.status == "running":
+                container.stop(timeout=10)
+            container.start()
+            return True, f"Cell {name} wiped (workspace preserved)"
 
+        elif command == "wipe-workspace":
             from routers.commands import _wipe_workspace
 
             if container.status == "running":
                 container.stop(timeout=10)
-
-            if wipe_workspace:
-                _wipe_workspace(container)
-
+            _wipe_workspace(container)
             container.start()
-            return True, f"Cell {name} wiped (workspace={'wiped' if wipe_workspace else 'preserved'})"
+            return True, f"Cell {name} wiped (workspace wiped)"
 
         elif command == "update_config":
             import runtime_config
+
             config = args.get("config", {}) if args else {}
             applied, rejected = runtime_config.validate_and_merge(config)
             # Handle SSH_AUTHORIZED_KEYS specially
             if "SSH_AUTHORIZED_KEYS" in applied:
                 from routers.commands import _apply_ssh_keys
+
                 _apply_ssh_keys(applied["SSH_AUTHORIZED_KEYS"])
             msg = f"Applied {len(applied)} key(s)"
             if rejected:

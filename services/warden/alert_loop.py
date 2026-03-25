@@ -22,15 +22,16 @@ logger = logging.getLogger(__name__)
 _last_alert_check_us: int = 0
 
 
-def _query_oo_alerts(sql: str, start_us: int, end_us: int) -> list[dict]:
-    """Query OpenObserve for alert data.  Returns [] on any failure."""
+def _query_alerts(sql: str, start_us: int, end_us: int) -> list[dict]:
+    """Query log store for alert data.  Returns [] on any failure."""
     try:
-        from openobserve_client import query_openobserve
-        return query_openobserve(sql, start_us, end_us)
+        from log_client import query_logs
+
+        return query_logs(sql, start_us, end_us)
     except ImportError:
         return []
     except Exception as e:
-        logger.warning("Alert OO query failed: %s", e)
+        logger.warning("Alert log query failed: %s", e)
         return []
 
 
@@ -67,18 +68,20 @@ def alert_loop(stop_event: Optional[threading.Event] = None):
 
             for alert_id, alert_def in alert_registry.items():
                 sql = alert_def["sql"].format(last_check_us=_last_alert_check_us)
-                rows = _query_oo_alerts(sql, _last_alert_check_us, now_us)
+                rows = _query_alerts(sql, _last_alert_check_us, now_us)
                 if not rows:
                     continue
 
                 for row in rows:
-                    alerts.append({
-                        "event_type": alert_def["event_type"],
-                        "severity": alert_def.get("severity", "info"),
-                        "title": alert_def["title"].format(**row),
-                        "message": alert_def["message"].format(**row),
-                        "metadata": row,
-                    })
+                    alerts.append(
+                        {
+                            "event_type": alert_def["event_type"],
+                            "severity": alert_def.get("severity", "info"),
+                            "title": alert_def["title"].format(**row),
+                            "message": alert_def["message"].format(**row),
+                            "metadata": row,
+                        }
+                    )
 
             if alerts:
                 try:

@@ -91,9 +91,7 @@ class AsyncProfilesResource:
     def __init__(self, client: AsyncCagentClient) -> None:
         self._client = client
 
-    async def list(
-        self, limit: int = 100, offset: int = 0
-    ) -> PaginatedResponse[SecurityProfile]:
+    async def list(self, limit: int = 100, offset: int = 0) -> PaginatedResponse[SecurityProfile]:
         resp = await self._client.request(
             "GET",
             "/api/v1/security-profiles",
@@ -108,9 +106,7 @@ class AsyncProfilesResource:
         )
 
     async def get(self, profile_id: int) -> SecurityProfile:
-        resp = await self._client.request(
-            "GET", f"/api/v1/security-profiles/{profile_id}"
-        )
+        resp = await self._client.request("GET", f"/api/v1/security-profiles/{profile_id}")
         return SecurityProfile.model_validate(resp.json())
 
     async def create(
@@ -127,9 +123,7 @@ class AsyncProfilesResource:
             body["runtime_policy"] = runtime_policy
         if pids_limit is not None:
             body["pids_limit"] = pids_limit
-        resp = await self._client.request(
-            "POST", "/api/v1/security-profiles", json=body
-        )
+        resp = await self._client.request("POST", "/api/v1/security-profiles", json=body)
         return SecurityProfile.model_validate(resp.json())
 
     async def update(
@@ -149,33 +143,23 @@ class AsyncProfilesResource:
             body["runtime_policy"] = runtime_policy
         if pids_limit is not None:
             body["pids_limit"] = pids_limit
-        resp = await self._client.request(
-            "PUT", f"/api/v1/security-profiles/{profile_id}", json=body
-        )
+        resp = await self._client.request("PUT", f"/api/v1/security-profiles/{profile_id}", json=body)
         return SecurityProfile.model_validate(resp.json())
 
     async def delete(self, profile_id: int) -> dict:
-        resp = await self._client.request(
-            "DELETE", f"/api/v1/security-profiles/{profile_id}"
-        )
+        resp = await self._client.request("DELETE", f"/api/v1/security-profiles/{profile_id}")
         return resp.json()
 
     async def export(self, profile_id: int) -> ProfileExportData:
-        resp = await self._client.request(
-            "GET", f"/api/v1/security-profiles/{profile_id}/export"
-        )
+        resp = await self._client.request("GET", f"/api/v1/security-profiles/{profile_id}/export")
         return ProfileExportData.model_validate(resp.json())
 
-    async def import_data(
-        self, profile_id: int, data: ProfileExportData | dict
-    ) -> ProfileImportResult:
+    async def import_data(self, profile_id: int, data: ProfileExportData | dict) -> ProfileImportResult:
         if isinstance(data, ProfileExportData):
             body = data.model_dump()
         else:
             body = data
-        resp = await self._client.request(
-            "POST", f"/api/v1/security-profiles/{profile_id}/import", json=body
-        )
+        resp = await self._client.request("POST", f"/api/v1/security-profiles/{profile_id}/import", json=body)
         return ProfileImportResult.model_validate(resp.json())
 
     async def list_community(self) -> list[CommunityProfile]:
@@ -184,9 +168,7 @@ class AsyncProfilesResource:
             resp.raise_for_status()
             return [CommunityProfile.model_validate(p) for p in resp.json()]
 
-    async def apply(
-        self, name: str, profile_id: Optional[int] = None
-    ) -> ProfileImportResult:
+    async def apply(self, name: str, profile_id: Optional[int] = None) -> ProfileImportResult:
         url = f"{COMMUNITY_BASE_URL}/{name}.json"
         async with httpx.AsyncClient() as http:
             resp = await http.get(url, timeout=15.0)
@@ -195,9 +177,7 @@ class AsyncProfilesResource:
         target_id = profile_id or await self._resolve_default_profile_id()
         return await self.import_data(target_id, export_data)
 
-    async def apply_url(
-        self, url: str, profile_id: Optional[int] = None
-    ) -> ProfileImportResult:
+    async def apply_url(self, url: str, profile_id: Optional[int] = None) -> ProfileImportResult:
         async with httpx.AsyncClient() as http:
             resp = await http.get(url, timeout=15.0)
             resp.raise_for_status()
@@ -221,12 +201,8 @@ class AsyncCellsResource:
     def __init__(self, client: AsyncCagentClient) -> None:
         self._client = client
 
-    async def list(
-        self, limit: int = 100, offset: int = 0
-    ) -> PaginatedResponse[Cell]:
-        resp = await self._client.request(
-            "GET", "/api/v1/cells", params={"limit": limit, "offset": offset}
-        )
+    async def list(self, limit: int = 100, offset: int = 0) -> PaginatedResponse[Cell]:
+        resp = await self._client.request("GET", "/api/v1/cells", params={"limit": limit, "offset": offset})
         data = resp.json()
         return PaginatedResponse[Cell](
             items=[Cell.model_validate(c) for c in data["items"]],
@@ -236,36 +212,24 @@ class AsyncCellsResource:
         )
 
     async def get(self, cell_id: str) -> CellStatus:
-        resp = await self._client.request(
-            "GET", f"/api/v1/cells/{cell_id}/status"
-        )
+        resp = await self._client.request("GET", f"/api/v1/cells/{cell_id}/status")
         return CellStatus.model_validate(resp.json())
 
-    async def wipe(self, cell_id: str, workspace: bool = False) -> dict:
-        resp = await self._client.request(
-            "POST",
-            f"/api/v1/cells/{cell_id}/wipe",
-            json={"wipe_workspace": workspace},
-        )
+    async def command(self, cell_id: str, command: str) -> dict:
+        resp = await self._client.request("POST", f"/api/v1/cells/{cell_id}/{command}")
         return resp.json()
+
+    async def wipe(self, cell_id: str, workspace: bool = False) -> dict:
+        return await self.command(cell_id, "wipe-workspace" if workspace else "wipe")
 
     async def restart(self, cell_id: str) -> dict:
-        resp = await self._client.request(
-            "POST", f"/api/v1/cells/{cell_id}/restart"
-        )
-        return resp.json()
+        return await self.command(cell_id, "restart")
 
     async def stop(self, cell_id: str) -> dict:
-        resp = await self._client.request(
-            "POST", f"/api/v1/cells/{cell_id}/stop"
-        )
-        return resp.json()
+        return await self.command(cell_id, "stop")
 
     async def start(self, cell_id: str) -> dict:
-        resp = await self._client.request(
-            "POST", f"/api/v1/cells/{cell_id}/start"
-        )
-        return resp.json()
+        return await self.command(cell_id, "start")
 
     async def assign_profile(self, cell_id: str, profile_id: int) -> dict:
         resp = await self._client.request(
@@ -276,9 +240,7 @@ class AsyncCellsResource:
         return resp.json()
 
     async def unassign_profile(self, cell_id: str) -> dict:
-        resp = await self._client.request(
-            "DELETE", f"/api/v1/cells/{cell_id}/profile"
-        )
+        resp = await self._client.request("DELETE", f"/api/v1/cells/{cell_id}/profile")
         return resp.json()
 
 
@@ -325,9 +287,7 @@ class AsyncDomainPoliciesResource:
         self, policy_id: int, value: str, header: str = "Authorization", format: str = "Bearer {value}"
     ) -> DomainPolicyResponse:
         body = {"header": header, "format": format, "value": value}
-        resp = await self._client.request(
-            "POST", f"/api/v1/domain-policies/{policy_id}/rotate-credential", json=body
-        )
+        resp = await self._client.request("POST", f"/api/v1/domain-policies/{policy_id}/rotate-credential", json=body)
         return DomainPolicyResponse.model_validate(resp.json())
 
 
