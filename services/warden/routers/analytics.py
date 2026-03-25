@@ -24,33 +24,33 @@ _VALID_DOMAIN_RE = re.compile(r"^[a-zA-Z0-9._][a-zA-Z0-9._-]*$")
 
 
 # ---------------------------------------------------------------------------
-# OpenObserve helpers (lazy import so module loads even without OO)
+# VictoriaLogs helpers (lazy import so module loads even without VL)
 # ---------------------------------------------------------------------------
 
 
-def _oo_available() -> bool:
-    """Check if OpenObserve client is importable and healthy."""
+def _vl_available() -> bool:
+    """Check if VictoriaLogs client is importable and healthy."""
     try:
-        from openobserve_client import is_openobserve_healthy
+        from victorialogs_client import is_healthy
 
-        return is_openobserve_healthy()
+        return is_healthy()
     except ImportError:
         return False
 
 
-def _oo_query(sql: str, window_hours: int) -> list[dict]:
-    """Run a SQL query against OpenObserve for the given time window."""
+def _vl_query(logsql: str, window_hours: int) -> list[dict]:
+    """Run a LogsQL stats query against VictoriaLogs for the given time window."""
     try:
-        from openobserve_client import now_us, query_openobserve
+        from victorialogs_client import now_us, query_stats
 
         end_us = now_us()
         start_us = end_us - window_hours * 3600 * 1_000_000
-        return query_openobserve(sql, start_us, end_us)
+        return query_stats(logsql, start_us, end_us)
     except ImportError:
-        logger.warning("openobserve_client not available")
+        logger.warning("victorialogs_client not available")
         return []
     except Exception as e:
-        logger.warning("OpenObserve query failed: %s", e)
+        logger.warning("VictoriaLogs query failed: %s", e)
         return []
 
 
@@ -116,7 +116,8 @@ def query_widget(body: WidgetQueryRequest):
         buckets = merged_params["buckets"]
         interval_min = max(1, int(window_hours * 60 / buckets))
         merged_params["interval_min"] = interval_min
-        merged_params["interval_us"] = interval_min * 60 * 1_000_000
+        # VictoriaLogs uses duration strings like "5m", "1h"
+        merged_params["interval"] = f"{interval_min}m"
 
     meta: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -126,15 +127,20 @@ def query_widget(body: WidgetQueryRequest):
         if key in merged_params:
             meta[key] = merged_params[key]
 
-    if not _oo_available():
-        meta["note"] = "OpenObserve unavailable, returning empty results"
+    if not _vl_available():
+        meta["note"] = "VictoriaLogs unavailable, returning empty results"
         rows: list = []
     else:
-        # Format SQL template with int params only (validated as ints)
-        int_params = {k: int(v) for k, v in merged_params.items() if isinstance(v, (int, float))}
-        sql = spec["sql"].format(**int_params)
+        # Format LogsQL template with params
+        format_params = {}
+        for k, v in merged_params.items():
+            if isinstance(v, (int, float)):
+                format_params[k] = int(v)
+            elif isinstance(v, str):
+                format_params[k] = v
+        logsql = spec["logsql"].format(**format_params)
         window_hours = merged_params["window_hours"]
-        raw_rows = _oo_query(sql, window_hours)
+        raw_rows = _vl_query(logsql, window_hours)
 
         # Generic row mapper: extract column values in order, round floats
         columns = spec["columns"]
@@ -145,8 +151,14 @@ def query_widget(body: WidgetQueryRequest):
                 val = r.get(col["name"])
                 if val is None:
                     val = "" if col["type"] == "string" else 0
+                # VictoriaLogs returns all values as strings; coerce to expected type
+                if col["type"] == "number" and isinstance(val, str):
+                    try:
+                        val = float(val)
+                    except (ValueError, TypeError):
+                        val = 0
                 if col["type"] == "number" and isinstance(val, float):
-                    val = round(val, 1)
+                    val = round(val, 1) if val != int(val) else int(val)
                 row.append(val)
             rows.append(row)
 
@@ -160,7 +172,7 @@ def query_widget(body: WidgetQueryRequest):
 
 
 # ---------------------------------------------------------------------------
-# Diagnose endpoint (kept as-is)
+# Diagnose endpoint
 # ---------------------------------------------------------------------------
 
 
@@ -213,25 +225,20 @@ def diagnose_domain(
         logger.debug("DNS resolution failed for domain lookup: %s", e)
         dns_result = "unknown"
 
-    # Get recent log entries for this domain via OpenObserve
+    # Get recent log entries for this domain via VictoriaLogs
     recent_requests: list[dict] = []
     try:
-        from openobserve_client import _STREAM, now_us, query_openobserve
+        from victorialogs_client import now_us, query_logs
 
         end_us = now_us()
         start_us = end_us - 1 * 3600 * 1_000_000  # last 1 hour
-        escaped = domain.replace("'", "''")
-        sql = (
-            f"SELECT _timestamp, method, path, response_code, response_flags, duration_ms "
-            f'FROM "{_STREAM}" '
-            f"WHERE source = 'envoy' AND log_type = 'access' AND authority = '{escaped}' "
-            f"ORDER BY _timestamp DESC LIMIT 5"
-        )
-        rows = query_openobserve(sql, start_us, end_us)
-        for r in rows:
+        safe_domain = domain.replace("\\", "\\\\").replace('"', '\\"')
+        logsql = f"source:envoy AND log_type:access AND authority:{safe_domain} | sort by (_time) desc | limit 5"
+        log_rows = query_logs(logsql, start_us, end_us)
+        for r in log_rows:
             recent_requests.append(
                 {
-                    "timestamp": r.get("_timestamp", ""),
+                    "timestamp": r.get("_time", r.get("timestamp", "")),
                     "method": r.get("method", ""),
                     "path": r.get("path", ""),
                     "response_code": int(r.get("response_code", 0)),
@@ -240,7 +247,7 @@ def diagnose_domain(
                 }
             )
     except ImportError:
-        logger.warning("openobserve_client not available for diagnose")
+        logger.warning("victorialogs_client not available for diagnose")
     except Exception as e:
         logger.warning("Failed to query recent requests: %s", e)
 

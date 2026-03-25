@@ -1,34 +1,35 @@
 """OpenTelemetry tracing setup for warden.
 
-Exports spans to the local OpenObserve instance via OTLP HTTP.
+Exports spans via OTLP HTTP. Tracing endpoint is configurable via
+OTEL_EXPORTER_OTLP_ENDPOINT env var (no longer tied to OpenObserve).
 Opt-in: controlled by OTEL_ENABLED constant (env var).
 """
 
 import logging
+import os
 
 from constants import (
     DATAPLANE_MODE,
     OTEL_ENABLED,
-    OPENOBSERVE_PASSWORD,
-    OPENOBSERVE_URL,
-    OPENOBSERVE_USER,
 )
 
 logger = logging.getLogger(__name__)
+
+# OTLP endpoint — defaults to a standard OTLP collector port.
+# Override with OTEL_EXPORTER_OTLP_ENDPOINT env var.
+OTEL_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318/v1/traces")
 
 
 def setup_tracing(app):
     """Instrument the FastAPI app with OpenTelemetry tracing.
 
     No-op when OTEL_ENABLED is falsy.  Otherwise configures a
-    TracerProvider that exports spans to OpenObserve via OTLP HTTP
-    and instruments FastAPI, requests, and logging.
+    TracerProvider that exports spans via OTLP HTTP and instruments
+    FastAPI, requests, and logging.
     """
     if not OTEL_ENABLED:
         logger.info("OpenTelemetry tracing disabled (OTEL_ENABLED is not set)")
         return
-
-    from base64 import b64encode
 
     from opentelemetry import trace
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -49,13 +50,8 @@ def setup_tracing(app):
 
     provider = TracerProvider(resource=resource)
 
-    # Basic auth header for OpenObserve OTLP endpoint
-    credentials = b64encode(f"{OPENOBSERVE_USER}:{OPENOBSERVE_PASSWORD}".encode()).decode()
-    endpoint = f"{OPENOBSERVE_URL}/api/default/v1/traces"
-
     exporter = OTLPSpanExporter(
-        endpoint=endpoint,
-        headers={"Authorization": f"Basic {credentials}"},
+        endpoint=OTEL_ENDPOINT,
     )
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
@@ -65,4 +61,4 @@ def setup_tracing(app):
     RequestsInstrumentor().instrument()
     LoggingInstrumentor().instrument()
 
-    logger.info("OpenTelemetry tracing enabled — exporting to %s", endpoint)
+    logger.info("OpenTelemetry tracing enabled — exporting to %s", OTEL_ENDPOINT)

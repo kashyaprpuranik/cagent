@@ -11,7 +11,7 @@
 #   1. Generates a docker-compose override file with trial resource limits
 #   2. Starts the full DP stack (cell + all infra)
 #   3. Runs a health check: DNS, HTTP proxy, HTTPS/MITM proxy, warden API,
-#      OpenObserve API, and 30s stability (no OOM kills or restarts)
+#      VictoriaLogs API, and 30s stability (no OOM kills or restarts)
 #   4. Records PASS/FAIL and tears down
 #   5. Repeats with progressively lower limits
 #
@@ -208,17 +208,16 @@ verify() {
     fi
     echo "OK: warden healthy"
 
-    # 6. OpenObserve responding
+    # 6. VictoriaLogs responding
     sleep 5
-    local oz_resp
-    oz_resp=$(docker exec log-store wget -q -O - \
-        --header="Authorization: Basic $(echo -n 'admin@cagent.local:openobserve-local-dev' | base64)" \
-        "http://localhost:5080/api/default/organizations" 2>/dev/null || echo "FAIL")
-    if [ "$oz_resp" = "FAIL" ]; then
-        echo "FAIL: OpenObserve unreachable"
+    local vl_resp
+    vl_resp=$(docker exec log-store wget -q -O - \
+        "http://localhost:9428/health" 2>/dev/null || echo "FAIL")
+    if [ "$vl_resp" = "FAIL" ]; then
+        echo "FAIL: VictoriaLogs unreachable"
         return 1
     fi
-    echo "OK: OpenObserve responding"
+    echo "OK: VictoriaLogs responding"
 
     # 7. Stability — no OOM kills or restarts after 10 more seconds
     sleep 10
@@ -281,7 +280,7 @@ run_trial() {
 #       warden_cpu warden_mem ozo_cpu ozo_mem dns_mem cell_cpu cell_mem
 
 # Post-tuning trials (Envoy --concurrency 1 + stats off, mitmproxy flow_detail=0,
-# OpenObserve 2 workers). Cell fixed at 3G. Finding minimum infra limits.
+# VictoriaLogs). Cell fixed at 3G. Finding minimum infra limits.
 #
 # Args: envoy_cpu envoy_mem mitm_cpu mitm_mem vector_cpu vector_mem
 #       warden_cpu warden_mem ozo_cpu ozo_mem dns_mem cell_cpu cell_mem

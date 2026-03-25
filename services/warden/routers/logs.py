@@ -82,12 +82,12 @@ async def search_logs(
     start: Optional[str] = None,
     end: Optional[str] = None,
 ):
-    """Search logs from local OpenObserve.
+    """Search logs from local VictoriaLogs.
 
-    Falls back to Docker logs if OO is unavailable.
+    Falls back to empty results if VL is unavailable.
     """
     try:
-        from openobserve_client import _STREAM, datetime_to_us, now_us, query_openobserve
+        from victorialogs_client import datetime_to_us, now_us, query_logs
 
         # Build time range
         end_us = now_us()
@@ -100,21 +100,31 @@ async def search_logs(
             start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
             start_us = datetime_to_us(start_dt)
 
-        # Build SQL query (escape single quotes to prevent SQL injection)
-        conditions = []
+        # Build LogsQL query — quote all user input to prevent injection.
+        # LogsQL special chars: | * ( ) " \
+        def _escape(s: str) -> str:
+            return s.replace("\\", "\\\\").replace('"', '\\"')
+
+        filters = []
         if query:
-            conditions.append(f"message LIKE '%{query.replace(chr(39), chr(39) * 2)}%'")
+            filters.append(f'_msg:"{_escape(query)}"')
         if source:
-            conditions.append(f"source = '{source.replace(chr(39), chr(39) * 2)}'")
+            filters.append(f'source:"{_escape(source)}"')
         if cell_id:
-            conditions.append(f"cell_id = '{cell_id.replace(chr(39), chr(39) * 2)}'")
+            filters.append(f'cell_id:"{_escape(cell_id)}"')
 
-        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        sql = f'SELECT * FROM "{_STREAM}"{where} ORDER BY _timestamp DESC LIMIT {limit}'
+        logsql = " AND ".join(filters) if filters else "*"
+        logsql += f" | sort by (_time) desc | limit {limit}"
 
-        hits = query_openobserve(sql, start_us, end_us)
+        hits = query_logs(logsql, start_us, end_us)
+        # Map VictoriaLogs field names to frontend-expected names
+        for hit in hits:
+            if "_msg" in hit and "message" not in hit:
+                hit["message"] = hit["_msg"]
+            if "_time" in hit and "timestamp" not in hit:
+                hit["timestamp"] = hit["_time"]
         return {"hits": hits, "total": len(hits)}
 
     except ImportError:
-        logger.debug("OpenObserve client not available, returning empty results")
+        logger.debug("VictoriaLogs client not available, returning empty results")
         return {"hits": [], "total": 0}

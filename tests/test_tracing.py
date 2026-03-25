@@ -1,6 +1,5 @@
 """Unit tests for OpenTelemetry tracing setup."""
 
-import importlib
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -96,7 +95,7 @@ class TestSetupTracingDisabled:
 class TestSetupTracingEnabled:
     """When OTEL_ENABLED is true, setup_tracing should configure OTel."""
 
-    def _run_with_mocks(self, dataplane_mode="connected", openobserve_url="http://log-store:5080"):
+    def _run_with_mocks(self, dataplane_mode="connected", otel_endpoint="http://localhost:4318/v1/traces"):
         """Helper: run setup_tracing with mocked OTel modules and return mocks."""
         otel_modules, mocks = _build_otel_mocks()
 
@@ -104,9 +103,7 @@ class TestSetupTracingEnabled:
 
         with (
             patch.object(tracing, "OTEL_ENABLED", True),
-            patch.object(tracing, "OPENOBSERVE_URL", openobserve_url),
-            patch.object(tracing, "OPENOBSERVE_USER", "admin@cagent.local"),
-            patch.object(tracing, "OPENOBSERVE_PASSWORD", "test-password"),
+            patch.object(tracing, "OTEL_ENDPOINT", otel_endpoint),
             patch.object(tracing, "DATAPLANE_MODE", dataplane_mode),
             patch.dict(sys.modules, otel_modules),
         ):
@@ -121,14 +118,10 @@ class TestSetupTracingEnabled:
 
         # TracerProvider was created and registered
         mocks["TracerProvider"].assert_called_once()
-        mocks["trace"].set_tracer_provider.assert_called_once_with(
-            mocks["TracerProvider"].return_value
-        )
+        mocks["trace"].set_tracer_provider.assert_called_once_with(mocks["TracerProvider"].return_value)
 
         # BatchSpanProcessor was created with the exporter and added to provider
-        mocks["BatchSpanProcessor"].assert_called_once_with(
-            mocks["OTLPSpanExporter"].return_value
-        )
+        mocks["BatchSpanProcessor"].assert_called_once_with(mocks["OTLPSpanExporter"].return_value)
         mocks["TracerProvider"].return_value.add_span_processor.assert_called_once_with(
             mocks["BatchSpanProcessor"].return_value
         )
@@ -139,17 +132,18 @@ class TestSetupTracingEnabled:
         mocks["LoggingInstrumentor"].return_value.instrument.assert_called_once()
 
     def test_otlp_endpoint_constructed_correctly(self):
-        _, mocks = self._run_with_mocks(openobserve_url="http://log-store:5080")
+        _, mocks = self._run_with_mocks(otel_endpoint="http://collector:4318/v1/traces")
 
         call_kwargs = mocks["OTLPSpanExporter"].call_args[1]
-        assert call_kwargs["endpoint"] == "http://log-store:5080/api/default/v1/traces"
+        assert call_kwargs["endpoint"] == "http://collector:4318/v1/traces"
 
-    def test_otlp_basic_auth_header(self):
+    def test_otlp_no_auth_header(self):
+        """VictoriaLogs OTLP export should not require auth headers."""
         _, mocks = self._run_with_mocks()
 
         call_kwargs = mocks["OTLPSpanExporter"].call_args[1]
-        assert "Authorization" in call_kwargs["headers"]
-        assert call_kwargs["headers"]["Authorization"].startswith("Basic ")
+        # No auth headers should be passed (VL doesn't need auth)
+        assert "headers" not in call_kwargs or call_kwargs.get("headers") is None
 
     def test_service_name_resource_attribute(self):
         _, mocks = self._run_with_mocks(dataplane_mode="connected")
@@ -161,6 +155,4 @@ class TestSetupTracingEnabled:
         assert attrs["deployment.environment"] == "connected"
 
         # TracerProvider was created with the resource
-        mocks["TracerProvider"].assert_called_once_with(
-            resource=mocks["Resource"].create.return_value
-        )
+        mocks["TracerProvider"].assert_called_once_with(resource=mocks["Resource"].create.return_value)

@@ -1,39 +1,36 @@
 # =============================================================================
 # Vector Sinks - Connected Mode
-# Ships logs to local OpenObserve (per-DP log store) and keeps a file backup.
+# Ships logs to local VictoriaLogs (per-DP log store) and keeps a file backup.
 # Used when DATAPLANE_MODE=connected.
 # =============================================================================
 
 sinks:
-  # Local OpenObserve (per-DP log analytics)
+  # Local VictoriaLogs (per-DP log analytics)
   # Logs are stored locally and queryable by the warden API.
   # The CP queries warden via mTLS for connected tenants.
   log_store:
-    type: http
+    type: elasticsearch
     inputs:
       - parse_docker
       - parse_gvisor
       - parse_cell_app
-    uri: "${OPENOBSERVE_URL:-http://log-store:5080}/api/default/cagent_logs/_json"
-    method: post
-    encoding:
-      codec: json
-    auth:
-      strategy: basic
-      user: "${OPENOBSERVE_USER:-admin@cagent.local}"
-      password: "${OPENOBSERVE_PASSWORD}"
+    endpoints:
+      - http://log-store:9428/insert/elasticsearch/
+    mode: bulk
+    suppress_type_name: true
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: "source,log_type,hostname"
+    bulk:
+      index: cagent_logs
+    healthcheck:
+      enabled: false
     batch:
       max_events: ${VECTOR_BATCH_MAX_EVENTS:-200}
       timeout_secs: ${VECTOR_BATCH_TIMEOUT_SECS:-10}
-    request:
-      headers:
-        Content-Type: application/json
-      rate_limit_num: 500
-      rate_limit_duration_secs: 60
-      retry_initial_backoff_secs: 2
-      retry_max_duration_secs: 30
 
-  # Local file backup (safety net if OO is temporarily down)
+  # Local file backup (safety net if VL is temporarily down)
   file_backup:
     type: file
     inputs:

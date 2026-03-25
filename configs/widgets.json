@@ -9,7 +9,7 @@
       {"name": "count", "type": "number", "role": "measure"},
       {"name": "last_seen", "type": "datetime", "role": "info"}
     ],
-    "sql": "SELECT authority as domain, COUNT(*) as count, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 GROUP BY authority ORDER BY count DESC LIMIT {limit}"
+    "logsql": "source:envoy AND log_type:access AND response_code:403 | stats by (authority) count() as count, max(_time) as last_seen | rename authority as domain | sort by (count) desc | limit {limit}"
   },
   "blocked_timeseries": {
     "name": "Blocked Requests Over Time",
@@ -20,7 +20,7 @@
       {"name": "bucket", "type": "datetime", "role": "dimension"},
       {"name": "count", "type": "number", "role": "measure"}
     ],
-    "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' AND response_code = 403 GROUP BY bucket ORDER BY bucket"
+    "logsql": "source:envoy AND log_type:access AND response_code:403 | stats by (_time:{interval}) count() as count"
   },
   "bandwidth_by_domain": {
     "name": "Bandwidth by Domain",
@@ -33,7 +33,7 @@
       {"name": "bytes_received", "type": "number", "role": "measure"},
       {"name": "total_bytes", "type": "number", "role": "measure"}
     ],
-    "sql": "SELECT authority as domain, SUM(bytes_sent) as bytes_sent, SUM(bytes_received) as bytes_received, SUM(bytes_sent) + SUM(bytes_received) as total_bytes FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY total_bytes DESC LIMIT {limit}"
+    "logsql": "source:envoy AND log_type:access | stats by (authority) sum(bytes_sent) as bytes_sent, sum(bytes_received) as bytes_received | math total_bytes = bytes_sent + bytes_received | rename authority as domain | sort by (total_bytes) desc | limit {limit}"
   },
   "requests_by_status": {
     "name": "Requests by Status Code",
@@ -44,7 +44,7 @@
       {"name": "status_code", "type": "number", "role": "dimension"},
       {"name": "count", "type": "number", "role": "measure"}
     ],
-    "sql": "SELECT response_code as status_code, COUNT(*) as count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY response_code ORDER BY count DESC"
+    "logsql": "source:envoy AND log_type:access | stats by (response_code) count() as count | rename response_code as status_code | sort by (count) desc"
   },
   "request_volume": {
     "name": "Request Volume",
@@ -57,7 +57,7 @@
       {"name": "blocked", "type": "number", "role": "measure"},
       {"name": "rate_limited", "type": "number", "role": "measure"}
     ],
-    "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as total, SUM(CASE WHEN response_code = 403 THEN 1 ELSE 0 END) as blocked, SUM(CASE WHEN rate_limited IS NOT NULL AND rate_limited != '' THEN 1 ELSE 0 END) as rate_limited FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY bucket ORDER BY bucket"
+    "logsql": "source:envoy AND log_type:access | stats by (_time:{interval}) count() as total, count_if(response_code:403) as blocked, count_if(rate_limited:*) as rate_limited"
   },
   "latency_by_domain": {
     "name": "Latency Percentiles by Domain",
@@ -70,7 +70,7 @@
       {"name": "avg_ms", "type": "number", "role": "measure"},
       {"name": "max_ms", "type": "number", "role": "measure"}
     ],
-    "sql": "SELECT authority as domain, COUNT(*) as request_count, AVG(duration_ms) as avg_ms, MAX(duration_ms) as max_ms FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY avg_ms DESC LIMIT {limit}"
+    "logsql": "source:envoy AND log_type:access | stats by (authority) count() as request_count, avg(duration_ms) as avg_ms, max(duration_ms) as max_ms | rename authority as domain | sort by (avg_ms) desc | limit {limit}"
   },
   "credential_usage": {
     "name": "Credential Injection by Domain",
@@ -82,7 +82,7 @@
       {"name": "total_requests", "type": "number", "role": "measure"},
       {"name": "injected_count", "type": "number", "role": "measure"}
     ],
-    "sql": "SELECT authority as domain, COUNT(*) as total_requests, SUM(CASE WHEN credential_injected = 'true' THEN 1 ELSE 0 END) as injected_count FROM \"cagent_logs\" WHERE source = 'envoy' AND log_type = 'access' GROUP BY authority ORDER BY injected_count DESC LIMIT {limit}"
+    "logsql": "source:envoy AND log_type:access | stats by (authority) count() as total_requests, count_if(credential_injected:true) as injected_count | rename authority as domain | sort by (injected_count) desc | limit {limit}"
   },
   "dlp_detections": {
     "name": "DLP Detections",
@@ -96,7 +96,7 @@
       {"name": "mode", "type": "string", "role": "info"},
       {"name": "last_seen", "type": "datetime", "role": "info"}
     ],
-    "sql": "SELECT dlp_host as domain, dlp_pattern as pattern, COUNT(*) as count, dlp_mode as mode, MAX(_timestamp) as last_seen FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY dlp_host, dlp_pattern, dlp_mode ORDER BY count DESC LIMIT {limit}"
+    "logsql": "log_type:dlp_violation | stats by (dlp_host, dlp_pattern, dlp_mode) count() as count, max(_time) as last_seen | rename dlp_host as domain, dlp_pattern as pattern, dlp_mode as mode | sort by (count) desc | limit {limit}"
   },
   "dlp_timeseries": {
     "name": "DLP Detections Over Time",
@@ -107,6 +107,6 @@
       {"name": "bucket", "type": "datetime", "role": "dimension"},
       {"name": "count", "type": "number", "role": "measure"}
     ],
-    "sql": "SELECT FLOOR(_timestamp / {interval_us}) * {interval_us} as bucket, COUNT(*) as count FROM \"cagent_logs\" WHERE log_type = 'dlp_violation' GROUP BY bucket ORDER BY bucket"
+    "logsql": "log_type:dlp_violation | stats by (_time:{interval}) count() as count"
   }
 }

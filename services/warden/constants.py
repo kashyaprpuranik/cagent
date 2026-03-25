@@ -17,16 +17,19 @@ docker_client = docker.from_env()
 CELL_LABEL = "cagent.role=cell"
 CELL_CONTAINER_FALLBACK = "cell"
 
+
 # Detect own compose project to scope cell discovery (avoids seeing cells from other stacks)
 def _detect_compose_project() -> str:
     """Read the compose project label from this container's own metadata."""
     try:
         import socket
+
         hostname = socket.gethostname()
         self_container = docker_client.containers.get(hostname)
         return self_container.labels.get("com.docker.compose.project", "")
     except Exception:
         return ""
+
 
 _COMPOSE_PROJECT = _detect_compose_project()
 
@@ -74,15 +77,15 @@ VALID_SECCOMP_PROFILES = {"standard", "hardened", "permissive"}
 # ---------------------------------------------------------------------------
 # Capabilities required by sshd/entrypoint (same as docker-compose cap_add)
 SSHD_CAPS = [
-    "CHOWN",            # entrypoint: chown on SSH keys, tmux dirs
-    "DAC_OVERRIDE",     # read/write files across users during setup
-    "FOWNER",           # entrypoint: chmod on SSH authorized_keys
-    "SETUID",           # gosu + sshd privilege separation
-    "SETGID",           # gosu + sshd privilege separation
-    "NET_BIND_SERVICE", # sshd binds port 22
-    "SYS_CHROOT",       # sshd privilege separation (ChrootDirectory)
-    "AUDIT_WRITE",      # sshd/PAM audit logging
-    "KILL",             # sshd manages child processes
+    "CHOWN",  # entrypoint: chown on SSH keys, tmux dirs
+    "DAC_OVERRIDE",  # read/write files across users during setup
+    "FOWNER",  # entrypoint: chmod on SSH authorized_keys
+    "SETUID",  # gosu + sshd privilege separation
+    "SETGID",  # gosu + sshd privilege separation
+    "NET_BIND_SERVICE",  # sshd binds port 22
+    "SYS_CHROOT",  # sshd privilege separation (ChrootDirectory)
+    "AUDIT_WRITE",  # sshd/PAM audit logging
+    "KILL",  # sshd manages child processes
 ]
 
 # tmpfs mounts for read-only root (same as docker-compose tmpfs)
@@ -140,10 +143,8 @@ WARDEN_API_TOKEN = os.environ.get("WARDEN_API_TOKEN", "").strip()
 # For self-hosted/connected DPs where the user manages their own DNS/tunnel.
 WARDEN_PUBLIC_URL = os.environ.get("WARDEN_PUBLIC_URL", "").strip()
 
-# Local OpenObserve (per-DP log store)
-OPENOBSERVE_URL = os.environ.get("OPENOBSERVE_URL", "http://log-store:5080")
-OPENOBSERVE_USER = os.environ.get("OPENOBSERVE_USER", "admin@cagent.local")
-OPENOBSERVE_PASSWORD = os.environ.get("OPENOBSERVE_PASSWORD", "")
+# Local VictoriaLogs (per-DP log store)
+VICTORIALOGS_URL = os.environ.get("VICTORIALOGS_URL", "http://log-store:9428")
 
 # OpenTelemetry tracing (opt-in)
 OTEL_ENABLED = os.environ.get("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")

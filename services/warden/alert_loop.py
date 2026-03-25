@@ -1,9 +1,10 @@
-"""Alert evaluation loop: check OpenObserve for DLP violations and push to CP."""
+"""Alert evaluation loop: check VictoriaLogs for DLP violations and push to CP."""
 
 import json
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -18,29 +19,30 @@ from constants import (
 
 logger = logging.getLogger(__name__)
 
-# Microsecond timestamp of the last successful alert check.
-_last_alert_check_us: int = 0
+# ISO8601 timestamp of the last successful alert check.
+_last_alert_check_iso: str = ""
 
 
-def _query_oo_alerts(sql: str, start_us: int, end_us: int) -> list[dict]:
-    """Query OpenObserve for alert data.  Returns [] on any failure."""
+def _query_vl_alerts(logsql: str, start_us: int, end_us: int) -> list[dict]:
+    """Query VictoriaLogs for alert data.  Returns [] on any failure."""
     try:
-        from openobserve_client import query_openobserve
-        return query_openobserve(sql, start_us, end_us)
+        from victorialogs_client import query_stats
+
+        return query_stats(logsql, start_us, end_us)
     except ImportError:
         return []
     except Exception as e:
-        logger.warning("Alert OO query failed: %s", e)
+        logger.warning("Alert VL query failed: %s", e)
         return []
 
 
 def alert_loop(stop_event: Optional[threading.Event] = None):
-    """Check OpenObserve for DLP violations and push alerts to the CP.
+    """Check VictoriaLogs for DLP violations and push alerts to the CP.
 
     Runs independently from the heartbeat loop in its own thread.
     Only active in connected mode with a valid CP token.
     """
-    global _last_alert_check_us
+    global _last_alert_check_iso
 
     if DATAPLANE_MODE != "connected" or not CONTROL_PLANE_TOKEN:
         logger.info("Alert loop disabled (not in connected mode or no CP token)")
@@ -53,7 +55,7 @@ def alert_loop(stop_event: Optional[threading.Event] = None):
     )
 
     # Start from 60 minutes ago on first run
-    _last_alert_check_us = int((time.time() - 3600) * 1_000_000)
+    _last_alert_check_iso = datetime.fromtimestamp(time.time() - 3600, tz=timezone.utc).isoformat()
 
     _alerts_path = Path(DATA_PLANE_DIR) / "configs" / "alerts.json"
     if not _alerts_path.exists():
@@ -63,22 +65,25 @@ def alert_loop(stop_event: Optional[threading.Event] = None):
     while not (stop_event and stop_event.is_set()):
         try:
             now_us = int(time.time() * 1_000_000)
+            start_us = int(datetime.fromisoformat(_last_alert_check_iso).timestamp() * 1_000_000)
             alerts: list[dict] = []
 
             for alert_id, alert_def in alert_registry.items():
-                sql = alert_def["sql"].format(last_check_us=_last_alert_check_us)
-                rows = _query_oo_alerts(sql, _last_alert_check_us, now_us)
+                logsql = alert_def["logsql"].format(last_check_iso=_last_alert_check_iso)
+                rows = _query_vl_alerts(logsql, start_us, now_us)
                 if not rows:
                     continue
 
                 for row in rows:
-                    alerts.append({
-                        "event_type": alert_def["event_type"],
-                        "severity": alert_def.get("severity", "info"),
-                        "title": alert_def["title"].format(**row),
-                        "message": alert_def["message"].format(**row),
-                        "metadata": row,
-                    })
+                    alerts.append(
+                        {
+                            "event_type": alert_def["event_type"],
+                            "severity": alert_def.get("severity", "info"),
+                            "title": alert_def["title"].format(**row),
+                            "message": alert_def["message"].format(**row),
+                            "metadata": row,
+                        }
+                    )
 
             if alerts:
                 try:
@@ -99,7 +104,7 @@ def alert_loop(stop_event: Optional[threading.Event] = None):
                 except requests.exceptions.RequestException as e:
                     logger.warning("CP alert push error: %s", e)
 
-            _last_alert_check_us = now_us
+            _last_alert_check_iso = datetime.fromtimestamp(now_us / 1_000_000, tz=timezone.utc).isoformat()
 
         except Exception:
             logger.exception("Error in alert loop cycle")

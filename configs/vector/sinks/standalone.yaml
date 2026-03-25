@@ -4,7 +4,7 @@
 # ship logs to S3, Elasticsearch, or another destination.
 #
 # Usage:
-#   docker compose --profile dev --profile auditing up -d
+#   docker compose --profile dev --profile admin up -d
 # =============================================================================
 
 sinks:
@@ -23,23 +23,27 @@ sinks:
       codec: json
 
   # ---------------------------------------------------------------------------
-  # OpenObserve (local log store, enabled with --profile auditing)
-  # Uses the Elasticsearch-compatible bulk API.
+  # VictoriaLogs (local log store)
+  # Uses the Elasticsearch-compatible bulk API for ingestion.
   # ---------------------------------------------------------------------------
-  openobserve:
-    type: http
+  victorialogs:
+    type: elasticsearch
     inputs:
       - parse_docker
       - parse_gvisor
       - parse_cell_app
-    uri: http://log-store:5080/api/default/cagent-logs/_json
-    method: post
-    auth:
-      strategy: basic
-      user: "${OPENOBSERVE_USER}"
-      password: "${OPENOBSERVE_PASSWORD}"
-    encoding:
-      codec: json
+    endpoints:
+      - http://log-store:9428/insert/elasticsearch/
+    mode: bulk
+    suppress_type_name: true
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: "source,log_type,hostname"
+    bulk:
+      index: cagent_logs
+    healthcheck:
+      enabled: false
     batch:
       max_events: 100
       timeout_secs: 5
