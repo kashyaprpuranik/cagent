@@ -1,6 +1,6 @@
 # cagent
 
-Python SDK for the [Cagent](https://cagent.app) Control Plane API — secure sandboxes for AI agents.
+Python SDK for the [Cagent](https://github.com/kashyaprpuranik/cagent-control) Control Plane API — secure sandboxes for AI agents.
 
 ## Installation
 
