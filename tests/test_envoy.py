@@ -277,15 +277,21 @@ class TestEnvoyXdsGeneration:
         assert "control_plane_api" in names
         assert len(clusters) == 1  # only control_plane_api, domain clusters come from CDS
 
-    def test_bootstrap_ext_authz_permissive(self, configs_dir):
-        """Bootstrap ext_authz should use permissive upstream headers."""
+    def test_bootstrap_ext_authz_allowed_headers(self, configs_dir):
+        """Bootstrap ext_authz should allow credential-related upstream headers."""
         gen = self._get_generator(configs_dir)
         bootstrap = gen.generate_envoy_bootstrap()
         hcm = bootstrap["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0]["typed_config"]
         ext_authz = hcm["http_filters"][0]
         assert ext_authz["name"] == "envoy.filters.http.ext_authz"
-        patterns = ext_authz["typed_config"]["http_service"]["authorization_response"]["allowed_upstream_headers"]["patterns"]
-        assert {"safe_regex": {"google_re2": {}, "regex": ".*"}} in patterns
+        patterns = ext_authz["typed_config"]["http_service"]["authorization_response"]["allowed_upstream_headers"][
+            "patterns"
+        ]
+        # Should have a specific regex matching credential headers (not a .* catch-all)
+        assert len(patterns) >= 1
+        regex = patterns[0]["safe_regex"]["regex"]
+        assert "authorization" in regex
+        assert "x-credential-injected" in regex
 
     def test_cds_has_domain_clusters(self, configs_dir):
         """CDS should contain typed cluster resources."""
@@ -322,6 +328,8 @@ class TestEnvoyXdsGeneration:
         assert monolithic_domain_clusters == cds_clusters
 
         # Virtual hosts should match
-        monolithic_vhosts = monolithic["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]["virtual_hosts"]
+        monolithic_vhosts = monolithic["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0][
+            "typed_config"
+        ]["route_config"]["virtual_hosts"]
         rds_vhosts = rds["resources"][0]["virtual_hosts"]
         assert monolithic_vhosts == rds_vhosts
