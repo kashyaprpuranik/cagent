@@ -1,0 +1,43 @@
+[package]
+name = "cagent-proxy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP parsing
+http = "1"
+httparse = "1"
+bytes = "1"
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "client-legacy", "http1"] }
+http-body-util = "0.1"
+
+# Config hot-reload
+arc-swap = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# DLP scanning (Phase 2)
+aho-corasick = "1"
+regex = "1"
+
+# Credential security
+secrecy = { version = "0.10", features = ["serde"] }
+zeroize = "1"
+
+# Phase 2: MITM TLS interception
+tokio-rustls = "0.26"
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
+moka = { version = "0.12", features = ["future"] }
+webpki-roots = "0.26"
+hyper-rustls = { version = "0.27", features = ["http1", "tls12", "ring"] }
+time = "0.3"
