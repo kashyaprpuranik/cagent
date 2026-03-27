@@ -335,6 +335,148 @@ class TestProxyEgress:
 
 
 @pytest.mark.e2e
+class TestPathFiltering:
+    """Test path filtering (allowed_paths on domain policies)."""
+
+    # ifconfig.me is configured with allowed_paths: [/ip, /all*]
+    DOMAIN = "ifconfig.me"
+
+    def test_allowed_path_succeeds(self, data_plane_running):
+        """Request to an allowed path should succeed."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/ip"
+        )
+        code = result.stdout.strip()
+        assert code.isdigit() and int(code) < 500, f"Allowed path /ip returned: {code}"
+
+    def test_blocked_path_returns_403(self, data_plane_running):
+        """Request to a non-allowed path should return 403."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/ua"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"Blocked path /ua should return 403, got: {code}"
+
+    def test_wildcard_path_succeeds(self, data_plane_running):
+        """Wildcard path /all* should match /all.json."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/all.json"
+        )
+        code = result.stdout.strip()
+        assert code.isdigit() and int(code) < 500, f"Wildcard path /all.json returned: {code}"
+
+
+@pytest.mark.e2e
+class TestReadOnlyEnforcement:
+    """Test read-only enforcement (block POST/PUT/DELETE on read_only domains)."""
+
+    # pypi.org is configured with read_only: true
+    DOMAIN = "pypi.org"
+
+    def test_get_allowed_on_readonly(self, data_plane_running):
+        """GET should succeed on a read-only domain."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/"
+        )
+        code = result.stdout.strip()
+        assert code.isdigit() and int(code) < 500, f"GET on read-only domain returned: {code}"
+
+    def test_post_blocked_on_readonly(self, data_plane_running):
+        """POST should be blocked (403) on a read-only domain."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-X POST -d 'test' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"POST on read-only domain should return 403, got: {code}"
+
+
+@pytest.mark.e2e
+class TestDevboxLocalAlias:
+    """Test devbox.local alias resolution (DNS + HTTP rewrite)."""
+
+    # api.github.com has alias: github → github.devbox.local
+    ALIAS = "github.devbox.local"
+    REAL_DOMAIN = "api.github.com"
+
+    def test_alias_dns_resolves_to_proxy_ip(self, data_plane_running):
+        """DNS query for {alias}.devbox.local should return the proxy IP."""
+        result = exec_in_cell(f"nslookup {self.ALIAS} {DNS_FILTER_IP}")
+        # Legacy: devbox.local → Envoy IP (10.x.1.10)
+        # Rust: devbox.local → cagent-proxy IP (10.x.1.20)
+        proxy_ip = CAGENT_PROXY_IP if is_rust_mode() else f"10.{_NET_OCTET}.1.10"
+        assert proxy_ip in result.stdout, (
+            f"{self.ALIAS} should resolve to proxy IP ({proxy_ip}), got: {result.stdout}"
+        )
+
+    def test_alias_http_rewrite(self, data_plane_running):
+        """HTTP request to {alias}.devbox.local should be forwarded to the real domain."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.ALIAS}/"
+        )
+        code = result.stdout.strip()
+        # api.github.com returns 301 or 200
+        assert code.isdigit() and int(code) < 500, (
+            f"Alias {self.ALIAS} should proxy to {self.REAL_DOMAIN}, got: {code}"
+        )
+
+    def test_unknown_alias_blocked(self, data_plane_running):
+        """Unknown alias should be blocked (403 or NXDOMAIN)."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            "--connect-timeout 5 "
+            "http://nonexistent.devbox.local/"
+        )
+        code = result.stdout.strip()
+        assert not code or code == "000" or code == "403", (
+            f"Unknown alias should fail, got: {code}"
+        )
+
+
+@pytest.mark.e2e
+class TestIPv6Suppression:
+    """Test IPv6 AAAA suppression on blocked domains."""
+
+    def test_aaaa_returns_empty_not_nxdomain(self, data_plane_running):
+        """AAAA query for devbox.local should return empty answer (NOERROR), not NXDOMAIN."""
+        # dig returns NOERROR with 0 answers for suppressed AAAA
+        result = exec_in_cell(f"dig @{DNS_FILTER_IP} AAAA devbox.local +short")
+        # Should be empty (no IPv6 address returned)
+        assert result.stdout.strip() == "", (
+            f"AAAA for devbox.local should be empty (suppressed), got: {result.stdout.strip()}"
+        )
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(is_legacy_mode(), reason="cagent-proxy health endpoint only in rust mode")
+class TestCagentProxyHealth:
+    """Test cagent-proxy health endpoint (rust mode only)."""
+
+    def test_health_endpoint(self, data_plane_running):
+        """cagent-proxy /health should return 200 from warden container."""
+        result = subprocess.run(
+            ["docker", "exec", f"{_CP_PREFIX}warden", "wget", "-q", "-O", "-",
+             f"http://10.{_NET_OCTET}.2.20:18080/health"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"Health check failed: {result.stderr}"
+        assert "ok" in result.stdout, f"Unexpected health response: {result.stdout}"
+
+
+@pytest.mark.e2e
 class TestCredentialInjection:
     """Test credential injection functionality (via Envoy ext_authz)."""
 
