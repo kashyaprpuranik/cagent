@@ -45,7 +45,19 @@ pub async fn handle_request(
         return Ok(error_response(StatusCode::FORBIDDEN, "Domain not allowed"));
     }
 
-    // Get domain policy for additional checks
+    // Resolve devbox.local alias → real domain
+    let real_domain: String;
+    let is_alias;
+    if let Some(policy) = config.resolve_alias(domain) {
+        real_domain = policy.domain.clone();
+        is_alias = true;
+        tracing::debug!(alias = domain, domain = %real_domain, "alias resolved");
+    } else {
+        real_domain = domain.to_string();
+        is_alias = false;
+    }
+
+    // Get domain policy for additional checks (use real domain)
     let policy = config.get_policy(domain);
 
     // 2. Read-only enforcement
@@ -75,21 +87,27 @@ pub async fn handle_request(
     }
 
     // 4. Build upstream request
-    let upstream_uri = if uri.scheme().is_some() {
+    let upstream_host = if is_alias { &real_domain } else { &host };
+    let upstream_uri = if uri.scheme().is_some() && !is_alias {
         uri.to_string()
     } else {
-        format!("http://{}{}", host, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"))
+        format!("http://{}{}", upstream_host, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"))
     };
 
     let mut upstream_req = Request::builder()
         .method(method.clone())
         .uri(&upstream_uri);
 
-    // Copy headers, skipping hop-by-hop
+    // Copy headers, skipping hop-by-hop and Host (we'll set it explicitly for aliases)
     for (name, value) in req.headers() {
-        if !is_hop_by_hop(name.as_str()) {
+        if !is_hop_by_hop(name.as_str()) && !(is_alias && name == hyper::header::HOST) {
             upstream_req = upstream_req.header(name, value);
         }
+    }
+
+    // Rewrite Host header for aliases
+    if is_alias {
+        upstream_req = upstream_req.header("Host", real_domain.as_str());
     }
 
     // 5. Credential injection

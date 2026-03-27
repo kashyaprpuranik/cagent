@@ -133,6 +133,9 @@ def push_to_cagent_proxy(domain_entries: list, domain_policies: list) -> bool:
             "read_only": entry.get("read_only", False),
             "allowed_paths": entry.get("allowed_paths", []),
         }
+        # Alias: creates {alias}.devbox.local shortcut
+        if entry.get("alias"):
+            pd["alias"] = entry["alias"]
         # Rate limit
         rl = entry.get("rate_limit", {})
         if rl.get("requests_per_minute"):

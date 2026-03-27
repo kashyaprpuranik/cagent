@@ -19,6 +19,9 @@ pub static CONFIG: LazyLock<ArcSwap<ProxyConfig>> = LazyLock::new(|| {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DomainPolicy {
     pub domain: String,
+    /// Optional alias: creates `{alias}.devbox.local` shortcut for this domain.
+    #[serde(default)]
+    pub alias: Option<String>,
     #[serde(default)]
     pub tls: bool,
     #[serde(default)]
@@ -49,6 +52,10 @@ pub struct ProxyConfig {
     /// Pre-computed: set of allowed domain names for fast lookup.
     #[serde(skip)]
     pub allowed_domains: HashSet<String>,
+
+    /// Pre-computed: `{alias}.devbox.local` → index into `domains`.
+    #[serde(skip)]
+    pub alias_index: HashMap<String, usize>,
 }
 
 impl Default for ProxyConfig {
@@ -57,6 +64,7 @@ impl Default for ProxyConfig {
             domains: Vec::new(),
             domain_index: HashMap::new(),
             allowed_domains: HashSet::new(),
+            alias_index: HashMap::new(),
         }
     }
 }
@@ -66,18 +74,28 @@ impl ProxyConfig {
     pub fn build_indexes(mut self) -> Self {
         self.domain_index.clear();
         self.allowed_domains.clear();
+        self.alias_index.clear();
         for (i, policy) in self.domains.iter().enumerate() {
             let domain = policy.domain.to_lowercase();
             self.domain_index.insert(domain.clone(), i);
             self.allowed_domains.insert(domain);
+            // Build alias index: "openai.devbox.local" → index
+            if let Some(alias) = &policy.alias {
+                let alias_domain = format!("{}.devbox.local", alias.to_lowercase());
+                self.alias_index.insert(alias_domain, i);
+            }
         }
         self
     }
 
-    /// Check if a domain is allowed.
+    /// Check if a domain is allowed (including devbox.local aliases).
     pub fn is_allowed(&self, domain: &str) -> bool {
         let lower = domain.to_lowercase();
         if self.allowed_domains.contains(&lower) {
+            return true;
+        }
+        // Check devbox.local alias
+        if self.alias_index.contains_key(&lower) {
             return true;
         }
         // Check wildcard: *.example.com matches sub.example.com
@@ -88,10 +106,21 @@ impl ProxyConfig {
         false
     }
 
-    /// Get the policy for a domain.
+    /// Resolve a devbox.local alias to (real_domain, policy).
+    /// Returns None if the domain is not an alias.
+    pub fn resolve_alias(&self, domain: &str) -> Option<&DomainPolicy> {
+        let lower = domain.to_lowercase();
+        self.alias_index.get(&lower).map(|&idx| &self.domains[idx])
+    }
+
+    /// Get the policy for a domain (including alias lookup).
     pub fn get_policy(&self, domain: &str) -> Option<&DomainPolicy> {
         let lower = domain.to_lowercase();
         if let Some(&idx) = self.domain_index.get(&lower) {
+            return Some(&self.domains[idx]);
+        }
+        // Alias lookup
+        if let Some(&idx) = self.alias_index.get(&lower) {
             return Some(&self.domains[idx]);
         }
         // Wildcard fallback

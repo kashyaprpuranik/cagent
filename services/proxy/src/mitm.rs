@@ -30,6 +30,17 @@ pub async fn handle_intercepted_request(
         return Ok(error_response(StatusCode::FORBIDDEN, "Domain not allowed"));
     }
 
+    // Resolve devbox.local alias → real domain
+    let (real_domain, is_alias) = if let Some(policy) = config.resolve_alias(domain) {
+        (policy.domain.clone(), true)
+    } else {
+        (domain.to_string(), false)
+    };
+
+    if is_alias {
+        tracing::debug!(alias = domain, domain = %real_domain, "MITM alias resolved");
+    }
+
     let policy = config.get_policy(domain);
 
     // Read-only enforcement
@@ -57,22 +68,22 @@ pub async fn handle_intercepted_request(
         }
     }
 
-    // Build upstream HTTPS request
-    let upstream_url = format!("https://{}:{}{}", domain, port, path);
+    // Build upstream HTTPS request (use real domain for aliases)
+    let upstream_url = format!("https://{}:{}{}", real_domain, port, path);
 
     let mut upstream_req = Request::builder()
         .method(method.clone())
         .uri(&upstream_url);
 
-    // Copy headers
+    // Copy headers, skipping Host (we set it explicitly)
     for (name, value) in req.headers() {
-        if !is_hop_by_hop(name.as_str()) {
+        if !is_hop_by_hop(name.as_str()) && name != hyper::header::HOST {
             upstream_req = upstream_req.header(name, value);
         }
     }
 
-    // Ensure Host header is set to the real domain
-    upstream_req = upstream_req.header("Host", domain);
+    // Set Host header to the real domain (rewrites alias → real domain)
+    upstream_req = upstream_req.header("Host", real_domain.as_str());
 
     // Credential injection
     if let Some(p) = policy {
