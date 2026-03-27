@@ -128,20 +128,26 @@ pub async fn handle_request(
         .body(Full::new(body_bytes.clone()))
         .unwrap();
 
-    // 6. Forward upstream
-    match forward_upstream(upstream_req).await {
-        Ok(resp) => {
-            tracing::info!(
-                domain = domain,
-                method = %method,
-                status = resp.status().as_u16(),
-                "proxied"
-            );
-            Ok(resp)
+    // 6. Forward upstream (with timeout)
+    match tokio::time::timeout(std::time::Duration::from_secs(30), forward_upstream(upstream_req)).await {
+        Err(_) => {
+            tracing::warn!(domain = %real_domain, "upstream timeout (30s)");
+            return Ok(error_response(StatusCode::GATEWAY_TIMEOUT, "Upstream request timed out"));
         }
-        Err(e) => {
-            tracing::error!(domain = domain, error = %e, "upstream error");
-            Ok(error_response(StatusCode::BAD_GATEWAY, "Upstream connection failed"))
+        Ok(result) => match result {
+            Ok(resp) => {
+                tracing::info!(
+                    domain = %real_domain,
+                    method = %method,
+                    status = resp.status().as_u16(),
+                    "proxied"
+                );
+                Ok(resp)
+            }
+            Err(e) => {
+                tracing::error!(domain = %real_domain, error = %e, "upstream error");
+                Ok(error_response(StatusCode::BAD_GATEWAY, "Upstream connection failed"))
+            }
         }
     }
 }

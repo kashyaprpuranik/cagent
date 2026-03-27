@@ -512,6 +512,7 @@ services:
       - RUST_LOG=${RUST_LOG:-cagent_proxy=info}
       - MITM_CA_CERT=/etc/cagent/mitm/mitmproxy-ca-cert.pem
       - MITM_CA_KEY=/etc/cagent/mitm/mitmproxy-ca.pem
+      - DEVBOX_LOCAL_IP=10.${NET_OCTET:-200}.1.20
 
     # On BOTH networks:
     # - cell-net: cell sends HTTP/HTTPS proxy + DNS queries here

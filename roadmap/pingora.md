@@ -154,14 +154,15 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 | Admin API (stats, health) | localhost:9901 | /health endpoint | ✅ Phase 1 |
 | Catch-all 403 (unlisted domains) | Default virtual host | Default deny | ✅ Phase 1 |
 | Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | TODO | Phase 1b |
-| Devbox.local aliases (rewrite Host) | Virtual host + auto_host_rewrite | TODO (DNS resolves, but no HTTP rewrite) | Phase 1b |
+| Devbox.local aliases (rewrite Host) | Virtual host + auto_host_rewrite | alias field + Host rewrite | ✅ Phase 1b |
+| Timeout enforcement | Per-route/cluster timeouts | TODO | Phase 1b |
 | Metadata IP block (169.254.169.254) | Virtual host 403 | TODO | Phase 1b |
 | X-Real-Domain header | Request header add | TODO | Phase 1b |
 | X-Credential-Injected header | ext_authz response | TODO | Phase 1b |
+| Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | TODO | Phase 1b |
+| Shared HTTP client (connection pooling) | Implicit via circuit breakers | TODO (Arc\<Client\>) | Phase 1b |
 | Circuit breakers (max connections) | Per-cluster config | TODO | Future |
-| Connection pooling / keep-alive | Implicit via circuit breakers | TODO (hyper pool) | Future |
 | Retry logic | Per-route retry_policy | TODO | Future |
-| Timeout enforcement | Per-route/cluster timeouts | TODO | Future |
 | Email proxy routing (email.devbox.local) | Virtual host → email-proxy | TODO | Future |
 
 ### mitmproxy Features
@@ -187,7 +188,7 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 | Domain allowlist (forward allowed) | Corefile per-domain blocks | In-memory HashSet | ✅ Phase 3 |
 | NXDOMAIN for blocked domains | Catch-all template | Return NXDOMAIN | ✅ Phase 3 |
 | Upstream forwarding (8.8.8.8) | forward plugin | UDP forward to 8.8.8.8/8.8.4.4 | ✅ Phase 3 |
-| Devbox.local → proxy IP | template plugin | Custom A record (127.0.0.1) | ✅ Phase 3 |
+| Devbox.local → proxy IP | template plugin | Custom A record (proxy cell-net IP) | ✅ Phase 3 |
 | IPv6 AAAA suppression | template NOERROR | Return empty AAAA | ✅ Phase 3 |
 | Hot-reload | reload plugin (5s) | arc-swap (instant via config push) | ✅ Phase 4 |
 | Query logging | log plugin | tracing | ✅ Phase 3 |

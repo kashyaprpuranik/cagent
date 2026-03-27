@@ -21,7 +21,13 @@ use crate::config::CONFIG;
 const UPSTREAM_DNS: &[&str] = &["8.8.8.8:53", "8.8.4.4:53"];
 
 /// IP address to return for devbox.local aliases (points to the proxy itself).
-const DEVBOX_LOCAL_IP: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
+/// Defaults to 127.0.0.1; overridden by DEVBOX_LOCAL_IP env var (e.g., 10.200.1.20).
+fn devbox_local_ip() -> Ipv4Addr {
+    std::env::var("DEVBOX_LOCAL_IP")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(Ipv4Addr::new(127, 0, 0, 1))
+}
 
 /// Run the DNS filter server.
 pub async fn run_dns_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -163,7 +169,7 @@ fn build_devbox_response(
     match qtype {
         RecordType::A => {
             let name = request.queries()[0].name().clone();
-            let record = Record::from_rdata(name, 60, RData::A(A(DEVBOX_LOCAL_IP)));
+            let record = Record::from_rdata(name, 60, RData::A(A(devbox_local_ip())));
             response.add_answer(record);
         }
         RecordType::AAAA => {

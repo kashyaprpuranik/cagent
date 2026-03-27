@@ -105,21 +105,27 @@ pub async fn handle_intercepted_request(
         .body(Full::new(body_bytes))
         .unwrap();
 
-    // Forward upstream over HTTPS
-    match forward_https(upstream_req).await {
-        Ok(resp) => {
-            tracing::info!(
-                domain = domain,
-                method = %method,
-                path = path,
-                status = resp.status().as_u16(),
-                "MITM proxied"
-            );
-            Ok(resp)
+    // Forward upstream over HTTPS (with timeout)
+    match tokio::time::timeout(std::time::Duration::from_secs(30), forward_https(upstream_req)).await {
+        Err(_) => {
+            tracing::warn!(domain = %real_domain, "MITM upstream timeout (30s)");
+            Ok(error_response(StatusCode::GATEWAY_TIMEOUT, "Upstream request timed out"))
         }
-        Err(e) => {
-            tracing::error!(domain = domain, error = %e, "MITM upstream error");
-            Ok(error_response(StatusCode::BAD_GATEWAY, "Upstream connection failed"))
+        Ok(result) => match result {
+            Ok(resp) => {
+                tracing::info!(
+                    domain = %real_domain,
+                    method = %method,
+                    path = path,
+                    status = resp.status().as_u16(),
+                    "MITM proxied"
+                );
+                Ok(resp)
+            }
+            Err(e) => {
+                tracing::error!(domain = %real_domain, error = %e, "MITM upstream error");
+                Ok(error_response(StatusCode::BAD_GATEWAY, "Upstream connection failed"))
+            }
         }
     }
 }

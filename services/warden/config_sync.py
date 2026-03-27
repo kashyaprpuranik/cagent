@@ -280,8 +280,7 @@ def regenerate_configs(
         if PROXY_MODE == "rust":
             # ── Rust proxy path: push config via HTTP instead of writing files ──
             all_domains = config_generator.get_domains()
-            push_to_cagent_proxy(all_domains, _synced_domain_policies)
-            proxy_changed = True  # always counts as changed after push
+            proxy_changed = push_to_cagent_proxy(all_domains, _synced_domain_policies)
         else:
             # ── Legacy path: generate Corefile + Envoy xDS files ──
             corefile_content = config_generator.generate_corefile()
