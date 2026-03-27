@@ -26,6 +26,7 @@ def pytest_configure(config):
 
 _NET_OCTET = os.environ.get("NET_OCTET", "200")
 _CP_PREFIX = os.environ.get("CP_PREFIX", "")
+_PROXY_MODE = os.environ.get("PROXY_MODE", "legacy")  # "legacy" or "rust"
 
 
 def _get_compose_project() -> str:
@@ -34,15 +35,32 @@ def _get_compose_project() -> str:
 
 LOCAL_ADMIN_PORT = os.environ.get("LOCAL_ADMIN_PORT", "8081")
 
-# Cell-net IPs (internal network)
-DNS_FILTER_IP = f"10.{_NET_OCTET}.1.5"
-HTTP_PROXY_IP = f"10.{_NET_OCTET}.1.10"
-MITM_PROXY_IP = f"10.{_NET_OCTET}.1.15"
+# Cell-net IPs depend on proxy mode
+if _PROXY_MODE == "rust":
+    # cagent-proxy: single binary handles HTTP, HTTPS, and DNS
+    CAGENT_PROXY_IP = f"10.{_NET_OCTET}.1.20"
+    DNS_FILTER_IP = CAGENT_PROXY_IP
+    HTTP_PROXY_IP = CAGENT_PROXY_IP
+    HTTP_PROXY_PORT = "18443"
+    MITM_PROXY_IP = CAGENT_PROXY_IP
+else:
+    # Legacy: Envoy + mitmproxy + CoreDNS
+    DNS_FILTER_IP = f"10.{_NET_OCTET}.1.5"
+    HTTP_PROXY_IP = f"10.{_NET_OCTET}.1.10"
+    HTTP_PROXY_PORT = "8443"
+    MITM_PROXY_IP = f"10.{_NET_OCTET}.1.15"
+    CAGENT_PROXY_IP = None
 
 # Infra-net IPs
 INFRA_DNS_IP = f"10.{_NET_OCTET}.2.5"
 INFRA_ENVOY_IP = f"10.{_NET_OCTET}.2.10"
 INFRA_GATEWAY_IP = f"10.{_NET_OCTET}.2.1"
+
+def is_legacy_mode():
+    return _PROXY_MODE != "rust"
+
+def is_rust_mode():
+    return _PROXY_MODE == "rust"
 
 CELL_LABEL = "cagent.role=cell"
 CELL_CONTAINER_FALLBACK = "cell"
@@ -76,15 +94,16 @@ def is_data_plane_running():
     detect containers that exist but are crash-looping (status would
     show "Restarting" or "Exited").
     """
+    proxy_name = f"{_CP_PREFIX}cagent-proxy" if is_rust_mode() else f"{_CP_PREFIX}http-proxy"
     try:
         result = subprocess.run(
-            ["docker", "ps", "-a", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Names}} {{.Status}}"],
+            ["docker", "ps", "-a", "--filter", f"name={proxy_name}", "--format", "{{.Names}} {{.Status}}"],
             capture_output=True,
             text=True,
             timeout=5,
         )
         for line in result.stdout.strip().splitlines():
-            if f"{_CP_PREFIX}http-proxy" in line and "Up" in line:
+            if proxy_name in line and "Up" in line:
                 return True
         return False
     except Exception:
@@ -97,46 +116,39 @@ def data_plane_running():
 
     Warden restarts Envoy/CoreDNS on startup (config generation), so
     even after ``test.sh``'s initial sleep services may still be
-    coming back up.  Poll until http-proxy is running (it may briefly
+    coming back up.  Poll until proxy is running (it may briefly
     restart while warden regenerates its config after a fresh start).
     """
+    proxy_name = f"{_CP_PREFIX}cagent-proxy" if is_rust_mode() else f"{_CP_PREFIX}http-proxy"
+
     # Retry for up to 30s — after a fresh start, warden regenerates
-    # the Envoy config and restarts http-proxy, causing a brief gap.
+    # the config and restarts the proxy, causing a brief gap.
     deadline = time.time() + 30
     while time.time() < deadline:
         if is_data_plane_running():
             break
         time.sleep(2)
     else:
-        # Provide diagnostic info on failure
         try:
             diag = subprocess.run(
-                [
-                    "docker",
-                    "ps",
-                    "-a",
-                    "--filter",
-                    f"name={_CP_PREFIX}http-proxy",
-                    "--format",
-                    "{{.Names}} {{.Status}}",
-                ],
+                ["docker", "ps", "-a", "--filter", f"name={proxy_name}", "--format", "{{.Names}} {{.Status}}"],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
-            status = diag.stdout.strip() or "(no http-proxy container found)"
+            status = diag.stdout.strip() or f"(no {proxy_name} container found)"
         except Exception:
             status = "(docker command failed)"
-        pytest.fail(f"Data plane not running after 30s — test.sh should have started it. http-proxy status: {status}")
+        pytest.fail(f"Data plane not running after 30s — test.sh should have started it. {proxy_name} status: {status}")
 
     cell = _discover_cell_container_name()
 
-    # Wait for Envoy proxy to accept connections
+    # Wait for HTTP proxy to accept connections
     deadline = time.time() + 60
     while time.time() < deadline:
         try:
             probe = subprocess.run(
-                ["docker", "exec", cell, "sh", "-c", f"nc -z -w 2 {HTTP_PROXY_IP} 8443 && echo OK"],
+                ["docker", "exec", cell, "sh", "-c", f"nc -z -w 2 {HTTP_PROXY_IP} {HTTP_PROXY_PORT} && echo OK"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -147,9 +159,9 @@ def data_plane_running():
             pass
         time.sleep(3)
     else:
-        pytest.fail("Envoy proxy not reachable from cell container after 60s — warden may still be restarting it")
+        pytest.fail(f"Proxy ({HTTP_PROXY_IP}:{HTTP_PROXY_PORT}) not reachable from cell after 60s")
 
-    # Wait for CoreDNS to accept connections
+    # Wait for DNS to accept connections
     deadline = time.time() + 30
     while time.time() < deadline:
         try:
@@ -165,7 +177,7 @@ def data_plane_running():
             pass
         time.sleep(2)
     else:
-        pytest.fail("CoreDNS not reachable from cell container after 30s")
+        pytest.fail(f"DNS ({DNS_FILTER_IP}:53) not reachable from cell after 30s")
 
     # Wait for admin API to be ready
     admin = get_admin_url()
@@ -300,7 +312,7 @@ class TestProxyEgress:
     def test_https_through_proxy_allowed_domain(self, data_plane_running):
         """Should successfully reach allowed domains through proxy."""
         result = exec_in_cell(
-            f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:8443 https://api.github.com"
+            f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} https://api.github.com"
         )
         # Should get some HTTP response (even 401 unauthorized is fine)
         http_code = result.stdout.strip()
@@ -310,7 +322,7 @@ class TestProxyEgress:
         """Should fail to reach blocked domains through proxy."""
         result = exec_in_cell(
             "curl -s -o /dev/null -w '%{http_code}' "
-            f"-x http://{HTTP_PROXY_IP}:8443 "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
             "--connect-timeout 5 "
             "https://evil-malware.com"
         )
@@ -353,7 +365,7 @@ class TestCredentialInjection:
         # For now, just verify the devbox.local routing works
         result = exec_in_cell(
             "curl -s -o /dev/null -w '%{http_code}' "
-            f"-x http://{HTTP_PROXY_IP}:8443 "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
             "--connect-timeout 5 "
             "http://openai.devbox.local/v1/models 2>&1"
         )
@@ -377,6 +389,7 @@ class TestLogging:
         )
         assert "Up" in result.stdout, "Log shipper is not running"
 
+    @pytest.mark.skipif(is_rust_mode(), reason="Envoy not present in rust proxy mode")
     def test_envoy_logs_exist(self, data_plane_running):
         """Envoy should be generating access logs (to stdout)."""
         result = subprocess.run(
@@ -400,7 +413,7 @@ class TestLogging:
         marker = f"logtest-{int(time.time())}"
 
         # Generate traffic through the proxy with a unique path
-        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 http://pypi.org/{marker} || true")
+        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} http://pypi.org/{marker} || true")
 
         # Poll the file backup volume for the marker (up to 30s)
         deadline = time.time() + 30
@@ -449,15 +462,19 @@ class TestCellSecurityHardening:
         assert "NO_HOST" in result.stdout or "No such file" in result.stdout
 
     def test_proxy_env_vars_set(self, data_plane_running):
-        """Cell must have HTTP_PROXY pointing to Envoy and HTTPS_PROXY pointing to Envoy or mitmproxy."""
+        """Cell must have HTTP_PROXY and HTTPS_PROXY pointing to the proxy."""
         result = exec_in_cell("echo $HTTP_PROXY")
-        assert f"{HTTP_PROXY_IP}:8443" in result.stdout, f"HTTP_PROXY not set correctly: {result.stdout}"
+        assert f"{HTTP_PROXY_IP}:{HTTP_PROXY_PORT}" in result.stdout, f"HTTP_PROXY not set correctly: {result.stdout}"
 
         result = exec_in_cell("echo $HTTPS_PROXY")
         https_proxy = result.stdout.strip()
-        # HTTPS_PROXY points to either Envoy (no MITM) or mitmproxy (with MITM)
-        valid = f"{HTTP_PROXY_IP}:8443" in https_proxy or f"{MITM_PROXY_IP}:8080" in https_proxy
-        assert valid, f"HTTPS_PROXY not set correctly: {https_proxy}"
+        if is_rust_mode():
+            # Both HTTP and HTTPS go through cagent-proxy on the same port
+            assert f"{HTTP_PROXY_IP}:{HTTP_PROXY_PORT}" in https_proxy, f"HTTPS_PROXY not set correctly: {https_proxy}"
+        else:
+            # HTTPS_PROXY points to either Envoy (no MITM) or mitmproxy (with MITM)
+            valid = f"{HTTP_PROXY_IP}:{HTTP_PROXY_PORT}" in https_proxy or f"{MITM_PROXY_IP}:8080" in https_proxy
+            assert valid, f"HTTPS_PROXY not set correctly: {https_proxy}"
 
     def test_cannot_reach_infra_net(self, data_plane_running):
         """Cell should not be able to reach any infra-net addresses."""
@@ -469,6 +486,7 @@ class TestCellSecurityHardening:
         result = exec_in_cell(f"nc -z -w 2 {INFRA_ENVOY_IP} 8443 && echo FAIL || echo BLOCKED")
         assert "BLOCKED" in result.stdout, f"Cell can reach envoy on infra-net ({INFRA_ENVOY_IP})"
 
+    @pytest.mark.skipif(is_rust_mode(), reason="Envoy not present in rust proxy mode")
     def test_envoy_admin_not_reachable(self, data_plane_running):
         """Envoy admin API (port 9901) must not be reachable from cell-net.
 
@@ -787,10 +805,11 @@ class TestLocalAdminConfigPipeline:
             assert warden_ready, "Warden API did not become ready within 30s after restart"
             r = requests.post(f"{admin_url}/api/config/reload", timeout=60)
             assert r.status_code == 200
-            assert wait_for_container(f"{_CP_PREFIX}dns-filter", timeout=15), (
-                "dns-filter did not come back after reload"
-            )
-            # Wait for CoreDNS to be ready
+            if is_legacy_mode():
+                assert wait_for_container(f"{_CP_PREFIX}dns-filter", timeout=15), (
+                    "dns-filter did not come back after reload"
+                )
+            # Wait for DNS to be ready
             time.sleep(2)
 
             # -- Step 6: Verify domain now resolves from cell (poll for propagation) --
@@ -988,7 +1007,7 @@ class TestAnalytics:
         deadline = time.time() + 15
         while time.time() < deadline:
             r = exec_in_cell(
-                f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:8443 --connect-timeout 2 http://{self.BLOCKED_DOMAIN}/test"
+                f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} --connect-timeout 2 http://{self.BLOCKED_DOMAIN}/test"
             )
             if r.returncode == 0 and "403" in r.stdout:
                 break
@@ -997,7 +1016,7 @@ class TestAnalytics:
         # Fire additional requests to ensure enough data for analytics
         for _ in range(2):
             exec_in_cell(
-                f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 --connect-timeout 5 http://{self.BLOCKED_DOMAIN}/test"
+                f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} --connect-timeout 5 http://{self.BLOCKED_DOMAIN}/test"
             )
         # Give Envoy a moment to flush logs
         time.sleep(2)
@@ -1029,7 +1048,7 @@ class TestAnalytics:
     def test_bandwidth_endpoint(self, admin_url, data_plane_running):
         """Widget query for bandwidth_by_domain returns bandwidth data."""
         # Generate some traffic to an allowed domain (may already exist from fixture)
-        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 http://ifconfig.me/")
+        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} http://ifconfig.me/")
         time.sleep(2)
 
         r = requests.post(
@@ -1135,7 +1154,8 @@ class TestDeepHealth:
         checks = health["checks"]
         # Should include log_store and at least one proxy/DNS check
         assert "log_store" in checks
-        assert "envoy_ready" in checks
+        if is_legacy_mode():
+            assert "envoy_ready" in checks
         assert "dns_resolution" in checks
 
 
@@ -1180,7 +1200,7 @@ class TestLogIngestionPipeline:
 
         # Generate traffic through the proxy — the marker appears in the request path
         exec_in_cell(
-            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 --connect-timeout 5 http://pypi.org/{marker} || true"
+            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} --connect-timeout 5 http://pypi.org/{marker} || true"
         )
 
         # Poll warden search until the marker appears (Vector flush + VL index)
@@ -1208,14 +1228,14 @@ class TestLogIngestionPipeline:
         """Search filtered by source should return matching logs."""
         # Generate some traffic first
         exec_in_cell(
-            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 "
+            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
             "--connect-timeout 5 http://pypi.org/search-filter-test || true"
         )
         time.sleep(5)
 
         r = requests.get(
             f"{admin_url}/api/logs/search",
-            params={"source": "envoy", "limit": 5},
+            params={"source": "envoy" if is_legacy_mode() else "docker", "limit": 5},
             timeout=10,
         )
         assert r.status_code == 200
@@ -1467,8 +1487,9 @@ class TestWardenAuthE2E:
 
 
 @pytest.mark.e2e
+@pytest.mark.skipif(is_rust_mode(), reason="mitmproxy not present in rust proxy mode")
 class TestMITMProxyHTTPS:
-    """Test HTTPS egress through MITM proxy."""
+    """Test HTTPS egress through MITM proxy (legacy mode only)."""
 
     @pytest.fixture(autouse=True)
     def _wait_for_mitm(self, data_plane_running):

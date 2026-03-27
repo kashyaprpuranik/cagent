@@ -3,7 +3,8 @@
 #
 # Usage:
 #   ./scripts/test.sh              # DP unit/config + frontend type-check
-#   ./scripts/test.sh --e2e        # All tests including DP e2e
+#   ./scripts/test.sh --e2e        # All tests including DP e2e (legacy proxy)
+#   ./scripts/test.sh --e2e --proxy-rust  # E2E with Rust proxy (cagent-proxy)
 #   ./scripts/test.sh --e2e --no-teardown  # Keep containers running after e2e
 
 set -e
@@ -12,11 +13,13 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 RUN_E2E=false
 NO_TEARDOWN=false
+PROXY_MODE=legacy
 
 for arg in "$@"; do
     case "$arg" in
         --e2e) RUN_E2E=true ;;
         --no-teardown) NO_TEARDOWN=true ;;
+        --proxy-rust) PROXY_MODE=rust ;;
     esac
 done
 
@@ -99,7 +102,7 @@ if [ "$RUN_E2E" = true ]; then
         CELL_SERVICE=$(docker inspect "$CELL_CID" --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null || true)
         if [ "$CELL_SERVICE" = "cell" ]; then
             echo "Cell is running with standard profile (gVisor), tearing down to restart with dev profile..."
-            docker compose --profile standard --profile admin --profile email --profile auditing down 2>/dev/null || true
+            docker compose --profile standard --profile admin --profile email --profile auditing --profile proxy-rust down 2>/dev/null || true
             NEED_RESTART=true
         fi
     else
@@ -121,14 +124,25 @@ if [ "$RUN_E2E" = true ]; then
         ADMIN_MODE=$(curl -sf http://localhost:${LOCAL_ADMIN_PORT}/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
         if [ "$ADMIN_MODE" = "connected" ]; then
             echo "Data plane is running in connected mode, restarting in standalone mode..."
-            docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
+            docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust down 2>/dev/null || true
             NEED_RESTART=true
         fi
     fi
 
     # Generate certs (MITM CA + mTLS)
     bash "$REPO_ROOT/scripts/setup.sh"
-    export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
+    export PROXY_MODE="$PROXY_MODE"
+
+    if [ "$PROXY_MODE" = "rust" ]; then
+        export HTTP_PROXY="http://10.${NET_OCTET}.1.20:18443"
+        export HTTPS_PROXY="http://10.${NET_OCTET}.1.20:18443"
+        export CELL_DNS_PRIMARY="10.${NET_OCTET}.1.20"
+        export CELL_DNS_SECONDARY="10.${NET_OCTET}.1.20"
+        export CAGENT_PROXY_URL="http://10.${NET_OCTET}.2.20:18080"
+        export DEVBOX_LOCAL_IP="10.${NET_OCTET}.1.20"
+    else
+        export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
+    fi
     export WARDEN_TLS_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-key.pem")"
     export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/ca-cert.pem")"
@@ -146,8 +160,8 @@ if [ "$RUN_E2E" = true ]; then
         # Use -v to remove volumes (proxy-config may have stale envoy config from
         # a prior connected-mode run, e.g. CP+DP e2e) and --remove-orphans to catch
         # containers started with a different compose file (e.g. e2e override).
-        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
-        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing --profile proxy-rust down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing --profile proxy-rust down -v --remove-orphans 2>/dev/null || true
 
         # Clean up stale networks (may have wrong labels or orphan endpoints)
         for net in "$INFRA_NET_NAME" "$CELL_NET_NAME"; do
@@ -164,14 +178,22 @@ if [ "$RUN_E2E" = true ]; then
         # Also clean up e2e-bridge network left by CP+DP e2e
         docker network rm e2e-bridge 2>/dev/null || true
 
-        echo "Starting data plane (standalone, --profile dev --profile admin --profile auditing, 2 cells)..."
-        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --remove-orphans --scale cell-dev=2
+        E2E_PROFILES="--profile dev --profile admin --profile auditing"
+        if [ "$PROXY_MODE" = "rust" ]; then
+            E2E_PROFILES="$E2E_PROFILES --profile proxy-rust"
+        fi
+        echo "Starting data plane (standalone, $E2E_PROFILES, proxy=$PROXY_MODE, 2 cells)..."
+        DATAPLANE_MODE=standalone docker compose $E2E_PROFILES up -d --build --remove-orphans --scale cell-dev=2
         CONTAINERS_STARTED=true
         echo "Waiting for containers to stabilize..."
         sleep 10
     else
+        E2E_PROFILES="--profile dev --profile admin --profile auditing"
+        if [ "$PROXY_MODE" = "rust" ]; then
+            E2E_PROFILES="$E2E_PROFILES --profile proxy-rust"
+        fi
         echo "Data plane already running, rebuilding images in case code changed..."
-        DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --scale cell-dev=2
+        DATAPLANE_MODE=standalone docker compose $E2E_PROFILES up -d --build --scale cell-dev=2
         echo "Waiting for containers to stabilize..."
         sleep 5
     fi
@@ -185,7 +207,7 @@ if [ "$RUN_E2E" = true ]; then
     if [ "$CONTAINERS_STARTED" = true ] && [ "$NO_TEARDOWN" = false ]; then
         echo ""
         echo "Stopping containers started by this script..."
-        docker compose --profile dev --profile admin --profile email --profile auditing down 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust down 2>/dev/null || true
     elif [ "$NO_TEARDOWN" = true ]; then
         echo ""
         echo "Keeping containers running (--no-teardown)"
