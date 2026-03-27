@@ -819,8 +819,12 @@ class ConfigGenerator:
         config mode), lists the specific credential headers.
         """
         if credential_headers is None:
-            # Permissive: let warden control which headers to inject
-            upstream_patterns = [{"safe_regex": {"google_re2": {}, "regex": ".*"}}]
+            # Connected mode: allow credential + tracking headers only.
+            # Must NOT match content-length/content-type or the ext_authz
+            # response will overwrite the original request headers, breaking POST bodies.
+            upstream_patterns = [
+                {"safe_regex": {"google_re2": {}, "regex": "^(authorization|x-api-key|x-credential-injected|cookie)$"}},
+            ]
         else:
             upstream_patterns = [
                 {"exact": "x-credential-injected"},  # tracking header
