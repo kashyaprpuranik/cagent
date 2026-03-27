@@ -6,6 +6,7 @@
 mod certs;
 mod config;
 mod config_api;
+mod dns;
 mod mitm;
 mod proxy;
 
@@ -22,6 +23,8 @@ use tokio::net::TcpListener;
 const PROXY_ADDR: &str = "0.0.0.0:18443";
 /// Config API listen address (warden pushes config here).
 const CONFIG_ADDR: &str = "0.0.0.0:18080";
+/// DNS listen address.
+const DNS_ADDR: &str = "0.0.0.0:53";
 /// Path to MITM CA cert PEM (mounted from host).
 const CA_CERT_PATH: &str = "/etc/cagent/mitm/mitmproxy-ca-cert.pem";
 /// Path to MITM CA key PEM (mounted from host).
@@ -45,17 +48,23 @@ async fn main() {
     tracing::info!("cagent-proxy starting");
     tracing::info!("  proxy: {}", PROXY_ADDR);
     tracing::info!("  config: {}", CONFIG_ADDR);
+    tracing::info!("  dns: {}", DNS_ADDR);
 
     // Load MITM CA (optional — HTTPS interception only works if CA is present)
     let mitm_ca = load_mitm_ca();
 
-    // Start both listeners concurrently
+    let dns_addr: SocketAddr = DNS_ADDR.parse().expect("invalid DNS_ADDR");
+
+    // Start all listeners concurrently
     tokio::select! {
         res = run_proxy_listener(mitm_ca) => {
             tracing::error!("proxy listener exited: {:?}", res);
         }
         res = run_config_listener() => {
             tracing::error!("config listener exited: {:?}", res);
+        }
+        res = dns::run_dns_server(dns_addr) => {
+            tracing::error!("DNS server exited: {:?}", res);
         }
     }
 }

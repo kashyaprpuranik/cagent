@@ -115,16 +115,16 @@ services:
           cpus: '0.25'
           memory: 256M
 
-    # DNS forced through dns-filter (dns-filter-2 failover via --profile dns-ha)
+    # DNS: cell resolves via dns-filter (or cagent-proxy when PROXY_MODE=rust)
     dns:
-      - 10.${NET_OCTET:-200}.1.5
-      - 10.${NET_OCTET:-200}.1.6
+      - ${CELL_DNS_PRIMARY:-10.${NET_OCTET:-200}.1.5}
+      - ${CELL_DNS_SECONDARY:-10.${NET_OCTET:-200}.1.6}
 
     # Environment
     environment:
-      - HTTP_PROXY=http://10.${NET_OCTET:-200}.1.10:8443
+      - HTTP_PROXY=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
       - HTTPS_PROXY=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
-      - http_proxy=http://10.${NET_OCTET:-200}.1.10:8443
+      - http_proxy=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
       - https_proxy=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
@@ -233,16 +233,16 @@ services:
           cpus: '0.25'
           memory: 256M
 
-    # DNS forced through dns-filter (dns-filter-2 failover via --profile dns-ha)
+    # DNS: cell resolves via dns-filter (or cagent-proxy when PROXY_MODE=rust)
     dns:
-      - 10.${NET_OCTET:-200}.1.5
-      - 10.${NET_OCTET:-200}.1.6
+      - ${CELL_DNS_PRIMARY:-10.${NET_OCTET:-200}.1.5}
+      - ${CELL_DNS_SECONDARY:-10.${NET_OCTET:-200}.1.6}
 
     # Environment
     environment:
-      - HTTP_PROXY=http://10.${NET_OCTET:-200}.1.10:8443
+      - HTTP_PROXY=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
       - HTTPS_PROXY=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
-      - http_proxy=http://10.${NET_OCTET:-200}.1.10:8443
+      - http_proxy=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
       - https_proxy=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
@@ -489,6 +489,57 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
+  # Cagent Proxy (Rust) - Unified HTTP proxy + MITM + DNS in one binary
+  # Replaces http-proxy + mitm-proxy + dns-filter when PROXY_MODE=rust
+  # Enable with: --profile proxy-rust
+  # ===========================================================================
+  cagent-proxy:
+    build:
+      context: ./services/proxy
+    image: ghcr.io/kashyaprpuranik/cagent-proxy:latest
+    container_name: ${CP_PREFIX:-}cagent-proxy
+    labels:
+      - "cagent.log-collect=true"
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - proxy-rust
+
+    volumes:
+      - ./configs/mitm:/etc/cagent/mitm:ro
+
+    environment:
+      - RUST_LOG=${RUST_LOG:-cagent_proxy=info}
+      - MITM_CA_CERT=/etc/cagent/mitm/mitmproxy-ca-cert.pem
+      - MITM_CA_KEY=/etc/cagent/mitm/mitmproxy-ca.pem
+
+    # On BOTH networks:
+    # - cell-net: cell sends HTTP/HTTPS proxy + DNS queries here
+    # - infra-net: forwards allowed requests to upstream + receives config from warden
+    networks:
+      cell-net:
+        ipv4_address: 10.${NET_OCTET:-200}.1.20
+      infra-net:
+        ipv4_address: 10.${NET_OCTET:-200}.2.20
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 32M
+        reservations:
+          cpus: '0.05'
+          memory: 8M
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:18080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+    restart: unless-stopped
+
+  # ===========================================================================
   # Log Shipper - Log Collection & Forwarding
   # Collects Docker logs, gVisor audit logs, cell app logs
   # Optional: Only runs with --profile auditing
@@ -592,6 +643,9 @@ services:
       - NET_OCTET=${NET_OCTET:-200}
       - DATA_PLANE_DIR=/app/cagent
       - RUNTIME_CONFIG_PATH=${RUNTIME_CONFIG_PATH:-}
+      # Proxy mode: "legacy" (Envoy+mitmproxy+CoreDNS) or "rust" (cagent-proxy)
+      - PROXY_MODE=${PROXY_MODE:-legacy}
+      - CAGENT_PROXY_URL=${CAGENT_PROXY_URL:-}
 
     volumes:
       # Docker socket for container management

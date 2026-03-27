@@ -29,6 +29,7 @@ DP_AGENT_PROFILE="dev"
 ACTION="up"
 MINIMAL=false
 MTLS=true
+PROXY_RUST=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -55,6 +56,10 @@ while [[ $# -gt 0 ]]; do
             MTLS=false
             shift
             ;;
+        --proxy-rust)
+            PROXY_RUST=true
+            shift
+            ;;
         down)
             ACTION="down"
             shift
@@ -67,6 +72,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --gvisor        Use gVisor runtime (default: runc)"
             echo "  --beta          Enable beta features (email proxy)"
             echo "  --no-mtls       Disable warden mTLS listener (enabled by default)"
+            echo "  --proxy-rust    Use cagent-proxy (Rust) instead of Envoy+mitmproxy+CoreDNS"
             echo ""
             echo "Actions:"
             echo "  down            Stop all services"
@@ -103,7 +109,7 @@ cd "$ROOT_DIR"
 # --- Handle 'down' action ---
 if [ "$ACTION" = "down" ]; then
     echo "Stopping Data Plane..."
-    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email down --remove-orphans 2>/dev/null || true
+    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email --profile proxy-rust down --remove-orphans 2>/dev/null || true
     echo ""
     echo "=== All services stopped ==="
     exit 0
@@ -112,7 +118,18 @@ fi
 # --- Cert generation (MITM CA + mTLS) ---
 bash "$ROOT_DIR/scripts/setup.sh"
 
-if [ "$MINIMAL" = false ]; then
+if [ "$PROXY_RUST" = true ]; then
+    # Use cagent-proxy: single Rust binary replaces Envoy + mitmproxy + CoreDNS
+    export PROXY_MODE="rust"
+    export CAGENT_PROXY_URL="http://10.${NET_OCTET:-200}.2.20:18080"
+    # Cell uses cagent-proxy for HTTP, HTTPS, and DNS
+    export HTTP_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
+    export HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
+    export CELL_DNS_PRIMARY="10.${NET_OCTET:-200}.1.20"
+    export CELL_DNS_SECONDARY="10.${NET_OCTET:-200}.1.20"
+    DP_PROFILES="$DP_PROFILES --profile proxy-rust"
+    echo "Rust proxy enabled (cagent-proxy replaces Envoy+mitmproxy+CoreDNS)"
+elif [ "$MINIMAL" = false ]; then
     export HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.15:8080"
     echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
 fi
