@@ -143,67 +143,67 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 
 | Feature | Current (Envoy) | cagent-proxy | Status |
 |---------|----------------|--------------|--------|
-| HTTP forward proxy (port 8443) | Envoy listener | hyper listener | Phase 1 ✅ |
-| Domain allowlist (virtual hosts) | Generated YAML | In-memory HashSet | Phase 1 ✅ |
-| Path filtering (allowed_paths) | Per-route config | In-memory check | Phase 1 ✅ |
-| Read-only enforcement (block POST/PUT/DELETE) | Header matching routes | Method check | Phase 1 ✅ |
-| Credential injection | ext_authz → warden round-trip | In-process (arc-swap) | Phase 1 ✅ |
-| Config hot-reload | Restart Envoy / xDS file watch | arc-swap atomic swap | Phase 1 ✅ |
+| HTTP forward proxy (port 8443) | Envoy listener | hyper listener (18443) | ✅ Phase 1 |
+| Domain allowlist (virtual hosts) | Generated YAML | In-memory HashSet | ✅ Phase 1 |
+| Path filtering (allowed_paths) | Per-route config | In-memory check | ✅ Phase 1 |
+| Read-only enforcement (block POST/PUT/DELETE) | Header matching routes | Method check | ✅ Phase 1 |
+| Credential injection | ext_authz → warden round-trip | In-process (arc-swap) | ✅ Phase 1 |
+| Config hot-reload | Restart Envoy / xDS file watch | arc-swap atomic swap | ✅ Phase 1 |
+| TLS upstream (re-encrypt to origin) | Cluster transport_socket | hyper-rustls | ✅ Phase 2 |
+| Access logging (JSON to stdout) | Access log config | tracing (structured) | ✅ Phase 1 |
+| Admin API (stats, health) | localhost:9901 | /health endpoint | ✅ Phase 1 |
+| Catch-all 403 (unlisted domains) | Default virtual host | Default deny | ✅ Phase 1 |
 | Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | TODO | Phase 1b |
-| Access logging (JSON to stdout) | Access log config | TODO | Phase 1b |
-| TLS upstream (re-encrypt to origin) | Cluster transport_socket | TODO | Phase 1b |
-| Devbox.local aliases (rewrite Host) | Virtual host + auto_host_rewrite | TODO | Phase 1b |
-| Circuit breakers (max connections) | Per-cluster config | TODO | Phase 3+ |
-| Connection pooling / keep-alive | Implicit via circuit breakers | TODO (hyper pool) | Phase 3+ |
-| Retry logic | Per-route retry_policy | TODO | Phase 3+ |
-| Timeout enforcement | Per-route/cluster timeouts | TODO | Phase 3+ |
-| Admin API (stats, health) | localhost:9901 | /health endpoint | Phase 1 ✅ |
-| Catch-all 403 (unlisted domains) | Default virtual host | Default deny | Phase 1 ✅ |
+| Devbox.local aliases (rewrite Host) | Virtual host + auto_host_rewrite | TODO (DNS resolves, but no HTTP rewrite) | Phase 1b |
 | Metadata IP block (169.254.169.254) | Virtual host 403 | TODO | Phase 1b |
-| Email proxy routing (email.devbox.local) | Virtual host → email-proxy | TODO | Phase 3+ |
 | X-Real-Domain header | Request header add | TODO | Phase 1b |
 | X-Credential-Injected header | ext_authz response | TODO | Phase 1b |
+| Circuit breakers (max connections) | Per-cluster config | TODO | Future |
+| Connection pooling / keep-alive | Implicit via circuit breakers | TODO (hyper pool) | Future |
+| Retry logic | Per-route retry_policy | TODO | Future |
+| Timeout enforcement | Per-route/cluster timeouts | TODO | Future |
+| Email proxy routing (email.devbox.local) | Virtual host → email-proxy | TODO | Future |
 
 ### mitmproxy Features
 
 | Feature | Current (mitmproxy) | cagent-proxy | Status |
 |---------|--------------------|--------------| --------|
-| TLS interception (MITM) | --mode regular | tokio-rustls + rcgen | Phase 2 |
-| Per-domain cert generation | Built-in CA | rcgen + moka cache | Phase 2 |
-| HTTPS → HTTP redirect to Envoy | mitm_addon.py | Not needed (single process) | N/A ✅ |
-| DLP pattern scanning | dlp_addon.py (regex) | aho-corasick + regex | Phase 2 |
-| DLP modes (log/block/redact) | dlp_config.json | In-memory config | Phase 2 |
-| DLP base64 decoding | Built-in | TODO | Phase 2 |
-| DLP skip_domains | Config list | In-memory config | Phase 2 |
-| DLP threshold patterns (email/phone bulk) | Count-based | TODO | Phase 2 |
-| Stream large bodies (1MB limit) | --set stream_large_bodies=1m | Buffered scan | Phase 2 |
-| Upstream cert skip | --set upstream_cert=false | Custom TLS verifier | Phase 2 |
-| Lazy connection strategy | --set connection_strategy=lazy | Default (connect on demand) | N/A ✅ |
+| TLS interception (MITM) | --mode regular | tokio-rustls + rcgen | ✅ Phase 2 |
+| Per-domain cert generation | Built-in CA | rcgen + moka cache | ✅ Phase 2 |
+| HTTPS → HTTP redirect to Envoy | mitm_addon.py | Not needed (single process) | ✅ N/A |
+| Lazy connection strategy | --set connection_strategy=lazy | Default (connect on demand) | ✅ N/A |
+| DLP pattern scanning | dlp_addon.py (regex) | TODO (aho-corasick + regex) | Phase 2b |
+| DLP modes (log/block/redact) | dlp_config.json | TODO | Phase 2b |
+| DLP base64 decoding | Built-in | TODO | Phase 2b |
+| DLP skip_domains | Config list | TODO | Phase 2b |
+| DLP threshold patterns (email/phone bulk) | Count-based | TODO | Phase 2b |
+| Stream large bodies (1MB limit) | --set stream_large_bodies=1m | TODO | Phase 2b |
+| Upstream cert skip | --set upstream_cert=false | Uses webpki-roots (standard verify) | ✅ Phase 2 |
 
 ### CoreDNS Features
 
 | Feature | Current (CoreDNS) | cagent-proxy | Status |
 |---------|-------------------|--------------| --------|
-| Domain allowlist (forward allowed) | Corefile per-domain blocks | Hickory RequestHandler | Phase 3 |
-| NXDOMAIN for blocked domains | Catch-all template | Return NXDOMAIN | Phase 3 |
-| Upstream forwarding (8.8.8.8) | forward plugin | Hickory ForwardAuthority | Phase 3 |
-| DNS caching (configurable TTL) | cache plugin | In-memory cache | Phase 3 |
-| Devbox.local → Envoy IP | template plugin | Custom A record response | Phase 3 |
-| IPv6 AAAA suppression | template NOERROR | Return empty AAAA | Phase 3 |
-| Hot-reload (5s watch) | reload plugin | arc-swap (instant) | Phase 3 |
-| Health check (:8080) | health plugin | /health endpoint | Phase 3 |
-| Query logging | log plugin | tracing | Phase 3 |
-| HA failover (dns-filter-2) | --profile dns-ha | Not needed (embedded) | N/A ✅ |
-| Email proxy DNS (Docker internal) | forward to 127.0.0.11 | Forward to Docker DNS | Phase 3 |
+| Domain allowlist (forward allowed) | Corefile per-domain blocks | In-memory HashSet | ✅ Phase 3 |
+| NXDOMAIN for blocked domains | Catch-all template | Return NXDOMAIN | ✅ Phase 3 |
+| Upstream forwarding (8.8.8.8) | forward plugin | UDP forward to 8.8.8.8/8.8.4.4 | ✅ Phase 3 |
+| Devbox.local → proxy IP | template plugin | Custom A record (127.0.0.1) | ✅ Phase 3 |
+| IPv6 AAAA suppression | template NOERROR | Return empty AAAA | ✅ Phase 3 |
+| Hot-reload | reload plugin (5s) | arc-swap (instant via config push) | ✅ Phase 4 |
+| Query logging | log plugin | tracing | ✅ Phase 3 |
+| HA failover (dns-filter-2) | --profile dns-ha | Not needed (embedded) | ✅ N/A |
+| Health check (:8080) | health plugin | /health on config API | ✅ Phase 1 |
+| DNS caching (configurable TTL) | cache plugin | TODO | Future |
+| Email proxy DNS (Docker internal) | forward to 127.0.0.11 | TODO | Future |
 
 ### Warden Integration Changes
 
-| Feature | Current | After Migration |
-|---------|---------|-----------------|
-| Config delivery | Generate Corefile + Envoy YAML, restart services | POST /config JSON, arc-swap |
-| Credential delivery | ext_authz HTTP call per request | Embedded in config, in-process |
-| DLP config | Write dlp_config.json, mitmproxy re-reads | Include in /config JSON |
-| Service restarts | docker restart coredns, envoy | None needed (atomic config swap) |
+| Feature | Current | After Migration | Status |
+|---------|---------|-----------------|--------|
+| Config delivery | Generate Corefile + Envoy YAML, restart services | POST /config JSON, arc-swap | ✅ Phase 4 |
+| Credential delivery | ext_authz HTTP call per request | Embedded in config, in-process | ✅ Phase 4 |
+| Service restarts | docker restart coredns, envoy | None needed (atomic config swap) | ✅ Phase 4 |
+| DLP config | Write dlp_config.json, mitmproxy re-reads | TODO: include in /config JSON | Phase 2b |
 
 ## Backwards Compatibility
 
