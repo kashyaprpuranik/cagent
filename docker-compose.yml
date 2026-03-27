@@ -48,7 +48,7 @@
 #
 # Resource Budget (target: 2 vCPU / 4GB, e.g. Hetzner cax11):
 #   Infra containers are sized to the minimum that passes a full health
-#   check (DNS resolution, HTTP/HTTPS proxy chain, warden API, OpenObserve
+#   check (DNS resolution, HTTP/HTTPS proxy chain, warden API, VictoriaLogs
 #   ingestion, 30s stability with no OOM kills or restarts). Limits were
 #   determined by binary-searching across 19 automated trials using
 #   scripts/resource_test.sh. The cell gets everything left over.
@@ -58,7 +58,7 @@
 #   cell             1.50   3G       Agent sandbox (gVisor/runc)
 #   warden           0.25   256M     Config sync, admin API, mTLS proxy
 #   http-proxy       0.10   80M      Envoy egress gateway (--concurrency 1, stats off)
-#   log-store        0.10   160M     OpenObserve (per-DP logs, 2 workers)
+#   log-store        0.10   128M     VictoriaLogs (per-DP logs)
 #   mitm-proxy       0.10   80M      TLS termination (mitmproxy, no flow retention)
 #   log-shipper      0.10   48M      Vector log collection
 #   dns-filter       0.05   32M      CoreDNS domain allowlist
@@ -529,10 +529,8 @@ services:
       - CONTROL_PLANE_URL=${CONTROL_PLANE_URL:-}
       - CONTROL_PLANE_TOKEN=${CONTROL_PLANE_TOKEN:-}
       - ENVIRONMENT=${ENVIRONMENT:-development}
-      # Local OpenObserve (used by connected sinks config)
-      - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://log-store:5080}
-      - OPENOBSERVE_USER=${OPENOBSERVE_USER:-admin@cagent.local}
-      - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD:-openobserve-local-dev}
+      # Compose project name for container isolation (Vector filters by this)
+      - COMPOSE_PROJECT=${COMPOSE_PROJECT_NAME:-}
 
     command: ["--config", "/etc/vector/vector.yaml", "--config", "/etc/vector/sinks.yaml"]
 
@@ -597,10 +595,8 @@ services:
       - WARDEN_TLS_CERT=${WARDEN_TLS_CERT:-}
       - WARDEN_TLS_KEY=${WARDEN_TLS_KEY:-}
       - WARDEN_MTLS_CA_CERT=${WARDEN_MTLS_CA_CERT:-}
-      # Local OpenObserve (per-DP log analytics)
-      - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://log-store:5080}
-      - OPENOBSERVE_USER=${OPENOBSERVE_USER:-admin@cagent.local}
-      - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD:-openobserve-local-dev}
+      # Local VictoriaLogs (per-DP log analytics)
+      - VICTORIALOGS_URL=${VICTORIALOGS_URL:-http://log-store:9428}
       # OpenTelemetry tracing (opt-in, off by default)
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       # Local admin settings
@@ -653,29 +649,27 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # Log Store - Local OpenObserve instance for per-DP log analytics
+  # Log Store - Local VictoriaLogs instance for per-DP log analytics
   # Receives logs from Vector, queryable by warden for dashboard analytics
-  # Optional: Only runs with --profile auditing
   # ===========================================================================
   log-store:
-    image: public.ecr.aws/zinclabs/openobserve:latest
+    image: docker.io/victoriametrics/victoria-logs:latest
     container_name: ${CP_PREFIX:-}log-store
-    profiles:
-      - auditing
     security_opt:
       - no-new-privileges:true
 
-    environment:
-      - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_USER:-admin@cagent.local}
-      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD:-openobserve-local-dev}
-      - ZO_COMPACT_DATA_RETENTION_DAYS=${LOG_RETENTION_DAYS:-30}
-      - ZO_DATA_DIR=/data
-      # Cap worker threads to avoid OOM on high-core machines (default = num CPUs)
-      - ZO_HTTP_WORKER_NUM=2
-      - ZO_HTTP_WORKER_MAX_BLOCKING=2
+    command:
+      - -retentionPeriod=30d
+      - -storageDataPath=/data
 
     volumes:
       - log-store-data:/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
     networks:
       infra-net:
@@ -685,7 +679,7 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 160M
+          memory: 128M
         reservations:
           cpus: '0.05'
           memory: 48M

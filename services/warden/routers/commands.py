@@ -267,8 +267,7 @@ def get_runtime_config():
         CONFIG_SYNC_INTERVAL,
         HEARTBEAT_INTERVAL,
         MTLS_ENABLED,
-        OPENOBSERVE_URL,
-        OPENOBSERVE_USER,
+        VICTORIALOGS_URL,
         WARDEN_API_TOKEN,
     )
 
@@ -277,8 +276,7 @@ def get_runtime_config():
         "HEARTBEAT_INTERVAL": int(runtime_config.get("HEARTBEAT_INTERVAL", HEARTBEAT_INTERVAL)),
         "CONFIG_SYNC_INTERVAL": int(runtime_config.get("CONFIG_SYNC_INTERVAL", CONFIG_SYNC_INTERVAL)),
         "ALERT_CHECK_INTERVAL": int(runtime_config.get("ALERT_CHECK_INTERVAL", ALERT_CHECK_INTERVAL)),
-        "OPENOBSERVE_URL": runtime_config.get("OPENOBSERVE_URL", OPENOBSERVE_URL),
-        "OPENOBSERVE_USER": runtime_config.get("OPENOBSERVE_USER", OPENOBSERVE_USER),
+        "VICTORIALOGS_URL": runtime_config.get("VICTORIALOGS_URL", VICTORIALOGS_URL),
         "BETA_FEATURES": runtime_config.get("BETA_FEATURES", ",".join(BETA_FEATURES)),
         "WARDEN_API_TOKEN": "(set)" if runtime_config.get("WARDEN_API_TOKEN", WARDEN_API_TOKEN) else "(not set)",
         "MTLS_ENABLED": MTLS_ENABLED,

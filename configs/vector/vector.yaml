@@ -18,12 +18,14 @@ api:
 sources:
   # Docker container logs (cell(s), envoy, coredns, warden, email-proxy)
   # Vector's docker_logs source passes include_labels to the Docker API for
-  # container discovery.  All monitored containers carry "cagent.log-collect=true".
-  # NOTE: Docker API ANDs multiple label filters, so only ONE label is used here.
+  # container discovery.  Docker API ANDs multiple label filters, so containers
+  # must match ALL labels.  The compose project filter ensures isolation when
+  # multiple DP stacks run on the same host.
   docker_logs:
     type: docker_logs
     include_labels:
       - "cagent.log-collect=true"
+      - "com.docker.compose.project=${COMPOSE_PROJECT:-}"
 
   # gVisor debug/audit logs (security-critical)
   # Requires runsc configured with: --debug-log=/var/log/runsc/

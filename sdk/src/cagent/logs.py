@@ -25,7 +25,7 @@ class LogsResource:
         start: Optional[str] = None,
         end: Optional[str] = None,
     ) -> list[dict]:
-        """Query cell logs (proxied through CP to warden/OpenObserve).
+        """Query cell logs (proxied through CP to warden/VictoriaLogs).
 
         Args:
             query: Search query string.
@@ -36,7 +36,7 @@ class LogsResource:
             end: ISO datetime end range.
 
         Returns:
-            List of log entries (raw dicts from OpenObserve).
+            List of log entries (raw dicts from VictoriaLogs).
         """
         params: dict[str, Any] = {"query": query, "limit": limit}
         if source is not None:

@@ -1,6 +1,5 @@
 import os
 import sys
-from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,10 +17,10 @@ mock_docker.containers.list.return_value = []
 
 from routers import analytics
 
-
 # ---------------------------------------------------------------------------
 # Widget registry tests
 # ---------------------------------------------------------------------------
+
 
 def test_widget_registry_has_all_types():
     expected = {
@@ -39,7 +38,7 @@ def test_widget_registry_has_all_types():
 
 
 def test_widget_registry_entries_have_required_keys():
-    required = {"name", "category", "visualization", "default_params", "columns", "sql"}
+    required = {"name", "category", "visualization", "default_params", "columns", "logsql"}
     for widget_id, spec in analytics.WIDGET_REGISTRY.items():
         missing = required - set(spec.keys())
         assert not missing, f"Widget {widget_id} missing keys: {missing}"
@@ -56,6 +55,7 @@ def test_widget_registry_columns_have_required_keys():
 # ---------------------------------------------------------------------------
 # /analytics/types endpoint
 # ---------------------------------------------------------------------------
+
 
 def test_get_widget_types():
     result = analytics.get_widget_types()
@@ -79,9 +79,10 @@ def test_get_widget_types():
 # /analytics/query endpoint
 # ---------------------------------------------------------------------------
 
-@patch("routers.analytics._oo_available", return_value=False)
-def test_query_widget_oo_unavailable(mock_oo):
-    """When OO is unavailable, return empty rows with a note."""
+
+@patch("routers.analytics._vl_available", return_value=False)
+def test_query_widget_vl_unavailable(mock_vl):
+    """When VL is unavailable, return empty rows with a note."""
     body = analytics.WidgetQueryRequest(type="blocked_domains_top", params={"window_hours": 1})
     result = analytics.query_widget(body)
 
@@ -92,10 +93,10 @@ def test_query_widget_oo_unavailable(mock_oo):
     assert "unavailable" in result["meta"]["note"].lower()
 
 
-@patch("routers.analytics._oo_available", return_value=True)
-@patch("routers.analytics._oo_query")
-def test_query_blocked_domains_top(mock_oo_query, mock_oo_avail):
-    mock_oo_query.return_value = [
+@patch("routers.analytics._vl_available", return_value=True)
+@patch("routers.analytics._vl_query")
+def test_query_blocked_domains_top(mock_vl_query, mock_vl_avail):
+    mock_vl_query.return_value = [
         {"domain": "evil.com", "count": 42, "last_seen": "2026-03-11T00:00:00Z"},
         {"domain": "bad.io", "count": 10, "last_seen": "2026-03-11T01:00:00Z"},
     ]
@@ -108,10 +109,10 @@ def test_query_blocked_domains_top(mock_oo_query, mock_oo_avail):
     assert result["rows"][1] == ["bad.io", 10, "2026-03-11T01:00:00Z"]
 
 
-@patch("routers.analytics._oo_available", return_value=True)
-@patch("routers.analytics._oo_query")
-def test_query_bandwidth_by_domain(mock_oo_query, mock_oo_avail):
-    mock_oo_query.return_value = [
+@patch("routers.analytics._vl_available", return_value=True)
+@patch("routers.analytics._vl_query")
+def test_query_bandwidth_by_domain(mock_vl_query, mock_vl_avail):
+    mock_vl_query.return_value = [
         {"domain": "example.com", "bytes_sent": 1000, "bytes_received": 500, "total_bytes": 1500},
     ]
     body = analytics.WidgetQueryRequest(type="bandwidth_by_domain")
@@ -122,10 +123,10 @@ def test_query_bandwidth_by_domain(mock_oo_query, mock_oo_avail):
     assert result["rows"][0] == ["example.com", 1000, 500, 1500]
 
 
-@patch("routers.analytics._oo_available", return_value=True)
-@patch("routers.analytics._oo_query")
-def test_query_requests_by_status(mock_oo_query, mock_oo_avail):
-    mock_oo_query.return_value = [
+@patch("routers.analytics._vl_available", return_value=True)
+@patch("routers.analytics._vl_query")
+def test_query_requests_by_status(mock_vl_query, mock_vl_avail):
+    mock_vl_query.return_value = [
         {"status_code": 200, "count": 100},
         {"status_code": 403, "count": 5},
     ]
@@ -137,10 +138,10 @@ def test_query_requests_by_status(mock_oo_query, mock_oo_avail):
     assert result["rows"][0] == [200, 100]
 
 
-@patch("routers.analytics._oo_available", return_value=True)
-@patch("routers.analytics._oo_query")
-def test_query_latency_by_domain(mock_oo_query, mock_oo_avail):
-    mock_oo_query.return_value = [
+@patch("routers.analytics._vl_available", return_value=True)
+@patch("routers.analytics._vl_query")
+def test_query_latency_by_domain(mock_vl_query, mock_vl_avail):
+    mock_vl_query.return_value = [
         {"domain": "slow.com", "request_count": 50, "avg_ms": 123.456, "max_ms": 500},
     ]
     body = analytics.WidgetQueryRequest(type="latency_by_domain")
@@ -151,10 +152,10 @@ def test_query_latency_by_domain(mock_oo_query, mock_oo_avail):
     assert result["rows"][0] == ["slow.com", 50, 123.5, 500]  # avg_ms rounded to 1 decimal
 
 
-@patch("routers.analytics._oo_available", return_value=True)
-@patch("routers.analytics._oo_query")
-def test_query_credential_usage(mock_oo_query, mock_oo_avail):
-    mock_oo_query.return_value = [
+@patch("routers.analytics._vl_available", return_value=True)
+@patch("routers.analytics._vl_query")
+def test_query_credential_usage(mock_vl_query, mock_vl_avail):
+    mock_vl_query.return_value = [
         {"domain": "api.example.com", "total_requests": 200, "injected_count": 150},
     ]
     body = analytics.WidgetQueryRequest(type="credential_usage")
@@ -164,10 +165,10 @@ def test_query_credential_usage(mock_oo_query, mock_oo_avail):
     assert result["rows"][0] == ["api.example.com", 200, 150]
 
 
-@patch("routers.analytics._oo_available", return_value=True)
-@patch("routers.analytics._oo_query")
-def test_query_blocked_timeseries(mock_oo_query, mock_oo_avail):
-    mock_oo_query.return_value = [
+@patch("routers.analytics._vl_available", return_value=True)
+@patch("routers.analytics._vl_query")
+def test_query_blocked_timeseries(mock_vl_query, mock_vl_avail):
+    mock_vl_query.return_value = [
         {"bucket": 1000000, "count": 5},
         {"bucket": 2000000, "count": 3},
     ]
@@ -178,10 +179,10 @@ def test_query_blocked_timeseries(mock_oo_query, mock_oo_avail):
     assert len(result["rows"]) == 2
 
 
-@patch("routers.analytics._oo_available", return_value=True)
-@patch("routers.analytics._oo_query")
-def test_query_request_volume(mock_oo_query, mock_oo_avail):
-    mock_oo_query.return_value = [
+@patch("routers.analytics._vl_available", return_value=True)
+@patch("routers.analytics._vl_query")
+def test_query_request_volume(mock_vl_query, mock_vl_avail):
+    mock_vl_query.return_value = [
         {"bucket": 1000000, "total": 100, "blocked": 5, "rate_limited": 2},
     ]
     body = analytics.WidgetQueryRequest(type="request_volume")
@@ -201,8 +202,10 @@ def test_query_unknown_widget():
 
 def test_query_default_params_used():
     """When no params provided, default_params from registry are used."""
-    with patch("routers.analytics._oo_available", return_value=True), \
-         patch("routers.analytics._oo_query", return_value=[]) as mock_q:
+    with (
+        patch("routers.analytics._vl_available", return_value=True),
+        patch("routers.analytics._vl_query", return_value=[]),
+    ):
         body = analytics.WidgetQueryRequest(type="blocked_domains_top")
         result = analytics.query_widget(body)
         assert result["meta"]["window_hours"] == 24
@@ -211,8 +214,10 @@ def test_query_default_params_used():
 
 def test_query_params_override_defaults():
     """User params should override default_params."""
-    with patch("routers.analytics._oo_available", return_value=True), \
-         patch("routers.analytics._oo_query", return_value=[]) as mock_q:
+    with (
+        patch("routers.analytics._vl_available", return_value=True),
+        patch("routers.analytics._vl_query", return_value=[]),
+    ):
         body = analytics.WidgetQueryRequest(type="blocked_domains_top", params={"window_hours": 6, "limit": 5})
         result = analytics.query_widget(body)
         assert result["meta"]["window_hours"] == 6
@@ -220,13 +225,14 @@ def test_query_params_override_defaults():
 
 
 # ---------------------------------------------------------------------------
-# /analytics/diagnose endpoint (kept as-is)
+# /analytics/diagnose endpoint
 # ---------------------------------------------------------------------------
+
 
 @patch("routers.analytics.subprocess.run")
 @patch("routers.analytics.Path")
 def test_diagnose_domain(mock_path, mock_subprocess):
-    """Test diagnose endpoint with mocked OO and DNS."""
+    """Test diagnose endpoint with mocked VL and DNS."""
     mock_container = MagicMock()
     mock_container.logs.return_value = b""
 
@@ -245,8 +251,8 @@ def test_diagnose_domain(mock_path, mock_subprocess):
         mock_path_instance.read_text.return_value = "domains:\n  - domain: allowed.com"
         mock_path.return_value = mock_path_instance
 
-        # Mock OO query for recent requests
-        with patch("routers.analytics.query_openobserve", create=True) as mock_oo_q:
+        # Mock VL query for recent requests
+        with patch("routers.analytics.query_logs", create=True):
             result = analytics.diagnose_domain(domain="blocked.com")
 
         assert result["domain"] == "blocked.com"

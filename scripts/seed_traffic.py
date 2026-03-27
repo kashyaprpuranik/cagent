@@ -10,7 +10,7 @@ Generates realistic traffic through DP services to produce logs:
 Run inside the cell container:
     docker exec cell python3 /seed_traffic.py
 
-Logs flow: DP services -> Vector -> CP ingest API -> OpenObserve
+Logs flow: DP services -> Vector -> VictoriaLogs (local log store)
 """
 
 import json
@@ -60,7 +60,8 @@ def dns_lookup(domain):
     try:
         subprocess.run(
             ["nslookup", domain, DNS_SERVER],
-            capture_output=True, timeout=5,
+            capture_output=True,
+            timeout=5,
         )
         return True
     except Exception:
@@ -72,7 +73,9 @@ def http_get(url):
     try:
         result = subprocess.run(
             ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", url],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         code = result.stdout.strip()
         return int(code) if code.isdigit() else 0
@@ -136,7 +139,7 @@ def main():
 
     print()
     print("=== Seed traffic complete ===")
-    print("Logs will propagate through Vector -> CP -> OpenObserve in ~15-20s.")
+    print("Logs will propagate through Vector -> VictoriaLogs in ~15-20s.")
 
 
 if __name__ == "__main__":
