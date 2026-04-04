@@ -6,6 +6,7 @@
 mod certs;
 mod config;
 mod config_api;
+mod dlp;
 mod dns;
 mod mitm;
 mod proxy;

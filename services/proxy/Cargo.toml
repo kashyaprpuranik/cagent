@@ -42,6 +42,9 @@ webpki-roots = "0.26"
 hyper-rustls = { version = "0.27", features = ["http1", "tls12", "ring"] }
 time = "0.3"
 
+# Base64 decoding (DLP)
+base64 = "0.22"
+
 # Phase 3: DNS filtering
 hickory-server = "0.25"
 hickory-resolver = "0.25"

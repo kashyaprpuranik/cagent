@@ -46,6 +46,10 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub domains: Vec<DomainPolicy>,
 
+    /// DLP (Data Loss Prevention) configuration.
+    #[serde(default)]
+    pub dlp: crate::dlp::DlpConfig,
+
     /// Pre-computed: domain name → index into `domains`.
     #[serde(skip)]
     pub domain_index: HashMap<String, usize>,
@@ -63,6 +67,7 @@ impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             domains: Vec::new(),
+            dlp: crate::dlp::DlpConfig::default(),
             domain_index: HashMap::new(),
             allowed_domains: HashSet::new(),
             alias_index: HashMap::new(),

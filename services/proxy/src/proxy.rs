@@ -155,8 +155,31 @@ pub async fn handle_request(
     // Collect request body
     let body_bytes = req.collect().await?.to_bytes();
 
+    // DLP scanning
+    let body_to_send = match crate::dlp::scan_body(&body_bytes, &real_domain) {
+        crate::dlp::DlpAction::Allow => body_bytes,
+        crate::dlp::DlpAction::Log(findings) => {
+            for f in &findings {
+                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: sensitive data detected");
+            }
+            body_bytes
+        }
+        crate::dlp::DlpAction::Block(findings) => {
+            for f in &findings {
+                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: blocked");
+            }
+            return Ok(error_response(StatusCode::FORBIDDEN, "Blocked by DLP: request body contains sensitive data"));
+        }
+        crate::dlp::DlpAction::Redact(findings, redacted) => {
+            for f in &findings {
+                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: redacted");
+            }
+            redacted.into()
+        }
+    };
+
     let upstream_req = upstream_req
-        .body(Full::new(body_bytes.clone()))
+        .body(Full::new(body_to_send))
         .unwrap();
 
     // 6. Forward upstream (with timeout)

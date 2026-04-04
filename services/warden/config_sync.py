@@ -112,7 +112,7 @@ def reload_email_proxy():
         return False
 
 
-def push_to_cagent_proxy(domain_entries: list, domain_policies: list) -> bool:
+def push_to_cagent_proxy(domain_entries: list, domain_policies: list, dlp_config: dict = None) -> bool:
     """Push config to cagent-proxy via its HTTP config API.
 
     Translates cagent.yaml-style domain entries + CP credential policies
@@ -152,6 +152,10 @@ def push_to_cagent_proxy(domain_entries: list, domain_policies: list) -> bool:
         proxy_domains.append(pd)
 
     payload = {"domains": proxy_domains}
+
+    # Include DLP config if available
+    if dlp_config:
+        payload["dlp"] = dlp_config
 
     try:
         resp = requests.post(
@@ -280,7 +284,8 @@ def regenerate_configs(
         if PROXY_MODE == "rust":
             # ── Rust proxy path: push config via HTTP instead of writing files ──
             all_domains = config_generator.get_domains()
-            proxy_changed = push_to_cagent_proxy(all_domains, _synced_domain_policies)
+            dlp = config_generator.get_dlp_config()
+            proxy_changed = push_to_cagent_proxy(all_domains, _synced_domain_policies, dlp_config=dlp)
         else:
             # ── Legacy path: generate Corefile + Envoy xDS files ──
             corefile_content = config_generator.generate_corefile()

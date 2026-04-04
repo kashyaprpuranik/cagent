@@ -173,12 +173,12 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 | Per-domain cert generation | Built-in CA | rcgen + moka cache | ✅ Phase 2 |
 | HTTPS → HTTP redirect to Envoy | mitm_addon.py | Not needed (single process) | ✅ N/A |
 | Lazy connection strategy | --set connection_strategy=lazy | Default (connect on demand) | ✅ N/A |
-| DLP pattern scanning | dlp_addon.py (regex) | TODO (aho-corasick + regex) | Phase 2b |
-| DLP modes (log/block/redact) | dlp_config.json | TODO | Phase 2b |
-| DLP base64 decoding | Built-in | TODO | Phase 2b |
-| DLP skip_domains | Config list | TODO | Phase 2b |
-| DLP threshold patterns (email/phone bulk) | Count-based | TODO | Phase 2b |
-| Stream large bodies (1MB limit) | --set stream_large_bodies=1m | TODO | Phase 2b |
+| DLP pattern scanning | dlp_addon.py (regex) | aho-corasick prefix + regex | ✅ Phase 2b |
+| DLP modes (log/block/redact) | dlp_config.json | In-memory config | ✅ Phase 2b |
+| DLP base64 decoding | Built-in | base64 crate decode + re-scan | ✅ Phase 2b |
+| DLP skip_domains | Config list | In-memory skip set | ✅ Phase 2b |
+| DLP threshold patterns (email/phone bulk) | Count-based | find_iter count >= threshold | ✅ Phase 2b |
+| Body scan size limit (1MB) | --set stream_large_bodies=1m | Truncate to 1MB before scan | ✅ Phase 2b |
 | Upstream cert skip | --set upstream_cert=false | Uses webpki-roots (standard verify) | ✅ Phase 2 |
 
 ### CoreDNS Features
@@ -204,7 +204,7 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 | Config delivery | Generate Corefile + Envoy YAML, restart services | POST /config JSON, arc-swap | ✅ Phase 4 |
 | Credential delivery | ext_authz HTTP call per request | Embedded in config, in-process | ✅ Phase 4 |
 | Service restarts | docker restart coredns, envoy | None needed (atomic config swap) | ✅ Phase 4 |
-| DLP config | Write dlp_config.json, mitmproxy re-reads | TODO: include in /config JSON | Phase 2b |
+| DLP config | Write dlp_config.json, mitmproxy re-reads | Included in /config JSON push | ✅ Phase 2b |
 
 ## Backwards Compatibility
 
