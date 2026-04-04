@@ -122,10 +122,10 @@ services:
 
     # Environment
     environment:
-      - HTTP_PROXY=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
-      - HTTPS_PROXY=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
-      - http_proxy=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
-      - https_proxy=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
+      - HTTP_PROXY=${CELL_HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
+      - HTTPS_PROXY=${CELL_HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
+      - http_proxy=${CELL_HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
+      - https_proxy=${CELL_HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
       - SSL_CERT_FILE=/tmp/ca-certificates.crt
@@ -174,10 +174,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-    depends_on:
-      - http-proxy
-      - dns-filter
 
     restart: unless-stopped
 
@@ -240,10 +236,10 @@ services:
 
     # Environment
     environment:
-      - HTTP_PROXY=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
-      - HTTPS_PROXY=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
-      - http_proxy=${HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
-      - https_proxy=${HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
+      - HTTP_PROXY=${CELL_HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
+      - HTTPS_PROXY=${CELL_HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
+      - http_proxy=${CELL_HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.10:8443}
+      - https_proxy=${CELL_HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
       - SSL_CERT_FILE=/tmp/ca-certificates.crt
@@ -288,10 +284,6 @@ services:
       timeout: 5s
       retries: 3
 
-    depends_on:
-      - http-proxy
-      - dns-filter
-
     restart: unless-stopped
 
   # ===========================================================================
@@ -331,6 +323,8 @@ services:
   dns-filter:
     image: ghcr.io/kashyaprpuranik/coredns:latest
     container_name: ${CP_PREFIX:-}dns-filter
+    profiles:
+      - proxy-legacy
     labels:
       - "cagent.log-collect=true"
     security_opt:
@@ -377,6 +371,8 @@ services:
   http-proxy:
     image: ghcr.io/kashyaprpuranik/envoy:v1.28-latest
     container_name: ${CP_PREFIX:-}http-proxy
+    profiles:
+      - proxy-legacy
     labels:
       - "cagent.log-collect=true"
     security_opt:
@@ -439,6 +435,8 @@ services:
       context: ./configs/mitm
       dockerfile: Dockerfile
     container_name: ${CP_PREFIX:-}mitm-proxy
+    profiles:
+      - proxy-legacy
     labels:
       - "cagent.log-collect=true"
     security_opt:

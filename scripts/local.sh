@@ -109,7 +109,7 @@ cd "$ROOT_DIR"
 # --- Handle 'down' action ---
 if [ "$ACTION" = "down" ]; then
     echo "Stopping Data Plane..."
-    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email --profile proxy-rust down --remove-orphans 2>/dev/null || true
+    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email --profile proxy-rust --profile proxy-legacy down --remove-orphans 2>/dev/null || true
     echo ""
     echo "=== All services stopped ==="
     exit 0
@@ -123,15 +123,19 @@ if [ "$PROXY_RUST" = true ]; then
     export PROXY_MODE="rust"
     export CAGENT_PROXY_URL="http://10.${NET_OCTET:-200}.2.20:18080"
     # Cell uses cagent-proxy for HTTP, HTTPS, and DNS
-    export HTTP_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
-    export HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
+    export CELL_HTTP_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
+    export CELL_HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
     export CELL_DNS_PRIMARY="10.${NET_OCTET:-200}.1.20"
     export CELL_DNS_SECONDARY="10.${NET_OCTET:-200}.1.20"
     DP_PROFILES="$DP_PROFILES --profile proxy-rust"
     echo "Rust proxy enabled (cagent-proxy replaces Envoy+mitmproxy+CoreDNS)"
-elif [ "$MINIMAL" = false ]; then
-    export HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.15:8080"
-    echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
+else
+    # Legacy: Envoy + mitmproxy + CoreDNS
+    DP_PROFILES="$DP_PROFILES --profile proxy-legacy"
+    if [ "$MINIMAL" = false ]; then
+        export CELL_HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.15:8080"
+        echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
+    fi
 fi
 
 if [ "${MTLS:-false}" = true ]; then

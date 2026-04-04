@@ -124,7 +124,7 @@ if [ "$RUN_E2E" = true ]; then
         ADMIN_MODE=$(curl -sf http://localhost:${LOCAL_ADMIN_PORT}/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
         if [ "$ADMIN_MODE" = "connected" ]; then
             echo "Data plane is running in connected mode, restarting in standalone mode..."
-            docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust down 2>/dev/null || true
+            docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down 2>/dev/null || true
             NEED_RESTART=true
         fi
     fi
@@ -134,14 +134,14 @@ if [ "$RUN_E2E" = true ]; then
     export PROXY_MODE="$PROXY_MODE"
 
     if [ "$PROXY_MODE" = "rust" ]; then
-        export HTTP_PROXY="http://10.${NET_OCTET}.1.20:18443"
-        export HTTPS_PROXY="http://10.${NET_OCTET}.1.20:18443"
+        export CELL_HTTP_PROXY="http://10.${NET_OCTET}.1.20:18443"
+        export CELL_HTTPS_PROXY="http://10.${NET_OCTET}.1.20:18443"
         export CELL_DNS_PRIMARY="10.${NET_OCTET}.1.20"
         export CELL_DNS_SECONDARY="10.${NET_OCTET}.1.20"
         export CAGENT_PROXY_URL="http://10.${NET_OCTET}.2.20:18080"
         export DEVBOX_LOCAL_IP="10.${NET_OCTET}.1.20"
     else
-        export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
+        export CELL_HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
     fi
     export WARDEN_TLS_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-key.pem")"
@@ -160,8 +160,8 @@ if [ "$RUN_E2E" = true ]; then
         # Use -v to remove volumes (proxy-config may have stale envoy config from
         # a prior connected-mode run, e.g. CP+DP e2e) and --remove-orphans to catch
         # containers started with a different compose file (e.g. e2e override).
-        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing --profile proxy-rust down -v --remove-orphans 2>/dev/null || true
-        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing --profile proxy-rust down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down -v --remove-orphans 2>/dev/null || true
 
         # Clean up stale networks (may have wrong labels or orphan endpoints)
         for net in "$INFRA_NET_NAME" "$CELL_NET_NAME"; do
@@ -181,6 +181,8 @@ if [ "$RUN_E2E" = true ]; then
         E2E_PROFILES="--profile dev --profile admin --profile auditing"
         if [ "$PROXY_MODE" = "rust" ]; then
             E2E_PROFILES="$E2E_PROFILES --profile proxy-rust"
+        else
+            E2E_PROFILES="$E2E_PROFILES --profile proxy-legacy"
         fi
         echo "Starting data plane (standalone, $E2E_PROFILES, proxy=$PROXY_MODE, 2 cells)..."
         DATAPLANE_MODE=standalone docker compose $E2E_PROFILES up -d --build --remove-orphans --scale cell-dev=2
@@ -191,6 +193,8 @@ if [ "$RUN_E2E" = true ]; then
         E2E_PROFILES="--profile dev --profile admin --profile auditing"
         if [ "$PROXY_MODE" = "rust" ]; then
             E2E_PROFILES="$E2E_PROFILES --profile proxy-rust"
+        else
+            E2E_PROFILES="$E2E_PROFILES --profile proxy-legacy"
         fi
         echo "Data plane already running, rebuilding images in case code changed..."
         DATAPLANE_MODE=standalone docker compose $E2E_PROFILES up -d --build --scale cell-dev=2
@@ -207,7 +211,7 @@ if [ "$RUN_E2E" = true ]; then
     if [ "$CONTAINERS_STARTED" = true ] && [ "$NO_TEARDOWN" = false ]; then
         echo ""
         echo "Stopping containers started by this script..."
-        docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust down 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down 2>/dev/null || true
     elif [ "$NO_TEARDOWN" = true ]; then
         echo ""
         echo "Keeping containers running (--no-teardown)"
