@@ -461,6 +461,58 @@ class TestIPv6Suppression:
 
 
 @pytest.mark.e2e
+class TestMetadataIPBlock:
+    """Test that cloud metadata endpoints are blocked."""
+
+    def test_metadata_ip_blocked(self, data_plane_running):
+        """Requests to 169.254.169.254 should return 403."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            "--connect-timeout 5 "
+            "http://169.254.169.254/latest/meta-data/"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"Metadata IP should return 403, got: {code}"
+
+    def test_metadata_hostname_blocked(self, data_plane_running):
+        """Requests to metadata.google.internal should return 403."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            "--connect-timeout 5 "
+            "http://metadata.google.internal/"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"Metadata hostname should return 403, got: {code}"
+
+
+@pytest.mark.e2e
+class TestRateLimiting:
+    """Test per-domain rate limiting.
+
+    api.openai.com is configured with rate_limit.requests_per_minute: 60.
+    We can't easily exhaust 60 RPM in a test, so we verify that normal
+    requests succeed (i.e., rate limiting doesn't false-positive).
+    Rate limiting enforcement was verified in manual testing with low RPM.
+    """
+
+    DOMAIN = "api.openai.com"
+
+    def test_normal_rate_not_blocked(self, data_plane_running):
+        """A few requests should not trigger rate limiting (60 RPM budget)."""
+        for _ in range(3):
+            result = exec_in_cell(
+                f"curl -s -o /dev/null -w '%{{http_code}}' "
+                f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+                f"--connect-timeout 5 http://{self.DOMAIN}/"
+            )
+            code = result.stdout.strip()
+            # Should get a real response (401 auth required, 200, 301, etc.), not 429
+            assert code != "429", f"Rate limit triggered too early on request: {code}"
+
+
+@pytest.mark.e2e
 @pytest.mark.skipif(is_legacy_mode(), reason="cagent-proxy health endpoint only in rust mode")
 class TestCagentProxyHealth:
     """Test cagent-proxy health endpoint (rust mode only)."""

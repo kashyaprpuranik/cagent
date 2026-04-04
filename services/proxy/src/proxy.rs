@@ -103,7 +103,17 @@ pub async fn handle_request(
         }
     }
 
-    // 4. Build upstream request
+    // 4. Rate limiting
+    if let Some(p) = policy {
+        if let Some(rpm) = p.rate_limit_rpm {
+            if !crate::config::check_rate_limit(&real_domain, rpm) {
+                tracing::info!(domain = %real_domain, rpm = rpm, "blocked: rate limit exceeded");
+                return Ok(error_response(StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded"));
+            }
+        }
+    }
+
+    // 5. Build upstream request
     let upstream_host = if is_alias { &real_domain } else { &host };
     let upstream_uri = if uri.scheme().is_some() && !is_alias {
         uri.to_string()

@@ -90,6 +90,16 @@ pub async fn handle_intercepted_request(
         }
     }
 
+    // Rate limiting
+    if let Some(p) = policy {
+        if let Some(rpm) = p.rate_limit_rpm {
+            if !crate::config::check_rate_limit(&real_domain, rpm) {
+                tracing::info!(domain = %real_domain, rpm = rpm, "MITM blocked: rate limit exceeded");
+                return Ok(error_response(StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded"));
+            }
+        }
+    }
+
     // Build upstream HTTPS request (use real domain for aliases)
     let upstream_url = format!("https://{}:{}{}", real_domain, port, path);
 

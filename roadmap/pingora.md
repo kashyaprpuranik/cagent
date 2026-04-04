@@ -160,7 +160,7 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 | X-Real-Domain header | Request header add | Added to upstream req | ✅ Phase 1b |
 | X-Credential-Injected header | ext_authz response | Added after injection | ✅ Phase 1b |
 | Shared HTTP client (connection pooling) | Implicit via circuit breakers | LazyLock\<Client\> | ✅ Phase 1b |
-| Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | TODO | Future |
+| Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | Token bucket per domain | ✅ Phase 1b |
 | Circuit breakers (max connections) | Per-cluster config | TODO | Future |
 | Retry logic | Per-route retry_policy | TODO | Future |
 | Email proxy routing (email.devbox.local) | Virtual host → email-proxy | TODO | Future |

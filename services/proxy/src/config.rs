@@ -4,7 +4,8 @@
 //! using `arc-swap` so readers (hot path) never block.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
+use std::time::Instant;
 
 use arc_swap::ArcSwap;
 use secrecy::SecretString;
@@ -139,4 +140,60 @@ pub fn update_config(new_config: ProxyConfig) {
     let config = new_config.build_indexes();
     CONFIG.store(std::sync::Arc::new(config));
     tracing::info!("Config updated: {} domains", CONFIG.load().domains.len());
+}
+
+// ---------------------------------------------------------------------------
+// Per-domain token bucket rate limiter
+// ---------------------------------------------------------------------------
+
+struct TokenBucket {
+    tokens: f64,
+    max_tokens: f64,
+    refill_rate: f64, // tokens per second
+    last_refill: Instant,
+}
+
+impl TokenBucket {
+    fn new(rpm: u32) -> Self {
+        let per_sec = rpm as f64 / 60.0;
+        // Burst = max(rpm/6, 1) — allows short bursts without draining the bucket
+        let burst = (rpm as f64 / 6.0).max(1.0);
+        Self {
+            tokens: burst,
+            max_tokens: burst,
+            refill_rate: per_sec,
+            last_refill: Instant::now(),
+        }
+    }
+
+    fn try_acquire(&mut self) -> bool {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * self.refill_rate).min(self.max_tokens);
+        self.last_refill = now;
+
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Global rate limiter state (domain → token bucket).
+static RATE_LIMITER: LazyLock<Mutex<HashMap<String, TokenBucket>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Check rate limit for a domain. Returns true if the request is allowed.
+pub fn check_rate_limit(domain: &str, rpm: u32) -> bool {
+    let mut buckets = RATE_LIMITER.lock().unwrap();
+    let bucket = buckets
+        .entry(domain.to_lowercase())
+        .or_insert_with(|| TokenBucket::new(rpm));
+    // Update max if config changed
+    let per_sec = rpm as f64 / 60.0;
+    bucket.refill_rate = per_sec;
+    bucket.max_tokens = (rpm as f64 / 6.0).max(1.0);
+    bucket.try_acquire()
 }
