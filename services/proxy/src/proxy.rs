@@ -3,14 +3,25 @@
 //! Accepts plain HTTP requests (non-CONNECT), checks domain allowlist,
 //! injects credentials, and forwards upstream.
 
-use std::sync::Arc;
+use std::sync::LazyLock;
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
+use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioExecutor;
 
 use crate::config::CONFIG;
+
+/// Shared HTTP client for connection pooling to upstream servers.
+static HTTP_CLIENT: LazyLock<Client<HttpConnector, Full<Bytes>>> = LazyLock::new(|| {
+    Client::builder(TokioExecutor::new()).build_http()
+});
+
+/// Blocked metadata IPs (cloud credential theft prevention).
+const METADATA_IPS: &[&str] = &["169.254.169.254", "metadata.google.internal"];
 
 /// Handle an incoming HTTP proxy request.
 ///
@@ -35,6 +46,12 @@ pub async fn handle_request(
 
     // Strip port from host for domain matching
     let domain = host.split(':').next().unwrap_or(&host);
+
+    // Block cloud metadata endpoint (defense-in-depth)
+    if METADATA_IPS.iter().any(|ip| domain.eq_ignore_ascii_case(ip)) {
+        tracing::warn!(domain = domain, "blocked: metadata endpoint");
+        return Ok(error_response(StatusCode::FORBIDDEN, "Metadata endpoint blocked"));
+    }
 
     // Load current config (lock-free)
     let config = CONFIG.load();
@@ -110,13 +127,17 @@ pub async fn handle_request(
         upstream_req = upstream_req.header("Host", real_domain.as_str());
     }
 
-    // 5. Credential injection
+    // 5. Add X-Real-Domain header (for upstream logging/routing)
+    upstream_req = upstream_req.header("X-Real-Domain", real_domain.as_str());
+
+    // 6. Credential injection
     if let Some(p) = policy {
         if let (Some(header), Some(format), Some(value)) =
             (&p.credential_header, &p.credential_format, &p.credential_value)
         {
             let header_value = format.replace("{value}", value);
             upstream_req = upstream_req.header(header.as_str(), header_value);
+            upstream_req = upstream_req.header("X-Credential-Injected", "true");
             tracing::debug!(domain = domain, header = header.as_str(), "credential injected");
         }
     }
@@ -156,11 +177,7 @@ pub async fn handle_request(
 async fn forward_upstream(
     req: Request<Full<Bytes>>,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
-    use hyper_util::client::legacy::Client;
-    use hyper_util::rt::TokioExecutor;
-
-    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
-    let resp = client.request(req).await?;
+    let resp = HTTP_CLIENT.request(req).await?;
 
     let status = resp.status();
     let headers = resp.headers().clone();

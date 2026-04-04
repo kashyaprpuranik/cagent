@@ -210,6 +210,17 @@ async fn handle_connect_stream(
         .and_then(|p| p.parse().ok())
         .unwrap_or(443);
 
+    // Block cloud metadata endpoint
+    if domain == "169.254.169.254" || domain.eq_ignore_ascii_case("metadata.google.internal") {
+        tracing::warn!(domain = %domain, "CONNECT blocked: metadata endpoint");
+        let mut stream = stream;
+        let _ = tokio::io::AsyncWriteExt::write_all(
+            &mut stream,
+            b"HTTP/1.1 403 Forbidden\r\n\r\n",
+        ).await;
+        return;
+    }
+
     // Check allowlist
     {
         let config = config::CONFIG.load();

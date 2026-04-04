@@ -155,12 +155,12 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 | Catch-all 403 (unlisted domains) | Default virtual host | Default deny | ✅ Phase 1 |
 | Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | TODO | Phase 1b |
 | Devbox.local aliases (rewrite Host) | Virtual host + auto_host_rewrite | alias field + Host rewrite | ✅ Phase 1b |
-| Timeout enforcement | Per-route/cluster timeouts | TODO | Phase 1b |
-| Metadata IP block (169.254.169.254) | Virtual host 403 | TODO | Phase 1b |
-| X-Real-Domain header | Request header add | TODO | Phase 1b |
-| X-Credential-Injected header | ext_authz response | TODO | Phase 1b |
-| Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | TODO | Phase 1b |
-| Shared HTTP client (connection pooling) | Implicit via circuit breakers | TODO (Arc\<Client\>) | Phase 1b |
+| Timeout enforcement (30s) | Per-route/cluster timeouts | tokio::time::timeout | ✅ Phase 1b |
+| Metadata IP block (169.254.169.254) | Virtual host 403 | Pre-allowlist check | ✅ Phase 1b |
+| X-Real-Domain header | Request header add | Added to upstream req | ✅ Phase 1b |
+| X-Credential-Injected header | ext_authz response | Added after injection | ✅ Phase 1b |
+| Shared HTTP client (connection pooling) | Implicit via circuit breakers | LazyLock\<Client\> | ✅ Phase 1b |
+| Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | TODO | Future |
 | Circuit breakers (max connections) | Per-cluster config | TODO | Future |
 | Retry logic | Per-route retry_policy | TODO | Future |
 | Email proxy routing (email.devbox.local) | Virtual host → email-proxy | TODO | Future |

@@ -3,12 +3,34 @@
 //! The CONNECT handshake and TLS setup is in main.rs.
 //! This module handles the decrypted HTTP requests after MITM.
 
+use std::sync::LazyLock;
+
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 
 use crate::config::CONFIG;
+
+/// Shared HTTPS client for connection pooling to upstream servers.
+static HTTPS_CLIENT: LazyLock<Client<hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Full<Bytes>>> = LazyLock::new(|| {
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let tls_config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(tls_config)
+        .https_only()
+        .enable_http1()
+        .build();
+
+    Client::builder(TokioExecutor::new()).build(https_connector)
+});
 
 /// Handle a decrypted HTTP request from the MITM stream.
 ///
@@ -85,6 +107,9 @@ pub async fn handle_intercepted_request(
     // Set Host header to the real domain (rewrites alias → real domain)
     upstream_req = upstream_req.header("Host", real_domain.as_str());
 
+    // Add X-Real-Domain header
+    upstream_req = upstream_req.header("X-Real-Domain", real_domain.as_str());
+
     // Credential injection
     if let Some(p) = policy {
         if let (Some(header), Some(format), Some(value)) =
@@ -92,6 +117,7 @@ pub async fn handle_intercepted_request(
         {
             let header_value = format.replace("{value}", value);
             upstream_req = upstream_req.header(header.as_str(), header_value);
+            upstream_req = upstream_req.header("X-Credential-Injected", "true");
             tracing::debug!(domain = domain, "MITM credential injected");
         }
     }
@@ -134,27 +160,7 @@ pub async fn handle_intercepted_request(
 async fn forward_https(
     req: Request<Full<Bytes>>,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
-    use hyper_util::client::legacy::Client;
-    use hyper_util::rt::TokioExecutor;
-
-    // Build HTTPS connector with system CA roots
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_tls_config(tls_config)
-        .https_only()
-        .enable_http1()
-        .build();
-
-    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
-        .build(https_connector);
-
-    let resp = client.request(req).await?;
+    let resp = HTTPS_CLIENT.request(req).await?;
     let status = resp.status();
     let headers = resp.headers().clone();
     let body = resp.into_body().collect().await?.to_bytes();
