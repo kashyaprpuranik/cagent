@@ -511,6 +511,10 @@ services:
       - MITM_CA_CERT=/etc/cagent/mitm/mitmproxy-ca-cert.pem
       - MITM_CA_KEY=/etc/cagent/mitm/mitmproxy-ca.pem
       - DEVBOX_LOCAL_IP=10.${NET_OCTET:-200}.1.20
+      # Shared secret for POST /config auth.  Must match the value set
+      # on warden.  Empty in dev/standalone — cagent-proxy logs a warning
+      # on startup when unset.
+      - CAGENT_PROXY_TOKEN=${CAGENT_PROXY_TOKEN:-}
 
     # On BOTH networks:
     # - cell-net: cell sends HTTP/HTTPS proxy + DNS queries here
@@ -645,6 +649,9 @@ services:
       # Proxy mode: "legacy" (Envoy+mitmproxy+CoreDNS) or "rust" (cagent-proxy)
       - PROXY_MODE=${PROXY_MODE:-legacy}
       - CAGENT_PROXY_URL=${CAGENT_PROXY_URL:-}
+      # Shared secret for POST /config to cagent-proxy.  Must match the
+      # value set on cagent-proxy.  Empty in dev/standalone.
+      - CAGENT_PROXY_TOKEN=${CAGENT_PROXY_TOKEN:-}
 
     volumes:
       # Docker socket for container management

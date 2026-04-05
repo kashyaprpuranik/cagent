@@ -38,6 +38,10 @@ _NET_OCTET = os.environ.get("NET_OCTET", "200")
 # Proxy mode: "legacy" (Envoy+mitmproxy+CoreDNS) or "rust" (cagent-proxy)
 PROXY_MODE = os.environ.get("PROXY_MODE", "legacy")
 CAGENT_PROXY_URL = os.environ.get("CAGENT_PROXY_URL", f"http://10.{_NET_OCTET}.2.20:18080")
+# Shared secret for authenticated POST /config to cagent-proxy.  Must match
+# the CAGENT_PROXY_TOKEN env var on the cagent-proxy container.  Empty in
+# dev/standalone — cagent-proxy logs a warning on startup when unset.
+CAGENT_PROXY_TOKEN = os.environ.get("CAGENT_PROXY_TOKEN", "")
 
 # Path to .env file for docker-compose resource overrides
 ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
@@ -157,15 +161,26 @@ def push_to_cagent_proxy(domain_entries: list, domain_policies: list, dlp_config
     if dlp_config:
         payload["dlp"] = dlp_config
 
+    headers = {}
+    if CAGENT_PROXY_TOKEN:
+        headers["X-Config-Token"] = CAGENT_PROXY_TOKEN
+
     try:
         resp = requests.post(
             f"{CAGENT_PROXY_URL}/config",
             json=payload,
+            headers=headers,
             timeout=5,
         )
         if resp.status_code == 200:
             logger.info("Pushed config to cagent-proxy: %s", resp.json())
             return True
+        if resp.status_code == 401:
+            logger.error(
+                "cagent-proxy rejected config push (401): CAGENT_PROXY_TOKEN "
+                "missing or does not match the one set on cagent-proxy"
+            )
+            return False
         logger.warning("cagent-proxy config push returned %s: %s", resp.status_code, resp.text)
         return False
     except requests.exceptions.ConnectionError:

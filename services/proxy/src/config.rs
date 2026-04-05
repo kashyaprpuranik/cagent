@@ -8,7 +8,6 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
-use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 /// Global proxy configuration, swapped atomically on config push.
@@ -117,6 +116,23 @@ impl ProxyConfig {
     pub fn resolve_alias(&self, domain: &str) -> Option<&DomainPolicy> {
         let lower = domain.to_lowercase();
         self.alias_index.get(&lower).map(|&idx| &self.domains[idx])
+    }
+
+    /// Return a copy of this config safe to serialize for operator display.
+    ///
+    /// `credential_value` on each domain is replaced with `Some("<redacted>")`
+    /// when a value was configured, or left `None` otherwise.  This preserves
+    /// visibility into which domains have credential injection enabled without
+    /// leaking the actual secret to any infra-net peer that can reach
+    /// `GET /config`.
+    pub fn redacted_for_display(&self) -> ProxyConfig {
+        let mut copy = self.clone();
+        for policy in &mut copy.domains {
+            if policy.credential_value.is_some() {
+                policy.credential_value = Some("<redacted>".to_string());
+            }
+        }
+        copy
     }
 
     /// Get the policy for a domain (including alias lookup).

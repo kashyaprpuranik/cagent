@@ -51,6 +51,10 @@ async fn main() {
     tracing::info!("  config: {}", CONFIG_ADDR);
     tracing::info!("  dns: {}", DNS_ADDR);
 
+    // Surface whether CAGENT_PROXY_TOKEN is set so operators notice
+    // unauthenticated config APIs in production deployments.
+    config_api::log_auth_status();
+
     // Load MITM CA (optional — HTTPS interception only works if CA is present)
     let mitm_ca = load_mitm_ca();
 

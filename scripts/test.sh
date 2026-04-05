@@ -140,6 +140,10 @@ if [ "$RUN_E2E" = true ]; then
         export CELL_DNS_SECONDARY="10.${NET_OCTET}.1.20"
         export CAGENT_PROXY_URL="http://10.${NET_OCTET}.2.20:18080"
         export DEVBOX_LOCAL_IP="10.${NET_OCTET}.1.20"
+        # Exercise the authenticated config push path end-to-end.
+        # Must be set identically on warden and cagent-proxy (wired via
+        # docker-compose.yml).
+        export CAGENT_PROXY_TOKEN="${CAGENT_PROXY_TOKEN:-e2e-test-token}"
     else
         export CELL_HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
     fi
