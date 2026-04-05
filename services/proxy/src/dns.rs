@@ -11,8 +11,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use hickory_proto::op::{Header, MessageType, OpCode, ResponseCode};
-use hickory_proto::rr::rdata::{A, AAAA};
-use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
+use hickory_proto::rr::rdata::A;
+use hickory_proto::rr::{RData, Record, RecordType};
 use tokio::net::UdpSocket;
 
 use crate::config::CONFIG;

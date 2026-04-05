@@ -207,6 +207,25 @@ async fn handle_connect_stream(
         }
     }
 
+    // Reject any bytes pipelined after the CONNECT headers but before the
+    // 200 response.  A well-behaved client waits for "200 Connection
+    // Established" before sending tunnelled data; a compromised cell could
+    // smuggle bytes past the TLS handshake otherwise (they'd be buffered
+    // inside `BufReader` and silently dropped when we call `into_inner()`).
+    if !reader.buffer().is_empty() {
+        tracing::warn!(
+            peer = %peer,
+            residual = reader.buffer().len(),
+            "CONNECT rejected: bytes pipelined before handshake complete"
+        );
+        let mut stream = reader.into_inner();
+        let _ = tokio::io::AsyncWriteExt::write_all(
+            &mut stream,
+            b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n",
+        ).await;
+        return;
+    }
+
     // Get the underlying stream back from the BufReader
     let stream = reader.into_inner();
 
