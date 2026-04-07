@@ -40,6 +40,7 @@ _CP_PREFIX = os.environ.get("CP_PREFIX", "")
 COREDNS_CONTAINER_NAME = f"{_CP_PREFIX}dns-filter"
 ENVOY_CONTAINER_NAME = f"{_CP_PREFIX}http-proxy"
 MITM_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}mitm-proxy"
+CAGENT_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}cagent-proxy"
 EMAIL_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}email-proxy"
 WARDEN_CONTAINER_NAME = f"{_CP_PREFIX}warden"
 
@@ -295,12 +296,16 @@ def _container_exists(name: str) -> bool:
 def get_managed_containers() -> List[str]:
     """Build the managed-container list dynamically.
 
-    Cell containers are discovered by label; infrastructure containers are
-    static.  Optional containers (warden, email-proxy) are included
-    only when they actually exist.
+    Cell containers are discovered by label; infrastructure containers
+    depend on the proxy mode.  Optional containers (warden, email-proxy)
+    are included only when they actually exist.
     """
+    proxy_mode = os.environ.get("PROXY_MODE", "legacy")
     names = discover_cell_container_names()
-    names.extend([COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, MITM_PROXY_CONTAINER_NAME])
+    if proxy_mode == "rust":
+        names.append(CAGENT_PROXY_CONTAINER_NAME)
+    else:
+        names.extend([COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, MITM_PROXY_CONTAINER_NAME])
     if _container_exists(WARDEN_CONTAINER_NAME):
         names.append(WARDEN_CONTAINER_NAME)
     if "email" in BETA_FEATURES:

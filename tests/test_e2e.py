@@ -841,8 +841,11 @@ class TestLocalAdminAPI:
         # Agent containers have dynamic names (e.g. cagent-cell-dev-1)
         agent_checks = [k for k in health["checks"] if "cell" in k and "manager" not in k]
         assert len(agent_checks) >= 1, f"No cell container in checks: {list(health['checks'])}"
-        assert f"{_CP_PREFIX}dns-filter" in health["checks"]
-        assert f"{_CP_PREFIX}http-proxy" in health["checks"]
+        if is_rust_mode():
+            assert f"{_CP_PREFIX}cagent-proxy" in health["checks"]
+        else:
+            assert f"{_CP_PREFIX}dns-filter" in health["checks"]
+            assert f"{_CP_PREFIX}http-proxy" in health["checks"]
 
     def test_info(self, admin_url):
         """Info endpoint should return container names and paths."""
@@ -852,8 +855,9 @@ class TestLocalAdminAPI:
         # Agent name is dynamic (label-discovered), just verify it's present
         assert "cell" in data["containers"]
         assert len(data["containers"]["cell"]) > 0
-        assert data["containers"]["dns"] == f"{_CP_PREFIX}dns-filter"
-        assert data["containers"]["http_proxy"] == f"{_CP_PREFIX}http-proxy"
+        if is_legacy_mode():
+            assert data["containers"]["dns"] == f"{_CP_PREFIX}dns-filter"
+            assert data["containers"]["http_proxy"] == f"{_CP_PREFIX}http-proxy"
 
     def test_list_containers(self, admin_url):
         """Should list managed containers with status."""
@@ -864,7 +868,11 @@ class TestLocalAdminAPI:
         # Agent containers have dynamic names; check at least one is present
         agent_containers = [k for k in data["containers"] if "cell" in k and "manager" not in k]
         assert len(agent_containers) >= 1, f"No cell container found: {list(data['containers'])}"
-        for name in (f"{_CP_PREFIX}dns-filter", f"{_CP_PREFIX}http-proxy"):
+        if is_rust_mode():
+            proxy_containers = [f"{_CP_PREFIX}cagent-proxy"]
+        else:
+            proxy_containers = [f"{_CP_PREFIX}dns-filter", f"{_CP_PREFIX}http-proxy"]
+        for name in proxy_containers:
             assert name in data["containers"]
             assert "status" in data["containers"][name]
 
@@ -1163,7 +1171,7 @@ class TestWebTerminal:
     def test_network_isolation_via_terminal(self, admin_url):
         """Direct external access should be blocked even through the terminal."""
         output = self._run("curl -s --connect-timeout 2 http://8.8.8.8 || echo BLOCKED")
-        assert "BLOCKED" in output or "not_allowed" in output, (
+        assert "BLOCKED" in output or "not_allowed" in output or "Domain not allowed" in output, (
             "Cell can reach external IPs directly through terminal — isolation broken!"
         )
 
