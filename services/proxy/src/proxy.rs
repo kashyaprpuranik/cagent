@@ -14,7 +14,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 
 use crate::config::CONFIG;
-use crate::util::{self, error_response, is_hop_by_hop, MAX_BODY_BYTES};
+use crate::util::{error_response, is_hop_by_hop, MAX_BODY_BYTES};
 
 /// Shared HTTP client for connection pooling to upstream servers.
 static HTTP_CLIENT: LazyLock<Client<HttpConnector, Full<Bytes>>> = LazyLock::new(|| {

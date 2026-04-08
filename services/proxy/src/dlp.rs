@@ -97,11 +97,37 @@ impl Default for DlpConfig {
 }
 
 /// A compiled pattern ready for scanning.
-struct CompiledPattern {
-    name: String,
-    regex: Regex,
-    threshold: Option<usize>,
+pub struct CompiledPattern {
+    pub name: String,
+    pub regex: Regex,
+    pub threshold: Option<usize>,
 }
+
+// Manual Debug impl to avoid requiring Regex: Debug
+impl std::fmt::Debug for CompiledPattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledPattern")
+            .field("name", &self.name)
+            .field("threshold", &self.threshold)
+            .finish()
+    }
+}
+
+// Manual Clone impl since Regex doesn't implement Clone but can be reconstructed
+impl Clone for CompiledPattern {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            regex: Regex::new(self.regex.as_str()).unwrap(),
+            threshold: self.threshold,
+        }
+    }
+}
+
+/// Built-in patterns, compiled once at startup.
+static COMPILED_DEFAULTS: LazyLock<Vec<CompiledPattern>> = LazyLock::new(|| {
+    compile_pattern_list(&DEFAULT_PATTERNS)
+});
 
 /// A DLP finding.
 pub struct DlpFinding {
@@ -145,23 +171,28 @@ pub fn scan_body(body: &[u8], domain: &str) -> DlpAction {
         Err(_) => return DlpAction::Allow, // binary body, skip
     };
 
-    // Compile patterns (built-in + custom)
-    let patterns = compile_patterns(dlp);
+    // Use pre-compiled built-in patterns + config's pre-compiled custom patterns.
+    // Both are compiled once (at startup / config push), not per request.
+    let defaults = &*COMPILED_DEFAULTS;
+    let custom = &config.compiled_custom_patterns;
 
     // Fast pre-filter: skip full regex scan if no prefix matches
     let has_prefix = PREFIX_MATCHER.is_match(text);
 
     // Scan plaintext
     let mut findings = Vec::new();
-    if has_prefix || !dlp.custom_patterns.is_empty() {
-        scan_text(text, &patterns, &mut findings);
+    if has_prefix || !custom.is_empty() {
+        scan_text(text, defaults, &mut findings);
+        scan_text(text, custom, &mut findings);
     }
 
     // Scan for PII patterns (SSN, credit card, email/phone bulk) — no prefix needed
-    scan_pii(text, &patterns, &mut findings);
+    scan_pii(text, defaults, &mut findings);
+    scan_pii(text, custom, &mut findings);
 
     // Base64 scan
-    scan_base64(text, &patterns, &mut findings);
+    scan_base64(text, defaults, &mut findings);
+    scan_base64(text, custom, &mut findings);
 
     if findings.is_empty() {
         return DlpAction::Allow;
@@ -170,34 +201,26 @@ pub fn scan_body(body: &[u8], domain: &str) -> DlpAction {
     match dlp.mode.as_str() {
         "block" => DlpAction::Block(findings),
         "redact" => {
-            let redacted = redact_text(text, &patterns);
+            let mut redacted = redact_text(text, defaults);
+            redacted = redact_text(&redacted, custom);
             DlpAction::Redact(findings, redacted.into_bytes())
         }
         _ => DlpAction::Log(findings), // "log" or unknown
     }
 }
 
-fn compile_patterns(dlp: &DlpConfig) -> Vec<CompiledPattern> {
+/// Compile a list of DLP pattern definitions into ready-to-use compiled patterns.
+/// Called once for built-in patterns (at startup) and once per config push for custom patterns.
+pub fn compile_pattern_list(patterns: &[DlpPattern]) -> Vec<CompiledPattern> {
     let mut compiled = Vec::new();
-    // Built-in patterns
-    for p in DEFAULT_PATTERNS.iter() {
-        if let Ok(re) = Regex::new(&p.regex) {
-            compiled.push(CompiledPattern {
-                name: p.name.clone(),
-                regex: re,
-                threshold: p.threshold,
-            });
-        }
-    }
-    // Custom patterns from config
-    for p in &dlp.custom_patterns {
+    for p in patterns {
         match Regex::new(&p.regex) {
             Ok(re) => compiled.push(CompiledPattern {
                 name: p.name.clone(),
                 regex: re,
                 threshold: p.threshold,
             }),
-            Err(e) => tracing::warn!(pattern = %p.name, error = %e, "invalid DLP custom pattern"),
+            Err(e) => tracing::warn!(pattern = %p.name, error = %e, "invalid DLP pattern"),
         }
     }
     compiled

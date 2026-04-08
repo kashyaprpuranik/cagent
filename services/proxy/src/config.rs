@@ -60,6 +60,10 @@ pub struct ProxyConfig {
     /// Pre-computed: `{alias}.devbox.local` → index into `domains`.
     #[serde(skip)]
     pub alias_index: HashMap<String, usize>,
+
+    /// Pre-compiled custom DLP patterns (compiled once per config push, not per request).
+    #[serde(skip)]
+    pub compiled_custom_patterns: Vec<crate::dlp::CompiledPattern>,
 }
 
 impl Default for ProxyConfig {
@@ -70,6 +74,7 @@ impl Default for ProxyConfig {
             domain_index: HashMap::new(),
             allowed_domains: HashSet::new(),
             alias_index: HashMap::new(),
+            compiled_custom_patterns: Vec::new(),
         }
     }
 }
@@ -90,6 +95,8 @@ impl ProxyConfig {
                 self.alias_index.insert(alias_domain, i);
             }
         }
+        // Pre-compile custom DLP patterns once per config push
+        self.compiled_custom_patterns = crate::dlp::compile_pattern_list(&self.dlp.custom_patterns);
         self
     }
 

@@ -34,6 +34,10 @@ pub async fn run_dns_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::
     let socket = UdpSocket::bind(addr).await?;
     tracing::info!("DNS server listening on {}", addr);
 
+    // Single upstream socket reused across all queries (avoids binding
+    // a new ephemeral port per query which can cause port exhaustion).
+    let upstream = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+
     let socket = Arc::new(socket);
     let mut buf = [0u8; 4096];
 
@@ -48,9 +52,10 @@ pub async fn run_dns_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::
 
         let query_data = buf[..len].to_vec();
         let sock = socket.clone();
+        let upstream = upstream.clone();
 
         tokio::spawn(async move {
-            match handle_dns_query(&query_data, src, &sock).await {
+            match handle_dns_query(&query_data, src, &sock, &upstream).await {
                 Ok(()) => {}
                 Err(e) => tracing::debug!(error = %e, "DNS query handling failed"),
             }
@@ -63,6 +68,7 @@ async fn handle_dns_query(
     data: &[u8],
     src: SocketAddr,
     socket: &UdpSocket,
+    upstream: &UdpSocket,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
     use hickory_proto::op::Message;
@@ -109,7 +115,7 @@ async fn handle_dns_query(
     }
 
     // Allowed — forward to upstream DNS
-    match forward_dns_query(data).await {
+    match forward_dns_query(data, upstream).await {
         Ok(response_data) => {
             socket.send_to(&response_data, src).await?;
             tracing::debug!(domain = domain, "DNS allowed: forwarded");
@@ -125,10 +131,8 @@ async fn handle_dns_query(
     Ok(())
 }
 
-/// Forward a DNS query to upstream resolvers.
-async fn forward_dns_query(data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    let upstream = UdpSocket::bind("0.0.0.0:0").await?;
-
+/// Forward a DNS query to upstream resolvers using the shared socket.
+async fn forward_dns_query(data: &[u8], upstream: &UdpSocket) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     for server in UPSTREAM_DNS {
         let addr: SocketAddr = server.parse()?;
         upstream.send_to(data, addr).await?;
