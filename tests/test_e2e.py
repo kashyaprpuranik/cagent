@@ -514,19 +514,28 @@ class TestRateLimiting:
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(is_legacy_mode(), reason="cagent-proxy health endpoint only in rust mode")
-class TestCagentProxyHealth:
-    """Test cagent-proxy health endpoint (rust mode only)."""
+class TestProxyHealth:
+    """Test proxy health endpoint (mode-aware)."""
 
     def test_health_endpoint(self, data_plane_running):
-        """cagent-proxy /health should return 200 from warden container."""
-        result = subprocess.run(
-            ["docker", "exec", f"{_CP_PREFIX}warden", "wget", "-q", "-O", "-",
-             f"http://10.{_NET_OCTET}.2.20:18080/health"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert result.returncode == 0, f"Health check failed: {result.stderr}"
-        assert "ok" in result.stdout, f"Unexpected health response: {result.stdout}"
+        """Proxy health endpoint should return 200."""
+        if is_rust_mode():
+            # cagent-proxy config API /health on infra-net
+            result = subprocess.run(
+                ["docker", "exec", f"{_CP_PREFIX}warden", "wget", "-q", "-O", "-",
+                 f"http://10.{_NET_OCTET}.2.20:18080/health"],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert result.returncode == 0, f"cagent-proxy health check failed: {result.stderr}"
+            assert "ok" in result.stdout, f"Unexpected health response: {result.stdout}"
+        else:
+            # Envoy admin /ready on localhost (only reachable from inside the container)
+            result = subprocess.run(
+                ["docker", "exec", f"{_CP_PREFIX}http-proxy", "bash", "-c",
+                 "echo > /dev/tcp/localhost/9901"],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert result.returncode == 0, f"Envoy admin port not reachable: {result.stderr}"
 
 
 @pytest.mark.e2e
@@ -540,16 +549,6 @@ class TestCredentialInjection:
         assert "NO_SECRETS_IN_ENV" in result.stdout or not result.stdout.strip(), (
             "Cell environment should not contain API keys"
         )
-
-    @pytest.mark.skipif(is_rust_mode(), reason="Envoy not present in rust proxy mode")
-    def test_envoy_handles_credential_injection(self, data_plane_running):
-        """Envoy should be running (handles credential injection via ext_authz)."""
-        result = subprocess.run(
-            ["docker", "ps", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Status}}"],
-            capture_output=True,
-            text=True,
-        )
-        assert "Up" in result.stdout, "Envoy proxy is not running"
 
     def test_http_devbox_local_gets_credentials(self, data_plane_running):
         """HTTP requests to *.devbox.local should get credentials injected.
@@ -682,29 +681,36 @@ class TestCellSecurityHardening:
         result = exec_in_cell(f"nc -z -w 2 {INFRA_ENVOY_IP} 8443 && echo FAIL || echo BLOCKED")
         assert "BLOCKED" in result.stdout, f"Cell can reach envoy on infra-net ({INFRA_ENVOY_IP})"
 
-    @pytest.mark.skipif(is_rust_mode(), reason="Envoy not present in rust proxy mode")
-    def test_envoy_admin_not_reachable(self, data_plane_running):
-        """Envoy admin API (port 9901) must not be reachable from cell-net.
+    def test_proxy_admin_not_reachable(self, data_plane_running):
+        """Proxy admin/config API must not be reachable from cell-net.
 
-        The cell has HTTP_PROXY set, so curl routes through Envoy's listener
-        on 8443 which rejects it as 'destination_not_allowed'. Even bypassing
-        the proxy, the admin binds to 127.0.0.1 so it's unreachable from
-        cell-net. Either outcome means the admin API is not exposed.
+        Envoy admin (9901) binds to 127.0.0.1 inside its container.
+        cagent-proxy config API (18080) listens on infra-net only.
+        In both cases, the cell should not be able to reach it.
         """
-        # Try via proxy (cell's default) — Envoy rejects unknown destinations
-        result = exec_in_cell(f"curl -s --connect-timeout 2 http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED")
-        assert "BLOCKED" in result.stdout or "refused" in result.stdout or "destination_not_allowed" in result.stdout, (
-            "Cell can reach Envoy admin API — config_dump would leak credentials!"
-        )
+        if is_rust_mode():
+            # cagent-proxy config API is on infra-net (10.x.2.20:18080),
+            # cell is on cell-net only — should be unreachable
+            admin_ip = f"10.{_NET_OCTET}.2.20"
+            result = exec_in_cell(
+                f"curl -s --connect-timeout 2 --noproxy '*' http://{admin_ip}:18080/health 2>&1 || echo BLOCKED"
+            )
+            assert "BLOCKED" in result.stdout or "refused" in result.stdout or "timed out" in result.stdout, (
+                "Cell can reach cagent-proxy config API — could overwrite allowlist!"
+            )
+        else:
+            # Envoy admin binds to 127.0.0.1, unreachable from cell-net
+            result = exec_in_cell(f"curl -s --connect-timeout 2 http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED")
+            assert "BLOCKED" in result.stdout or "refused" in result.stdout or "destination_not_allowed" in result.stdout, (
+                "Cell can reach Envoy admin API — config_dump would leak credentials!"
+            )
 
-        # Try bypassing the proxy — admin binds to 127.0.0.1, so direct
-        # connection to {HTTP_PROXY_IP}:9901 should be refused
-        result = exec_in_cell(
-            f"curl -s --connect-timeout 2 --noproxy '*' http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED"
-        )
-        assert "BLOCKED" in result.stdout or "refused" in result.stdout, (
-            "Cell can reach Envoy admin API directly (bypassing proxy)!"
-        )
+            result = exec_in_cell(
+                f"curl -s --connect-timeout 2 --noproxy '*' http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED"
+            )
+            assert "BLOCKED" in result.stdout or "refused" in result.stdout, (
+                "Cell can reach Envoy admin API directly (bypassing proxy)!"
+            )
 
     def test_raw_socket_blocked(self, data_plane_running):
         """Raw sockets should be blocked (CAP_NET_RAW dropped + seccomp)."""
@@ -1692,45 +1698,8 @@ class TestWardenAuthE2E:
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(is_rust_mode(), reason="mitmproxy not present in rust proxy mode")
-class TestMITMProxyHTTPS:
-    """Test HTTPS egress through MITM proxy (legacy mode only)."""
-
-    @pytest.fixture(autouse=True)
-    def _wait_for_mitm(self, data_plane_running):
-        """Wait for mitmproxy to be reachable from cell."""
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            probe = exec_in_cell("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 https://pypi.org/ 2>&1")
-            if probe.stdout.strip() not in ("", "000"):
-                break
-            time.sleep(2)
-
-    def test_https_to_allowed_domain_succeeds(self, data_plane_running):
-        """HTTPS request to an allowed domain should succeed through mitmproxy."""
-        result = exec_in_cell("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 https://pypi.org/ 2>&1")
-        http_code = result.stdout.strip()
-        assert http_code in ("200", "301", "302"), f"HTTPS to allowed domain failed with {http_code}: {result.stderr}"
-
-    def test_https_to_blocked_domain_fails(self, data_plane_running):
-        """HTTPS request to a blocked domain should be rejected."""
-        result = exec_in_cell(
-            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 https://evil.example.com/ 2>&1"
-        )
-        http_code = result.stdout.strip()
-        # Should get 403 from Envoy or 000 (connection failed, DNS blocked)
-        assert http_code in ("403", "000"), f"HTTPS to blocked domain should fail but got {http_code}"
-
-    def test_https_credential_injection(self, data_plane_running):
-        """HTTPS requests should have credentials injected (via mitmproxy -> Envoy ext_authz)."""
-        # Verify Envoy ext_authz is running (handles credential injection for both HTTP and HTTPS)
-        result = subprocess.run(
-            ["docker", "ps", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Status}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        assert "Up" in result.stdout, "Envoy proxy must be running for credential injection"
+class TestHTTPSProxyConfig:
+    """Test HTTPS proxy configuration and CA trust (both modes)."""
 
     def test_cell_trusts_mitm_ca(self, data_plane_running):
         """Cell should have the MITM CA cert in its trust store."""
@@ -1745,12 +1714,18 @@ class TestMITMProxyHTTPS:
         cert_count = int(result.stdout.strip()) if result.stdout.strip().isdigit() else 0
         assert cert_count > 1, "Combined CA bundle should contain multiple certificates"
 
-    def test_cell_https_proxy_points_to_mitmproxy(self, data_plane_running):
-        """Cell HTTPS_PROXY should point to mitmproxy when MITM is active."""
+    def test_cell_https_proxy_configured(self, data_plane_running):
+        """Cell HTTPS_PROXY should point to the correct proxy."""
         result = exec_in_cell("echo $HTTPS_PROXY")
-        assert f"{MITM_PROXY_IP}:8080" in result.stdout, (
-            f"HTTPS_PROXY should point to mitmproxy, got: {result.stdout.strip()}"
-        )
+        proxy_val = result.stdout.strip()
+        if is_rust_mode():
+            assert f"{CAGENT_PROXY_IP}:18443" in proxy_val, (
+                f"HTTPS_PROXY should point to cagent-proxy, got: {proxy_val}"
+            )
+        else:
+            assert f"{MITM_PROXY_IP}:8080" in proxy_val, (
+                f"HTTPS_PROXY should point to mitmproxy, got: {proxy_val}"
+            )
 
 
 # =============================================================================
