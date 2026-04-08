@@ -96,11 +96,10 @@ async fn handle_dns_query(
         return Ok(());
     }
 
-    // Check domain allowlist
+    // Check domain allowlist (is_allowed handles wildcards via *.parent matching)
     let config = CONFIG.load();
-    let base_domain = extract_base_domain(domain);
 
-    if !config.is_allowed(domain) && !config.is_allowed(&base_domain) {
+    if !config.is_allowed(domain) {
         // Blocked — return NXDOMAIN
         let response = build_nxdomain_response(&request);
         let response_bytes = response.to_bytes()?;
@@ -217,13 +216,3 @@ fn build_servfail_response(request: &hickory_proto::op::Message) -> hickory_prot
     response
 }
 
-/// Extract base domain for wildcard matching.
-/// e.g., "sub.api.github.com" → "api.github.com" → "github.com"
-fn extract_base_domain(domain: &str) -> String {
-    let parts: Vec<&str> = domain.split('.').collect();
-    if parts.len() > 2 {
-        parts[parts.len() - 2..].join(".")
-    } else {
-        domain.to_string()
-    }
-}

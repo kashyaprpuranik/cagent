@@ -14,6 +14,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 
 use crate::config::CONFIG;
+use crate::util::{self, error_response, is_hop_by_hop, MAX_BODY_BYTES};
 
 /// Shared HTTP client for connection pooling to upstream servers.
 static HTTP_CLIENT: LazyLock<Client<HttpConnector, Full<Bytes>>> = LazyLock::new(|| {
@@ -156,9 +157,22 @@ pub async fn handle_request(
         }
     }
 
-    // Collect request body
+    // Collect request body (with size limit to prevent OOM)
+    let content_length: usize = req.headers()
+        .get(hyper::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    if content_length > MAX_BODY_BYTES {
+        access_log(&real_domain, &method, &path, 413, start, 0, 0, credential_injected);
+        return Ok(error_response(StatusCode::PAYLOAD_TOO_LARGE, "Request body too large"));
+    }
     let body_bytes = req.collect().await?.to_bytes();
     let bytes_received = body_bytes.len();
+    if bytes_received > MAX_BODY_BYTES {
+        access_log(&real_domain, &method, &path, 413, start, 0, bytes_received, credential_injected);
+        return Ok(error_response(StatusCode::PAYLOAD_TOO_LARGE, "Request body too large"));
+    }
 
     // DLP scanning
     let body_to_send = match crate::dlp::scan_body(&body_bytes, &real_domain) {
@@ -272,26 +286,3 @@ fn extract_host(req: &Request<Incoming>) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Check if a header is hop-by-hop (should not be forwarded).
-fn is_hop_by_hop(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "connection"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailers"
-            | "transfer-encoding"
-            | "upgrade"
-    )
-}
-
-/// Build a simple error response.
-fn error_response(status: StatusCode, body: &str) -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(status)
-        .header("Content-Type", "text/plain")
-        .body(Full::new(Bytes::from(body.to_string())))
-        .unwrap()
-}

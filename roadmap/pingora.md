@@ -1,6 +1,6 @@
-# Pingora Migration: Unified Data Plane Proxy
+# cagent-proxy: Unified Data Plane Proxy
 
-Replace Envoy + mitmproxy + CoreDNS with a single Rust binary using Pingora + Hickory DNS.
+Replace Envoy + mitmproxy + CoreDNS with a single Rust binary (hyper + tokio-rustls + Hickory DNS).
 
 ## Current Architecture
 

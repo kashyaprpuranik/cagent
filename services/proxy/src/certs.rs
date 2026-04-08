@@ -45,16 +45,23 @@ impl MitmCa {
     }
 
     /// Get or create a TLS acceptor for the given domain.
+    ///
+    /// Uses moka's `try_get_with` for atomic get-or-insert — concurrent
+    /// CONNECT requests for the same domain share a single cert generation
+    /// instead of racing.
     pub async fn get_acceptor(&self, domain: &str) -> Result<Arc<TlsAcceptor>, Box<dyn std::error::Error + Send + Sync>> {
-        let domain = domain.to_lowercase();
+        let domain_lower = domain.to_lowercase();
+        let domain_for_gen = domain_lower.clone();
 
-        if let Some(acceptor) = self.cache.get(&domain).await {
-            return Ok(acceptor);
-        }
-
-        let acceptor = Arc::new(self.create_acceptor(&domain)?);
-        self.cache.insert(domain, acceptor.clone()).await;
-        Ok(acceptor)
+        self.cache
+            .try_get_with(domain_lower, async {
+                let acceptor = self.create_acceptor(&domain_for_gen)?;
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Arc::new(acceptor))
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            })
     }
 
     /// Generate a leaf cert for the domain and create a TLS acceptor.
@@ -88,6 +95,10 @@ impl MitmCa {
 
         // SAN
         params.subject_alt_names = vec![SanType::DnsName(domain.try_into()?)];
+
+        // Short validity — MITM certs are ephemeral and cached for 1h
+        params.not_before = time::OffsetDateTime::now_utc();
+        params.not_after = time::OffsetDateTime::now_utc() + time::Duration::hours(24);
 
         // Generate leaf key pair
         let leaf_key = KeyPair::generate()?;

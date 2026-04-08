@@ -13,6 +13,7 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 
 use crate::config::CONFIG;
+use crate::util::{error_response, is_hop_by_hop, MAX_BODY_BYTES};
 
 /// Shared HTTPS client for connection pooling to upstream servers.
 static HTTPS_CLIENT: LazyLock<Client<hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Full<Bytes>>> = LazyLock::new(|| {
@@ -136,9 +137,22 @@ pub async fn handle_intercepted_request(
         }
     }
 
-    // Collect body
+    // Collect body (with size limit to prevent OOM)
+    let content_length: usize = req.headers()
+        .get(hyper::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    if content_length > MAX_BODY_BYTES {
+        access_log(&real_domain, &method, &path, 413, start, 0, 0, credential_injected);
+        return Ok(error_response(StatusCode::PAYLOAD_TOO_LARGE, "Request body too large"));
+    }
     let body_bytes = req.collect().await?.to_bytes();
     let bytes_received = body_bytes.len();
+    if bytes_received > MAX_BODY_BYTES {
+        access_log(&real_domain, &method, &path, 413, start, 0, bytes_received, credential_injected);
+        return Ok(error_response(StatusCode::PAYLOAD_TOO_LARGE, "Request body too large"));
+    }
 
     // DLP scanning
     let body_to_send = match crate::dlp::scan_body(&body_bytes, &real_domain) {
@@ -234,18 +248,3 @@ async fn forward_https(
     Ok(response.body(Full::new(body)).unwrap())
 }
 
-fn is_hop_by_hop(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "connection" | "keep-alive" | "proxy-authenticate" | "proxy-authorization"
-            | "te" | "trailers" | "transfer-encoding" | "upgrade"
-    )
-}
-
-fn error_response(status: StatusCode, body: &str) -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(status)
-        .header("Content-Type", "text/plain")
-        .body(Full::new(Bytes::from(body.to_string())))
-        .unwrap()
-}

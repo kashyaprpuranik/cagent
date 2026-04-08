@@ -10,9 +10,12 @@ mod dlp;
 mod dns;
 mod mitm;
 mod proxy;
+mod util;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+use tokio::sync::Semaphore;
 
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -114,18 +117,26 @@ fn load_mitm_ca() -> Option<Arc<certs::MitmCa>> {
 ///
 /// Peeks at the first line to detect CONNECT (HTTPS) vs plain HTTP.
 /// CONNECT requests get MITM treatment; plain HTTP goes through the normal proxy.
+/// Maximum concurrent proxy connections.  Prevents unbounded task spawning
+/// if a compromised cell floods the proxy (defense-in-depth on top of the
+/// cell's 256-PID limit).
+const MAX_PROXY_CONNECTIONS: usize = 1024;
+
 async fn run_proxy_listener(
     mitm_ca: Option<Arc<certs::MitmCa>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = PROXY_ADDR.parse()?;
     let listener = TcpListener::bind(addr).await?;
-    tracing::info!("proxy listening on {}", addr);
+    let semaphore = Arc::new(Semaphore::new(MAX_PROXY_CONNECTIONS));
+    tracing::info!("proxy listening on {} (max {} concurrent)", addr, MAX_PROXY_CONNECTIONS);
 
     loop {
         let (stream, peer) = listener.accept().await?;
         let ca = mitm_ca.clone();
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
 
         tokio::spawn(async move {
+            let _permit = permit; // held until task completes
             // Peek at the first bytes to detect CONNECT
             let mut buf = [0u8; 8];
             let n = match stream.peek(&mut buf).await {
