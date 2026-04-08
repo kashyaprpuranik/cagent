@@ -34,8 +34,10 @@ const METADATA_IPS: &[&str] = &["169.254.169.254", "metadata.google.internal"];
 pub async fn handle_request(
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    let start = std::time::Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
+    let path = uri.path_and_query().map(|pq| pq.to_string()).unwrap_or_else(|| "/".to_string());
 
     // Extract host from the request (Host header or URI authority)
     let host = extract_host(&req).unwrap_or_default();
@@ -49,7 +51,7 @@ pub async fn handle_request(
 
     // Block cloud metadata endpoint (defense-in-depth)
     if METADATA_IPS.iter().any(|ip| domain.eq_ignore_ascii_case(ip)) {
-        tracing::warn!(domain = domain, "blocked: metadata endpoint");
+        access_log(domain, &method, &path, 403, start, 0, 0, false);
         return Ok(error_response(StatusCode::FORBIDDEN, "Metadata endpoint blocked"));
     }
 
@@ -58,7 +60,7 @@ pub async fn handle_request(
 
     // 1. Domain allowlist check
     if !config.is_allowed(domain) {
-        tracing::info!(domain = domain, method = %method, "blocked: domain not in allowlist");
+        access_log(domain, &method, &path, 403, start, 0, 0, false);
         return Ok(error_response(StatusCode::FORBIDDEN, "Domain not allowed"));
     }
 
@@ -80,7 +82,7 @@ pub async fn handle_request(
     // 2. Read-only enforcement
     if let Some(p) = policy {
         if p.read_only && !matches!(method, hyper::Method::GET | hyper::Method::HEAD | hyper::Method::OPTIONS) {
-            tracing::info!(domain = domain, method = %method, "blocked: read-only domain");
+            access_log(&real_domain, &method, &path, 403, start, 0, 0, false);
             return Ok(error_response(StatusCode::FORBIDDEN, "Write methods not allowed for this domain"));
         }
     }
@@ -88,16 +90,16 @@ pub async fn handle_request(
     // 3. Path filtering
     if let Some(p) = policy {
         if !p.allowed_paths.is_empty() {
-            let path = uri.path();
+            let req_path = uri.path();
             let path_allowed = p.allowed_paths.iter().any(|pattern| {
                 if pattern.ends_with('*') {
-                    path.starts_with(pattern.trim_end_matches('*'))
+                    req_path.starts_with(pattern.trim_end_matches('*'))
                 } else {
-                    path == pattern
+                    req_path == pattern
                 }
             });
             if !path_allowed {
-                tracing::info!(domain = domain, path = path, "blocked: path not allowed");
+                access_log(&real_domain, &method, &path, 403, start, 0, 0, false);
                 return Ok(error_response(StatusCode::FORBIDDEN, "Path not allowed"));
             }
         }
@@ -107,7 +109,7 @@ pub async fn handle_request(
     if let Some(p) = policy {
         if let Some(rpm) = p.rate_limit_rpm {
             if !crate::config::check_rate_limit(&real_domain, rpm) {
-                tracing::info!(domain = %real_domain, rpm = rpm, "blocked: rate limit exceeded");
+                access_log(&real_domain, &method, &path, 429, start, 0, 0, false);
                 return Ok(error_response(StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded"));
             }
         }
@@ -137,10 +139,11 @@ pub async fn handle_request(
         upstream_req = upstream_req.header("Host", real_domain.as_str());
     }
 
-    // 5. Add X-Real-Domain header (for upstream logging/routing)
+    // Add X-Real-Domain header (for upstream logging/routing)
     upstream_req = upstream_req.header("X-Real-Domain", real_domain.as_str());
 
     // 6. Credential injection
+    let mut credential_injected = false;
     if let Some(p) = policy {
         if let (Some(header), Some(format), Some(value)) =
             (&p.credential_header, &p.credential_format, &p.credential_value)
@@ -148,12 +151,14 @@ pub async fn handle_request(
             let header_value = format.replace("{value}", value);
             upstream_req = upstream_req.header(header.as_str(), header_value);
             upstream_req = upstream_req.header("X-Credential-Injected", "true");
+            credential_injected = true;
             tracing::debug!(domain = domain, header = header.as_str(), "credential injected");
         }
     }
 
     // Collect request body
     let body_bytes = req.collect().await?.to_bytes();
+    let bytes_received = body_bytes.len();
 
     // DLP scanning
     let body_to_send = match crate::dlp::scan_body(&body_bytes, &real_domain) {
@@ -168,6 +173,7 @@ pub async fn handle_request(
             for f in &findings {
                 tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: blocked");
             }
+            access_log(&real_domain, &method, &path, 403, start, 0, bytes_received, credential_injected);
             return Ok(error_response(StatusCode::FORBIDDEN, "Blocked by DLP: request body contains sensitive data"));
         }
         crate::dlp::DlpAction::Redact(findings, redacted) => {
@@ -182,28 +188,55 @@ pub async fn handle_request(
         .body(Full::new(body_to_send))
         .unwrap();
 
-    // 6. Forward upstream (with timeout)
+    // 7. Forward upstream (with timeout)
     match tokio::time::timeout(std::time::Duration::from_secs(30), forward_upstream(upstream_req)).await {
         Err(_) => {
-            tracing::warn!(domain = %real_domain, "upstream timeout (30s)");
-            return Ok(error_response(StatusCode::GATEWAY_TIMEOUT, "Upstream request timed out"));
+            access_log(&real_domain, &method, &path, 504, start, 0, bytes_received, credential_injected);
+            Ok(error_response(StatusCode::GATEWAY_TIMEOUT, "Upstream request timed out"))
         }
         Ok(result) => match result {
             Ok(resp) => {
-                tracing::info!(
-                    domain = %real_domain,
-                    method = %method,
-                    status = resp.status().as_u16(),
-                    "proxied"
-                );
+                let status = resp.status().as_u16();
+                access_log(&real_domain, &method, &path, status, start, 0, bytes_received, credential_injected);
                 Ok(resp)
             }
             Err(e) => {
                 tracing::error!(domain = %real_domain, error = %e, "upstream error");
+                access_log(&real_domain, &method, &path, 502, start, 0, bytes_received, credential_injected);
                 Ok(error_response(StatusCode::BAD_GATEWAY, "Upstream connection failed"))
             }
         }
     }
+}
+
+/// Emit a structured access log entry with all fields the analytics pipeline
+/// expects.  Vector's `parse_docker` transform parses the JSON and extracts
+/// these fields; the `source:envoy AND log_type:access` filter in widget
+/// queries matches because Vector classifies cagent-proxy logs with
+/// `source = "envoy"` and sets `log_type = "access"` when `method` is present.
+fn access_log(
+    domain: &str,
+    method: &hyper::Method,
+    path: &str,
+    response_code: u16,
+    start: std::time::Instant,
+    bytes_sent: usize,
+    bytes_received: usize,
+    credential_injected: bool,
+) {
+    let duration = start.elapsed().as_millis() as u64;
+    tracing::info!(
+        method = %method,
+        path = path,
+        authority = domain,
+        upstream_host = domain,
+        response_code = response_code,
+        duration = duration,
+        bytes_sent = bytes_sent,
+        bytes_received = bytes_received,
+        credential_injected = credential_injected,
+        "access"
+    );
 }
 
 /// Forward request to the upstream server.

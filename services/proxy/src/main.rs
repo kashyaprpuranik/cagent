@@ -33,8 +33,12 @@ const CA_KEY_PATH: &str = "/etc/cagent/mitm/mitmproxy-ca.pem";
 
 #[tokio::main]
 async fn main() {
-    // Initialize logging
+    // Initialize logging — JSON output with flattened fields so Vector can
+    // extract access-log fields (method, response_code, authority, etc.)
+    // directly from the top-level JSON keys.
     tracing_subscriber::fmt()
+        .json()
+        .flatten_event(true)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "cagent_proxy=info".parse().unwrap()),

@@ -56,7 +56,7 @@ transforms:
     source: |
       container = to_string(.container_name) ?? "unknown"
 
-      .source = if contains(container, "http-proxy") {
+      .source = if contains(container, "http-proxy") || contains(container, "cagent-proxy") {
         "envoy"
       } else if contains(container, "mitm-proxy") {
         "mitmproxy"

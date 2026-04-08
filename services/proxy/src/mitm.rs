@@ -41,14 +41,16 @@ pub async fn handle_intercepted_request(
     domain: &str,
     port: u16,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    let start = std::time::Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    let path = uri.path_and_query().map(|pq| pq.to_string()).unwrap_or_else(|| "/".to_string());
 
     let config = CONFIG.load();
 
     // Domain already checked in handle_connect, but re-check for safety
     if !config.is_allowed(domain) {
+        access_log(domain, &method, &path, 403, start, 0, 0, false);
         return Ok(error_response(StatusCode::FORBIDDEN, "Domain not allowed"));
     }
 
@@ -68,7 +70,7 @@ pub async fn handle_intercepted_request(
     // Read-only enforcement
     if let Some(p) = policy {
         if p.read_only && !matches!(method, hyper::Method::GET | hyper::Method::HEAD | hyper::Method::OPTIONS) {
-            tracing::info!(domain = domain, method = %method, "MITM blocked: read-only domain");
+            access_log(&real_domain, &method, &path, 403, start, 0, 0, false);
             return Ok(error_response(StatusCode::FORBIDDEN, "Write methods not allowed"));
         }
     }
@@ -84,7 +86,7 @@ pub async fn handle_intercepted_request(
                 }
             });
             if !path_allowed {
-                tracing::info!(domain = domain, path = path, "MITM blocked: path not allowed");
+                access_log(&real_domain, &method, &path, 403, start, 0, 0, false);
                 return Ok(error_response(StatusCode::FORBIDDEN, "Path not allowed"));
             }
         }
@@ -94,7 +96,7 @@ pub async fn handle_intercepted_request(
     if let Some(p) = policy {
         if let Some(rpm) = p.rate_limit_rpm {
             if !crate::config::check_rate_limit(&real_domain, rpm) {
-                tracing::info!(domain = %real_domain, rpm = rpm, "MITM blocked: rate limit exceeded");
+                access_log(&real_domain, &method, &path, 429, start, 0, 0, false);
                 return Ok(error_response(StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded"));
             }
         }
@@ -121,6 +123,7 @@ pub async fn handle_intercepted_request(
     upstream_req = upstream_req.header("X-Real-Domain", real_domain.as_str());
 
     // Credential injection
+    let mut credential_injected = false;
     if let Some(p) = policy {
         if let (Some(header), Some(format), Some(value)) =
             (&p.credential_header, &p.credential_format, &p.credential_value)
@@ -128,12 +131,14 @@ pub async fn handle_intercepted_request(
             let header_value = format.replace("{value}", value);
             upstream_req = upstream_req.header(header.as_str(), header_value);
             upstream_req = upstream_req.header("X-Credential-Injected", "true");
+            credential_injected = true;
             tracing::debug!(domain = domain, "MITM credential injected");
         }
     }
 
     // Collect body
     let body_bytes = req.collect().await?.to_bytes();
+    let bytes_received = body_bytes.len();
 
     // DLP scanning
     let body_to_send = match crate::dlp::scan_body(&body_bytes, &real_domain) {
@@ -148,6 +153,7 @@ pub async fn handle_intercepted_request(
             for f in &findings {
                 tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: blocked");
             }
+            access_log(&real_domain, &method, &path, 403, start, 0, bytes_received, credential_injected);
             return Ok(error_response(StatusCode::FORBIDDEN, "Blocked by DLP: request body contains sensitive data"));
         }
         crate::dlp::DlpAction::Redact(findings, redacted) => {
@@ -165,26 +171,48 @@ pub async fn handle_intercepted_request(
     // Forward upstream over HTTPS (with timeout)
     match tokio::time::timeout(std::time::Duration::from_secs(30), forward_https(upstream_req)).await {
         Err(_) => {
-            tracing::warn!(domain = %real_domain, "MITM upstream timeout (30s)");
+            access_log(&real_domain, &method, &path, 504, start, 0, bytes_received, credential_injected);
             Ok(error_response(StatusCode::GATEWAY_TIMEOUT, "Upstream request timed out"))
         }
         Ok(result) => match result {
             Ok(resp) => {
-                tracing::info!(
-                    domain = %real_domain,
-                    method = %method,
-                    path = path,
-                    status = resp.status().as_u16(),
-                    "MITM proxied"
-                );
+                let status = resp.status().as_u16();
+                access_log(&real_domain, &method, &path, status, start, 0, bytes_received, credential_injected);
                 Ok(resp)
             }
             Err(e) => {
                 tracing::error!(domain = %real_domain, error = %e, "MITM upstream error");
+                access_log(&real_domain, &method, &path, 502, start, 0, bytes_received, credential_injected);
                 Ok(error_response(StatusCode::BAD_GATEWAY, "Upstream connection failed"))
             }
         }
     }
+}
+
+/// Emit a structured access log entry (same schema as proxy.rs).
+fn access_log(
+    domain: &str,
+    method: &hyper::Method,
+    path: &str,
+    response_code: u16,
+    start: std::time::Instant,
+    bytes_sent: usize,
+    bytes_received: usize,
+    credential_injected: bool,
+) {
+    let duration = start.elapsed().as_millis() as u64;
+    tracing::info!(
+        method = %method,
+        path = path,
+        authority = domain,
+        upstream_host = domain,
+        response_code = response_code,
+        duration = duration,
+        bytes_sent = bytes_sent,
+        bytes_received = bytes_received,
+        credential_injected = credential_injected,
+        "access"
+    );
 }
 
 /// Forward request to upstream over HTTPS (TLS).
