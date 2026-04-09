@@ -73,15 +73,14 @@ async def list_sandboxes(
         limit: Max results to return (default 50).
     """
     client = _get_client()
+    params: dict = {"limit": limit, "offset": 0}
+    if status is not None:
+        params["status"] = status
+    if online is not None:
+        params["online"] = str(online).lower()
     try:
-        result = await client.cells.list(limit=limit)
-        items = result.model_dump()
-        # Apply post-filters that the SDK list() doesn't support
-        if status is not None:
-            items["items"] = [c for c in items["items"] if c.get("status") == status]
-        if online is not None:
-            items["items"] = [c for c in items["items"] if c.get("online") == online]
-        return _fmt(items)
+        resp = await client.request("GET", "/api/v1/cells", params=params)
+        return _fmt(resp.json())
     except ApiError as e:
         return _error(e)
 
@@ -240,6 +239,8 @@ async def get_audit_log(limit: int = 50, event_type: Optional[str] = None) -> st
 
 def main() -> None:
     """Entry point for the cagent-mcp CLI."""
+    # Validate required env vars at startup for clear error reporting
+    get_api_token()
     mcp.run()
 
 

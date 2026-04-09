@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cagent.exceptions import ApiError, NotFoundError
-from cagent.models import Cell, CellStatus, DomainPolicyResponse, PaginatedResponse
+from cagent.models import CellStatus, DomainPolicyResponse, PaginatedResponse
 
 from cagent_mcp.server import (
     add_domain_policy,
@@ -70,12 +70,26 @@ async def test_create_sandbox_with_ssh_key(mock_client):
 
 @pytest.mark.asyncio
 async def test_list_sandboxes(mock_client):
-    mock_client.cells.list.return_value = PaginatedResponse[Cell](
-        items=[], total=0, limit=50, offset=0
-    )
+    resp = MagicMock()
+    resp.json.return_value = {"items": [], "total": 0, "limit": 50, "offset": 0}
+    mock_client.request.return_value = resp
     result = json.loads(await list_sandboxes())
     assert result["items"] == []
-    mock_client.cells.list.assert_called_once_with(limit=50)
+    mock_client.request.assert_called_once_with(
+        "GET", "/api/v1/cells", params={"limit": 50, "offset": 0}
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_sandboxes_with_filters(mock_client):
+    resp = MagicMock()
+    resp.json.return_value = {"items": [{"cell_id": "c1", "status": "running"}], "total": 1, "limit": 10, "offset": 0}
+    mock_client.request.return_value = resp
+    result = json.loads(await list_sandboxes(status="running", online=True, limit=10))
+    assert result["total"] == 1
+    mock_client.request.assert_called_once_with(
+        "GET", "/api/v1/cells", params={"limit": 10, "offset": 0, "status": "running", "online": "true"}
+    )
 
 
 @pytest.mark.asyncio
@@ -210,7 +224,7 @@ async def test_tool_returns_error_on_not_found(mock_client):
 
 @pytest.mark.asyncio
 async def test_tool_returns_error_on_auth_failure(mock_client):
-    mock_client.cells.list.side_effect = ApiError(401, "Invalid or expired token")
+    mock_client.request.side_effect = ApiError(401, "Invalid or expired token")
     result = json.loads(await list_sandboxes())
     assert result["error"] is True
     assert result["status_code"] == 401
