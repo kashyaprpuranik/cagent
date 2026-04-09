@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -14,13 +15,11 @@ from cagent.models import (
     CommunityProfile,
     DomainPolicyResponse,
     PaginatedResponse,
+    ProfileImportResult,
     SecurityProfile,
 )
 
 runner = CliRunner()
-
-from datetime import datetime
-
 NOW = datetime.min
 
 
@@ -82,7 +81,6 @@ def test_profile_community(mock_factory):
 def test_profile_apply(mock_factory):
     client = _mock_client()
     mock_factory.return_value = client
-    from cagent.models import ProfileImportResult
     client.profiles.apply.return_value = ProfileImportResult(
         profile_id=1, profile_name="default", domain_policies_created=5,
         email_policies_created=0, dlp_updated=True, profile_updated=True,
