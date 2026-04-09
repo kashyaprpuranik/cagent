@@ -83,9 +83,11 @@ def profile_show(
                     if p.name == name_or_id:
                         profile = p
                         break
-                if profile or offset + len(page.items) >= page.total:
+                if profile:
                     break
                 offset += len(page.items)
+                if offset >= page.total:
+                    break
             if not profile:
                 _die(f"Profile '{name_or_id}' not found")
     typer.echo(json.dumps(profile.model_dump(), indent=2, default=str))
@@ -93,9 +95,11 @@ def profile_show(
 
 @profile_app.command("community")
 @handle_errors
-def profile_community():
+def profile_community(
+    base_url: Optional[str] = typer.Option(None, "--api-url", envvar="CAGENT_API_URL", help="CP API URL"),
+):
     """List available community profiles."""
-    with _client() as c:
+    with _client(base_url) as c:
         profiles = c.profiles.list_community()
     for p in profiles:
         tags = ", ".join(p.tags) if p.tags else ""
@@ -219,9 +223,13 @@ def cell_restart(
 def cell_wipe(
     cell_id: str = typer.Argument(help="Cell ID"),
     workspace: bool = typer.Option(False, "--workspace", "-w", help="Also wipe workspace"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
     base_url: Optional[str] = typer.Option(None, "--api-url", envvar="CAGENT_API_URL"),
 ):
     """Wipe a cell (reset to clean state)."""
+    action = "wipe (including workspace)" if workspace else "wipe"
+    if not yes:
+        typer.confirm(f"Are you sure you want to {action} cell '{cell_id}'?", abort=True)
     with _client(base_url) as c:
         c.cells.wipe(cell_id, workspace=workspace)
     msg = "Wipe (with workspace)" if workspace else "Wipe"
@@ -255,7 +263,9 @@ def domain_list(
 def domain_add(
     domain: str = typer.Argument(help="Domain to allow (e.g. 'api.openai.com')"),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
+    alias: Optional[str] = typer.Option(None, "--alias", "-a", help="Local alias (e.g. 'openai' -> openai.devbox.local)"),
     rpm: Optional[int] = typer.Option(None, "--rpm", help="Requests per minute limit"),
+    read_only: Optional[bool] = typer.Option(None, "--read-only", help="Block POST/PUT/DELETE methods"),
     base_url: Optional[str] = typer.Option(None, "--api-url", envvar="CAGENT_API_URL"),
 ):
     """Allow a domain for egress traffic."""
@@ -263,7 +273,9 @@ def domain_add(
         result = c.domain_policies.create(
             domain=domain,
             description=description,
+            alias=alias,
             requests_per_minute=rpm,
+            read_only=read_only,
         )
     typer.echo(f"Added domain policy: {result.domain} (id={result.id})")
 

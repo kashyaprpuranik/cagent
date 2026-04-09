@@ -65,6 +65,36 @@ def test_profile_show_by_id(mock_factory):
 
 
 @patch("cagent.cli._client")
+def test_profile_show_by_name(mock_factory):
+    client = _mock_client()
+    mock_factory.return_value = client
+    client.profiles.get.side_effect = ApiError(404, "Not found")
+    client.profiles.list.return_value = PaginatedResponse[SecurityProfile](
+        items=[
+            SecurityProfile(id=1, tenant_id=1, name="default", created_at=NOW, updated_at=NOW),
+            SecurityProfile(id=2, tenant_id=1, name="strict", description="Locked", created_at=NOW, updated_at=NOW),
+        ],
+        total=2, limit=100, offset=0,
+    )
+    result = runner.invoke(app, ["profile", "show", "strict"])
+    assert result.exit_code == 0
+    assert '"name": "strict"' in result.output
+
+
+@patch("cagent.cli._client")
+def test_profile_show_not_found(mock_factory):
+    client = _mock_client()
+    mock_factory.return_value = client
+    client.profiles.get.side_effect = ApiError(404, "Not found")
+    client.profiles.list.return_value = PaginatedResponse[SecurityProfile](
+        items=[], total=0, limit=100, offset=0,
+    )
+    result = runner.invoke(app, ["profile", "show", "nonexistent"])
+    assert result.exit_code == 1
+    assert "not found" in result.output
+
+
+@patch("cagent.cli._client")
 def test_profile_community(mock_factory):
     client = _mock_client()
     mock_factory.return_value = client
@@ -170,7 +200,7 @@ def test_cell_wipe(mock_factory):
     client = _mock_client()
     mock_factory.return_value = client
     client.cells.wipe.return_value = {"status": "queued"}
-    result = runner.invoke(app, ["cell", "wipe", "my-agent"])
+    result = runner.invoke(app, ["cell", "wipe", "my-agent", "--yes"])
     assert result.exit_code == 0
     assert "Wipe command sent" in result.output
     client.cells.wipe.assert_called_once_with("my-agent", workspace=False)
@@ -181,10 +211,19 @@ def test_cell_wipe_workspace(mock_factory):
     client = _mock_client()
     mock_factory.return_value = client
     client.cells.wipe.return_value = {"status": "queued"}
-    result = runner.invoke(app, ["cell", "wipe", "my-agent", "--workspace"])
+    result = runner.invoke(app, ["cell", "wipe", "my-agent", "--workspace", "--yes"])
     assert result.exit_code == 0
     assert "Wipe (with workspace)" in result.output
     client.cells.wipe.assert_called_once_with("my-agent", workspace=True)
+
+
+@patch("cagent.cli._client")
+def test_cell_wipe_requires_confirmation(mock_factory):
+    client = _mock_client()
+    mock_factory.return_value = client
+    result = runner.invoke(app, ["cell", "wipe", "my-agent"], input="n\n")
+    assert result.exit_code != 0
+    client.cells.wipe.assert_not_called()
 
 
 # -- Domain commands --
@@ -219,7 +258,7 @@ def test_domain_add(mock_factory):
     assert result.exit_code == 0
     assert "Added domain policy: api.anthropic.com" in result.output
     client.domain_policies.create.assert_called_once_with(
-        domain="api.anthropic.com", description=None, requests_per_minute=100
+        domain="api.anthropic.com", description=None, alias=None, requests_per_minute=100, read_only=None
     )
 
 
