@@ -165,6 +165,14 @@ if [ "$RUN_E2E" = true ]; then
         # Also clean up e2e-bridge network left by CP+DP e2e
         docker network rm e2e-bridge 2>/dev/null || true
 
+        # Remove orphan containers with explicit container_name from other compose
+        # projects (e.g. left behind by manual `docker compose` runs without
+        # COMPOSE_PROJECT_NAME set). These would otherwise cause "container name
+        # already in use" errors when docker compose up tries to create them.
+        for name in warden http-proxy mitm-proxy dns-filter log-shipper log-store; do
+            docker rm -f "$name" 2>/dev/null || true
+        done
+
         echo "Starting data plane (standalone, --profile dev --profile admin --profile auditing, 2 cells)..."
         DATAPLANE_MODE=standalone docker compose --profile dev --profile admin --profile auditing up -d --build --remove-orphans --scale cell-dev=2
         CONTAINERS_STARTED=true
