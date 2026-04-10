@@ -3,35 +3,13 @@
 //! The CONNECT handshake and TLS setup is in main.rs.
 //! This module handles the decrypted HTTP requests after MITM.
 
-use std::sync::LazyLock;
-
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
-use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
 
-use crate::config::CONFIG;
-use crate::util::{error_response, is_hop_by_hop, MAX_BODY_BYTES};
-
-/// Shared HTTPS client for connection pooling to upstream servers.
-static HTTPS_CLIENT: LazyLock<Client<hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Full<Bytes>>> = LazyLock::new(|| {
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_tls_config(tls_config)
-        .https_only()
-        .enable_http1()
-        .build();
-
-    Client::builder(TokioExecutor::new()).build(https_connector)
-});
+use crate::config::{parse_timeout, CONFIG};
+use crate::util::{error_response, is_hop_by_hop, MAX_BODY_BYTES, UPSTREAM_CLIENT};
 
 /// Handle a decrypted HTTP request from the MITM stream.
 ///
@@ -96,15 +74,23 @@ pub async fn handle_intercepted_request(
     // Rate limiting
     if let Some(p) = policy {
         if let Some(rpm) = p.rate_limit_rpm {
-            if !crate::config::check_rate_limit(&real_domain, rpm) {
+            if !crate::config::check_rate_limit(&real_domain, rpm, p.burst_size) {
                 access_log(&real_domain, &method, &path, 429, start, 0, 0, false);
                 return Ok(error_response(StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded"));
             }
         }
     }
 
-    // Build upstream HTTPS request (use real domain for aliases)
-    let upstream_url = format!("https://{}:{}{}", real_domain, port, path);
+    // Build upstream request — pick scheme from per-domain `tls` flag.
+    // tls defaults to true (HTTPS upstream); explicit `tls: false` keeps HTTP.
+    // For HTTP upstreams the standard port is 80, not the MITM port.
+    let use_tls = policy.map(|p| p.tls).unwrap_or(true);
+    let (scheme, upstream_port) = if use_tls {
+        ("https", port)
+    } else {
+        ("http", if port == 443 { 80 } else { port })
+    };
+    let upstream_url = format!("{}://{}:{}{}", scheme, real_domain, upstream_port, path);
 
     let mut upstream_req = Request::builder()
         .method(method.clone())
@@ -154,26 +140,21 @@ pub async fn handle_intercepted_request(
         return Ok(error_response(StatusCode::PAYLOAD_TOO_LARGE, "Request body too large"));
     }
 
-    // DLP scanning
+    // DLP scanning — every action emits a structured dlp_violation event so
+    // Vector → VictoriaLogs → analytics widgets show the detection.
     let body_to_send = match crate::dlp::scan_body(&body_bytes, &real_domain) {
         crate::dlp::DlpAction::Allow => body_bytes,
         crate::dlp::DlpAction::Log(findings) => {
-            for f in &findings {
-                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: sensitive data detected");
-            }
+            crate::dlp::emit_violation(method.as_str(), &real_domain, &path, &findings);
             body_bytes
         }
         crate::dlp::DlpAction::Block(findings) => {
-            for f in &findings {
-                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: blocked");
-            }
+            crate::dlp::emit_violation(method.as_str(), &real_domain, &path, &findings);
             access_log(&real_domain, &method, &path, 403, start, 0, bytes_received, credential_injected);
             return Ok(error_response(StatusCode::FORBIDDEN, "Blocked by DLP: request body contains sensitive data"));
         }
         crate::dlp::DlpAction::Redact(findings, redacted) => {
-            for f in &findings {
-                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: redacted");
-            }
+            crate::dlp::emit_violation(method.as_str(), &real_domain, &path, &findings);
             redacted.into()
         }
     };
@@ -182,8 +163,9 @@ pub async fn handle_intercepted_request(
         .body(Full::new(body_to_send))
         .unwrap();
 
-    // Forward upstream over HTTPS (with timeout)
-    match tokio::time::timeout(std::time::Duration::from_secs(30), forward_https(upstream_req)).await {
+    // Forward upstream (with per-domain timeout from policy)
+    let upstream_timeout = parse_timeout(policy.and_then(|p| p.timeout.as_deref()));
+    match tokio::time::timeout(upstream_timeout, forward_https(upstream_req)).await {
         Err(_) => {
             access_log(&real_domain, &method, &path, 504, start, 0, bytes_received, credential_injected);
             Ok(error_response(StatusCode::GATEWAY_TIMEOUT, "Upstream request timed out"))
@@ -229,11 +211,12 @@ fn access_log(
     );
 }
 
-/// Forward request to upstream over HTTPS (TLS).
+/// Forward request to upstream.  Scheme (http/https) is set on the request URI
+/// by the caller and dispatched by the shared mixed connector.
 async fn forward_https(
     req: Request<Full<Bytes>>,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
-    let resp = HTTPS_CLIENT.request(req).await?;
+    let resp = UPSTREAM_CLIENT.request(req).await?;
     let status = resp.status();
     let headers = resp.headers().clone();
     let body = resp.into_body().collect().await?.to_bytes();

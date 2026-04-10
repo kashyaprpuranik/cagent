@@ -94,15 +94,26 @@ transforms:
           .log_type = "access"
         }
 
-        # DLP violation events from mitm-proxy
-        if .source == "mitmproxy" && parsed.event == "dlp_violation" {
+        # DLP violation events — emitted by mitm-proxy (legacy) or
+        # cagent-proxy (rust mode) using the same field schema.
+        if parsed.event == "dlp_violation" {
           .log_type = "dlp_violation"
           .dlp_mode = parsed.mode
           .dlp_host = parsed.host
           .dlp_path = parsed.path
           .dlp_method = parsed.method
-          .dlp_findings = encode_json(parsed.findings)
-          findings_arr = array!(parsed.findings)
+          # cagent-proxy serializes findings as a JSON string; mitm-proxy
+          # passes a native array.  Try to parse the string first; fall back
+          # to treating it as already-decoded.
+          findings_raw = parsed.findings
+          if is_string(findings_raw) {
+            findings_decoded, _err = parse_json(string!(findings_raw))
+            if findings_decoded != null {
+              findings_raw = findings_decoded
+            }
+          }
+          .dlp_findings = encode_json(findings_raw)
+          findings_arr = array(findings_raw) ?? []
           if length(findings_arr) > 0 {
             first = object!(findings_arr[0])
             .dlp_pattern = to_string(first.pattern) ?? "unknown"

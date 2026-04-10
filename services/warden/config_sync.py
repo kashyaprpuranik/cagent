@@ -133,17 +133,24 @@ def push_to_cagent_proxy(domain_entries: list, domain_policies: list, dlp_config
         domain = entry.get("domain", "")
         pd = {
             "domain": domain,
-            "tls": True,  # default: HTTPS
+            # tls defaults to True (HTTPS upstream); explicit `tls: false`
+            # in cagent.yaml is for HTTP-only upstreams.
+            "tls": bool(entry.get("tls", True)),
             "read_only": entry.get("read_only", False),
             "allowed_paths": entry.get("allowed_paths", []),
         }
         # Alias: creates {alias}.devbox.local shortcut
         if entry.get("alias"):
             pd["alias"] = entry["alias"]
-        # Rate limit
+        # Rate limit (rpm + optional explicit burst override)
         rl = entry.get("rate_limit", {})
         if rl.get("requests_per_minute"):
             pd["rate_limit_rpm"] = rl["requests_per_minute"]
+        if rl.get("burst_size"):
+            pd["burst_size"] = rl["burst_size"]
+        # Per-domain upstream timeout (e.g. "30s", "120s", "5m")
+        if entry.get("timeout"):
+            pd["timeout"] = entry["timeout"]
         # Credentials from CP policies (injected in-process by cagent-proxy)
         cred = cred_by_domain.get(domain, {})
         if cred.get("credential_header"):
@@ -395,6 +402,9 @@ def _cp_policy_to_domain_entry(policy: dict) -> dict:
         entry["timeout"] = policy["timeout"]
     if policy.get("read_only"):
         entry["read_only"] = True
+    # tls flag: HTTPS upstream is the default, only set if explicitly disabled
+    if policy.get("tls") is False:
+        entry["tls"] = False
     # Note: credentials are NOT included — ext_authz handles them dynamically
     return entry
 

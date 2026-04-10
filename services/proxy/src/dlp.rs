@@ -297,3 +297,39 @@ fn redact_text(text: &str, patterns: &[CompiledPattern]) -> String {
     }
     result
 }
+
+/// Emit a structured DLP violation event in the format Vector's transform
+/// expects: `event=dlp_violation` plus host/path/method/mode/findings.
+/// Vector picks this up via the Docker logs source and classifies it as
+/// `log_type:dlp_violation` regardless of which proxy emitted it, so the
+/// DLP analytics widgets populate in both legacy and rust modes.
+pub fn emit_violation(
+    method: &str,
+    host: &str,
+    path: &str,
+    findings: &[DlpFinding],
+) {
+    let dlp = &crate::config::CONFIG.load().dlp;
+    let mode = dlp.mode.as_str();
+    // Build a JSON array of {pattern, snippet} so Vector can extract
+    // dlp_pattern from the first finding (matches legacy mitmproxy schema).
+    let findings_json: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "pattern": f.pattern,
+                "snippet": f.snippet,
+            })
+        })
+        .collect();
+    let findings_str = serde_json::to_string(&findings_json).unwrap_or_else(|_| "[]".to_string());
+    tracing::warn!(
+        event = "dlp_violation",
+        method = method,
+        host = host,
+        path = path,
+        mode = mode,
+        findings = %findings_str,
+        "DLP violation"
+    );
+}

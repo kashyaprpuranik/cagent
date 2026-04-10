@@ -3,23 +3,13 @@
 //! Accepts plain HTTP requests (non-CONNECT), checks domain allowlist,
 //! injects credentials, and forwards upstream.
 
-use std::sync::LazyLock;
-
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
-use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioExecutor;
 
-use crate::config::CONFIG;
-use crate::util::{error_response, is_hop_by_hop, MAX_BODY_BYTES};
-
-/// Shared HTTP client for connection pooling to upstream servers.
-static HTTP_CLIENT: LazyLock<Client<HttpConnector, Full<Bytes>>> = LazyLock::new(|| {
-    Client::builder(TokioExecutor::new()).build_http()
-});
+use crate::config::{parse_timeout, CONFIG};
+use crate::util::{error_response, is_hop_by_hop, MAX_BODY_BYTES, UPSTREAM_CLIENT};
 
 /// Blocked metadata IPs (cloud credential theft prevention).
 const METADATA_IPS: &[&str] = &["169.254.169.254", "metadata.google.internal"];
@@ -109,20 +99,20 @@ pub async fn handle_request(
     // 4. Rate limiting
     if let Some(p) = policy {
         if let Some(rpm) = p.rate_limit_rpm {
-            if !crate::config::check_rate_limit(&real_domain, rpm) {
+            if !crate::config::check_rate_limit(&real_domain, rpm, p.burst_size) {
                 access_log(&real_domain, &method, &path, 429, start, 0, 0, false);
                 return Ok(error_response(StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded"));
             }
         }
     }
 
-    // 5. Build upstream request
+    // 5. Build upstream request — pick scheme from per-domain `tls` flag.
+    // tls defaults to true (HTTPS upstream); explicit `tls: false` keeps HTTP.
     let upstream_host = if is_alias { &real_domain } else { &host };
-    let upstream_uri = if uri.scheme().is_some() && !is_alias {
-        uri.to_string()
-    } else {
-        format!("http://{}{}", upstream_host, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"))
-    };
+    let use_tls = policy.map(|p| p.tls).unwrap_or(true);
+    let scheme = if use_tls { "https" } else { "http" };
+    let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    let upstream_uri = format!("{}://{}{}", scheme, upstream_host, path_and_query);
 
     let mut upstream_req = Request::builder()
         .method(method.clone())
@@ -174,26 +164,21 @@ pub async fn handle_request(
         return Ok(error_response(StatusCode::PAYLOAD_TOO_LARGE, "Request body too large"));
     }
 
-    // DLP scanning
+    // DLP scanning — every action emits a structured dlp_violation event so
+    // Vector → VictoriaLogs → analytics widgets show the detection.
     let body_to_send = match crate::dlp::scan_body(&body_bytes, &real_domain) {
         crate::dlp::DlpAction::Allow => body_bytes,
         crate::dlp::DlpAction::Log(findings) => {
-            for f in &findings {
-                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: sensitive data detected");
-            }
+            crate::dlp::emit_violation(method.as_str(), &real_domain, &path, &findings);
             body_bytes
         }
         crate::dlp::DlpAction::Block(findings) => {
-            for f in &findings {
-                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: blocked");
-            }
+            crate::dlp::emit_violation(method.as_str(), &real_domain, &path, &findings);
             access_log(&real_domain, &method, &path, 403, start, 0, bytes_received, credential_injected);
             return Ok(error_response(StatusCode::FORBIDDEN, "Blocked by DLP: request body contains sensitive data"));
         }
         crate::dlp::DlpAction::Redact(findings, redacted) => {
-            for f in &findings {
-                tracing::warn!(domain = %real_domain, pattern = %f.pattern, snippet = %f.snippet, "DLP: redacted");
-            }
+            crate::dlp::emit_violation(method.as_str(), &real_domain, &path, &findings);
             redacted.into()
         }
     };
@@ -202,8 +187,9 @@ pub async fn handle_request(
         .body(Full::new(body_to_send))
         .unwrap();
 
-    // 7. Forward upstream (with timeout)
-    match tokio::time::timeout(std::time::Duration::from_secs(30), forward_upstream(upstream_req)).await {
+    // 7. Forward upstream (with per-domain timeout from policy)
+    let upstream_timeout = parse_timeout(policy.and_then(|p| p.timeout.as_deref()));
+    match tokio::time::timeout(upstream_timeout, forward_upstream(upstream_req)).await {
         Err(_) => {
             access_log(&real_domain, &method, &path, 504, start, 0, bytes_received, credential_injected);
             Ok(error_response(StatusCode::GATEWAY_TIMEOUT, "Upstream request timed out"))
@@ -253,11 +239,12 @@ fn access_log(
     );
 }
 
-/// Forward request to the upstream server.
+/// Forward request to the upstream server.  Scheme (http/https) is set on the
+/// request URI by the caller and dispatched by the shared mixed connector.
 async fn forward_upstream(
     req: Request<Full<Bytes>>,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
-    let resp = HTTP_CLIENT.request(req).await?;
+    let resp = UPSTREAM_CLIENT.request(req).await?;
 
     let status = resp.status();
     let headers = resp.headers().clone();

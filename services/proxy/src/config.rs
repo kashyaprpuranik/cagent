@@ -22,7 +22,9 @@ pub struct DomainPolicy {
     /// Optional alias: creates `{alias}.devbox.local` shortcut for this domain.
     #[serde(default)]
     pub alias: Option<String>,
-    #[serde(default)]
+    /// HTTPS upstream when true (default), HTTP upstream when false.
+    /// Mirrors `tls` in cagent.yaml — `tls: false` is for HTTP-only upstreams.
+    #[serde(default = "default_true")]
     pub tls: bool,
     #[serde(default)]
     pub read_only: bool,
@@ -30,12 +32,57 @@ pub struct DomainPolicy {
     pub allowed_paths: Vec<String>,
     #[serde(default)]
     pub rate_limit_rpm: Option<u32>,
+    /// Token bucket burst size override (defaults to rpm/6 when None).
+    #[serde(default)]
+    pub burst_size: Option<u32>,
+    /// Per-domain upstream timeout, e.g. "30s", "120s", "5m".
+    /// Falls back to DEFAULT_UPSTREAM_TIMEOUT_SECS when None or unparseable.
+    #[serde(default)]
+    pub timeout: Option<String>,
     #[serde(default)]
     pub credential_header: Option<String>,
     #[serde(default)]
     pub credential_format: Option<String>,
     #[serde(default)]
     pub credential_value: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Default upstream timeout when a domain doesn't specify one.
+pub const DEFAULT_UPSTREAM_TIMEOUT_SECS: u64 = 30;
+
+/// Parse a duration string like "30s", "120s", "5m", "1h" into Duration.
+/// Returns the default when input is None or unparseable.
+pub fn parse_timeout(s: Option<&str>) -> std::time::Duration {
+    let default = std::time::Duration::from_secs(DEFAULT_UPSTREAM_TIMEOUT_SECS);
+    let Some(raw) = s else { return default };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return default;
+    }
+    // Split numeric prefix from suffix
+    let (num_part, unit) = match trimmed.find(|c: char| !c.is_ascii_digit() && c != '.') {
+        Some(idx) => (&trimmed[..idx], &trimmed[idx..]),
+        None => (trimmed, "s"), // bare number → seconds
+    };
+    let n: f64 = match num_part.parse() {
+        Ok(v) if v > 0.0 => v,
+        _ => return default,
+    };
+    let secs = match unit.trim() {
+        "s" | "" => n,
+        "m" => n * 60.0,
+        "h" => n * 3600.0,
+        "ms" => n / 1000.0,
+        _ => return default,
+    };
+    if secs <= 0.0 || !secs.is_finite() {
+        return default;
+    }
+    std::time::Duration::from_secs_f64(secs)
 }
 
 /// Full proxy configuration, pushed by warden.
@@ -182,10 +229,13 @@ struct TokenBucket {
 }
 
 impl TokenBucket {
-    fn new(rpm: u32) -> Self {
+    fn new(rpm: u32, burst: Option<u32>) -> Self {
         let per_sec = rpm as f64 / 60.0;
-        // Burst = max(rpm/6, 1) — allows short bursts without draining the bucket
-        let burst = (rpm as f64 / 6.0).max(1.0);
+        // Burst defaults to max(rpm/6, 1) — allows short bursts without draining
+        // the bucket — but the policy can override it explicitly via burst_size.
+        let burst = burst
+            .map(|b| b as f64)
+            .unwrap_or_else(|| (rpm as f64 / 6.0).max(1.0));
         Self {
             tokens: burst,
             max_tokens: burst,
@@ -214,14 +264,19 @@ static RATE_LIMITER: LazyLock<Mutex<HashMap<String, TokenBucket>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Check rate limit for a domain. Returns true if the request is allowed.
-pub fn check_rate_limit(domain: &str, rpm: u32) -> bool {
+///
+/// `burst` is the explicit burst size from policy (None → default rpm/6).
+pub fn check_rate_limit(domain: &str, rpm: u32, burst: Option<u32>) -> bool {
     let mut buckets = RATE_LIMITER.lock().unwrap();
     let bucket = buckets
         .entry(domain.to_lowercase())
-        .or_insert_with(|| TokenBucket::new(rpm));
-    // Update max if config changed
+        .or_insert_with(|| TokenBucket::new(rpm, burst));
+    // Update bucket state if config changed (rpm or burst override)
     let per_sec = rpm as f64 / 60.0;
+    let new_burst = burst
+        .map(|b| b as f64)
+        .unwrap_or_else(|| (rpm as f64 / 6.0).max(1.0));
     bucket.refill_rate = per_sec;
-    bucket.max_tokens = (rpm as f64 / 6.0).max(1.0);
+    bucket.max_tokens = new_burst;
     bucket.try_acquire()
 }
