@@ -13,8 +13,8 @@
 !cell.Dockerfile
 !cell_entrypoint.sh
 !entrypoint.sh
-!cell-requirements/
-!cell-requirements/**
+!cell-requirements/pyproject.toml
+!cell-requirements/uv.lock
 !configs/
 !configs/**
 !scripts/
