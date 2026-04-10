@@ -1,0 +1,10 @@
+[project]
+name = "cagent-mitm"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "google-re2>=1.1",
+]
+
+[tool.uv]
+exclude-newer = "2026-04-02T00:00:00Z"

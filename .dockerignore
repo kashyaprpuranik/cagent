@@ -12,6 +12,7 @@
 # Allow cell container files
 !cell.Dockerfile
 !cell_entrypoint.sh
+!cell-requirements/
 !entrypoint.sh
 !configs/
 !configs/**

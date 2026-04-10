@@ -1,0 +1,33 @@
+[project]
+name = "cagent-cell"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "httpx",
+    "pyyaml",
+    "python-dotenv",
+    "rich",
+    "click",
+    "typer",
+]
+
+[project.optional-dependencies]
+ml = [
+    # torch is excluded — installed separately in the Dockerfile from the
+    # PyTorch CPU index, which lacks upload timestamps and breaks exclude-newer.
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "jupyter",
+    "ipython",
+    "transformers",
+    "datasets",
+    "accelerate",
+]
+
+[tool.uv]
+exclude-newer = "2026-04-02T00:00:00Z"

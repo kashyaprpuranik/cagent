@@ -128,7 +128,8 @@ if [ "$RUN_E2E" = true ]; then
 
     # Generate certs (MITM CA + mTLS)
     bash "$REPO_ROOT/scripts/setup.sh"
-    export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
+    # NOTE: HTTPS_PROXY is exported AFTER docker compose build (below) to
+    # avoid poisoning image pulls with the not-yet-running mitmproxy address.
     export WARDEN_TLS_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$REPO_ROOT/configs/mtls/server-key.pem")"
     export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$REPO_ROOT/configs/mtls/ca-cert.pem")"
@@ -175,6 +176,9 @@ if [ "$RUN_E2E" = true ]; then
         echo "Waiting for containers to stabilize..."
         sleep 5
     fi
+
+    # Export HTTPS_PROXY *after* build — it's for cell containers, not Docker builds.
+    export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
 
     set +e
     pytest tests/test_e2e.py -v

@@ -33,22 +33,14 @@ WORKDIR /app
 # Install wget for Docker health checks
 RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
-    fastapi==0.109.0 \
-    "uvicorn[standard]==0.27.0" \
-    docker==7.1.0 \
-    "requests>=2.32.0,<3" \
-    pyyaml==6.0.1 \
-    websockets==12.0 \
-    pydantic>=2.0.0 \
-    psutil>=5.9.0 \
-    "opentelemetry-api>=1.20.0" \
-    "opentelemetry-sdk>=1.20.0" \
-    "opentelemetry-exporter-otlp-proto-http>=1.20.0" \
-    "opentelemetry-instrumentation-fastapi>=0.41b0" \
-    "opentelemetry-instrumentation-requests>=0.41b0" \
-    "opentelemetry-instrumentation-logging>=0.41b0"
+# Install uv for deterministic dependency installation
+COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
+
+# Install Python dependencies from lock file (supply chain protection:
+# exclude-newer in pyproject.toml rejects packages uploaded after a cutoff date)
+COPY services/warden/pyproject.toml services/warden/uv.lock ./
+RUN uv sync --frozen --no-install-project --no-dev && rm -rf /root/.cache
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy warden code
 COPY services/warden/ /app/
