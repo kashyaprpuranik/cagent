@@ -166,11 +166,16 @@ if [ "$RUN_E2E" = true ]; then
         docker network rm e2e-bridge 2>/dev/null || true
 
         # Remove orphan containers with explicit container_name from other compose
-        # projects (e.g. left behind by manual `docker compose` runs without
-        # COMPOSE_PROJECT_NAME set). These would otherwise cause "container name
+        # projects (e.g. left behind by manual `docker compose` runs, or runs with
+        # a different CP_PREFIX). These would otherwise cause "container name
         # already in use" errors when docker compose up tries to create them.
-        for name in warden http-proxy mitm-proxy dns-filter log-shipper log-store; do
+        # All explicit container_name fields in docker-compose.yml are prefixed
+        # with ${CP_PREFIX:-}, so we clean both the unprefixed and prefixed forms.
+        for name in warden http-proxy mitm-proxy dns-filter dns-filter-2 log-shipper log-store email-proxy; do
             docker rm -f "$name" 2>/dev/null || true
+            if [ -n "${CP_PREFIX:-}" ]; then
+                docker rm -f "${CP_PREFIX}${name}" 2>/dev/null || true
+            fi
         done
 
         echo "Starting data plane (standalone, --profile dev --profile admin --profile auditing, 2 cells)..."
