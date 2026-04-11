@@ -90,16 +90,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
-# Python packages (all variants)
+# Python packages (all variants) — installed from lock file for supply chain
+# protection (exclude-newer rejects packages uploaded after a cutoff date).
+# Packages go into the system Python so they're available to user shells.
 # =============================================================================
-RUN pip3 install --no-cache-dir \
-    requests \
-    httpx \
-    pyyaml \
-    python-dotenv \
-    rich \
-    click \
-    typer
+COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
+COPY cell-requirements/pyproject.toml cell-requirements/uv.lock /tmp/cell-requirements/
+RUN cd /tmp/cell-requirements \
+    && uv export --frozen --no-dev --no-emit-project -o /tmp/base-requirements.txt \
+    && uv pip install --system --no-cache --break-system-packages -r /tmp/base-requirements.txt \
+    && rm /tmp/base-requirements.txt /root/.cache -rf
 
 # =============================================================================
 # Dev variant: Go, Rust, Cloud CLIs
@@ -127,22 +127,21 @@ RUN if [ "$VARIANT" = "dev" ] || [ "$VARIANT" = "ml" ]; then \
 # =============================================================================
 # ML variant: PyTorch, numpy, pandas, scikit-learn
 # =============================================================================
+# ML variant: torch installed separately from the CPU index (lacks upload
+# timestamps, so exclude-newer can't filter it — version pin is the control).
+# Other ML deps come from the main lock file via the [ml] extra.
 RUN if [ "$VARIANT" = "ml" ]; then \
-    pip3 install --no-cache-dir \
-        torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip3 install --no-cache-dir \
-        numpy \
-        pandas \
-        scipy \
-        scikit-learn \
-        matplotlib \
-        seaborn \
-        jupyter \
-        ipython \
-        transformers \
-        datasets \
-        accelerate \
+    uv pip install --system --no-cache --break-system-packages \
+        torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu \
+    && cd /tmp/cell-requirements \
+    && uv export --frozen --no-dev --no-emit-project --extra ml -o /tmp/ml-requirements.txt \
+    && uv pip install --system --no-cache --break-system-packages -r /tmp/ml-requirements.txt \
+    && rm /tmp/ml-requirements.txt \
+    && rm -rf /root/.cache \
     ; fi
+
+# Clean up cell-requirements after all Python deps are installed
+RUN rm -rf /tmp/cell-requirements
 
 # =============================================================================
 # AI variant: AI coding CLIs (Claude Code, Codex, OpenClaw, Copilot)

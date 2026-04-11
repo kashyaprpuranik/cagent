@@ -133,6 +133,10 @@ if [ "$RUN_E2E" = true ]; then
     bash "$REPO_ROOT/scripts/setup.sh"
     export PROXY_MODE="$PROXY_MODE"
 
+    # Cell-side proxy env vars depend on the proxy mode.  These control
+    # docker-compose's CELL_* variables for the cell containers; they are
+    # NOT the script's HTTPS_PROXY (that's set after build below to avoid
+    # poisoning image pulls with the not-yet-running mitmproxy address).
     if [ "$PROXY_MODE" = "rust" ]; then
         export CELL_HTTP_PROXY="http://10.${NET_OCTET}.1.20:18443"
         export CELL_HTTPS_PROXY="http://10.${NET_OCTET}.1.20:18443"
@@ -204,6 +208,14 @@ if [ "$RUN_E2E" = true ]; then
         DATAPLANE_MODE=standalone docker compose $E2E_PROFILES up -d --build --scale cell-dev=2
         echo "Waiting for containers to stabilize..."
         sleep 5
+    fi
+
+    # Export HTTPS_PROXY *after* build — it's for cell containers, not Docker
+    # builds.  Point at the proxy that's actually running for this mode.
+    if [ "$PROXY_MODE" = "rust" ]; then
+        export HTTPS_PROXY="http://10.${NET_OCTET}.1.20:18443"
+    else
+        export HTTPS_PROXY="http://10.${NET_OCTET}.1.15:8080"
     fi
 
     set +e

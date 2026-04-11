@@ -13,6 +13,8 @@
 !cell.Dockerfile
 !cell_entrypoint.sh
 !entrypoint.sh
+!cell-requirements/
+!cell-requirements/**
 !configs/
 !configs/**
 !scripts/

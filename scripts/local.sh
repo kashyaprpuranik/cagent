@@ -16,6 +16,10 @@
 # For full stack (CP + DP), use the cagent-control repo:
 #   cd ../cagent-control && ./dev_up.sh
 #
+# External callers (e.g. cagent-control/scripts/local.sh) can pre-set env vars
+# (DATAPLANE_MODE, DP_PROFILES, COMPOSE_PROJECT_NAME, SCALE_FLAG, MTLS) to
+# override defaults without passing CLI flags.
+#
 # NOT for production use.
 # =============================================================================
 
@@ -23,13 +27,13 @@ set -e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Defaults
-DP_PROFILES="--profile admin"
-DP_AGENT_PROFILE="dev"
-ACTION="up"
-MINIMAL=false
-MTLS=true
-PROXY_RUST=false
+# Defaults (respect pre-set env vars for external callers like cagent-control)
+DP_PROFILES="${DP_PROFILES:-"--profile admin"}"
+DP_AGENT_PROFILE="${DP_AGENT_PROFILE:-dev}"
+ACTION="${ACTION:-up}"
+MINIMAL="${MINIMAL:-false}"
+MTLS="${MTLS:-true}"
+PROXY_RUST="${PROXY_RUST:-false}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -98,7 +102,7 @@ done
 # Main
 # =============================================================================
 
-export COMPOSE_PROJECT_NAME=cagent-local
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cagent-local}"
 # NET_OCTET=200 (default), no CP_PREFIX, no network name overrides needed
 
 echo "=== Cagent Data Plane Development Environment ==="
@@ -121,24 +125,24 @@ bash "$ROOT_DIR/scripts/setup.sh"
 if [ "$PROXY_RUST" = true ]; then
     # Use cagent-proxy: single Rust binary replaces Envoy + mitmproxy + CoreDNS
     export PROXY_MODE="rust"
-    export CAGENT_PROXY_URL="http://10.${NET_OCTET:-200}.2.20:18080"
+    export CAGENT_PROXY_URL="${CAGENT_PROXY_URL:-http://10.${NET_OCTET:-200}.2.20:18080}"
     # Cell uses cagent-proxy for HTTP, HTTPS, and DNS
-    export CELL_HTTP_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
-    export CELL_HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.20:18443"
-    export CELL_DNS_PRIMARY="10.${NET_OCTET:-200}.1.20"
-    export CELL_DNS_SECONDARY="10.${NET_OCTET:-200}.1.20"
+    export CELL_HTTP_PROXY="${CELL_HTTP_PROXY:-http://10.${NET_OCTET:-200}.1.20:18443}"
+    export CELL_HTTPS_PROXY="${CELL_HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.20:18443}"
+    export CELL_DNS_PRIMARY="${CELL_DNS_PRIMARY:-10.${NET_OCTET:-200}.1.20}"
+    export CELL_DNS_SECONDARY="${CELL_DNS_SECONDARY:-10.${NET_OCTET:-200}.1.20}"
     DP_PROFILES="$DP_PROFILES --profile proxy-rust"
     echo "Rust proxy enabled (cagent-proxy replaces Envoy+mitmproxy+CoreDNS)"
 else
     # Legacy: Envoy + mitmproxy + CoreDNS
     DP_PROFILES="$DP_PROFILES --profile proxy-legacy"
     if [ "$MINIMAL" = false ]; then
-        export CELL_HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.15:8080"
+        export CELL_HTTPS_PROXY="${CELL_HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}"
         echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
     fi
 fi
 
-if [ "${MTLS:-false}" = true ]; then
+if [ "${MTLS:-false}" = true ] && [ -z "${WARDEN_TLS_CERT:-}" ]; then
     export WARDEN_TLS_CERT="$(base64 -w0 "$ROOT_DIR/configs/mtls/server-cert.pem")"
     export WARDEN_TLS_KEY="$(base64 -w0 "$ROOT_DIR/configs/mtls/server-key.pem")"
     export WARDEN_MTLS_CA_CERT="$(base64 -w0 "$ROOT_DIR/configs/mtls/ca-cert.pem")"
@@ -146,15 +150,23 @@ if [ "${MTLS:-false}" = true ]; then
 fi
 
 # --- Start services ---
-export DATAPLANE_MODE="standalone"
+export DATAPLANE_MODE="${DATAPLANE_MODE:-standalone}"
 
 profiles="--profile $DP_AGENT_PROFILE $DP_PROFILES"
 
 echo "Building images..."
 docker compose $profiles build
 
+# Export HTTPS_PROXY *after* build — it's intended for cell containers, not
+# the build process. Exporting before build causes image pulls to route
+# through the mitmproxy container that hasn't been started yet.
+if [ "$MINIMAL" = false ]; then
+    export HTTPS_PROXY="http://10.${NET_OCTET:-200}.1.15:8080"
+    echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
+fi
+
 echo "Starting services..."
-docker compose $profiles up -d
+docker compose $profiles up -d ${SCALE_FLAG:-}
 
 # Wait for cell container(s)
 echo "Waiting for cell container(s)..."
@@ -200,7 +212,7 @@ if [ "$MINIMAL" = false ]; then
 fi
 
 echo ""
-echo "=== Data Plane ready (standalone) ==="
+echo "=== Data Plane ready ($DATAPLANE_MODE) ==="
 echo ""
 echo "Cell container: docker exec -it $CELL_CONTAINER bash"
 if echo "$DP_PROFILES" | grep -q "admin"; then
