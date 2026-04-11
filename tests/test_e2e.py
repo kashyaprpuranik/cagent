@@ -1092,7 +1092,7 @@ def is_log_store_running():
     """Check if the log-store (VictoriaLogs) container is running."""
     try:
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=^log-store$", "--format", "{{.Status}}"],
+            ["docker", "ps", "--filter", f"name=^{_CP_PREFIX}log-store$", "--format", "{{.Status}}"],
             capture_output=True,
             text=True,
             timeout=5,
