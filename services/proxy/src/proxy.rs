@@ -72,6 +72,18 @@ pub async fn handle_request(
     // Load current config (lock-free)
     let config = CONFIG.load();
 
+    // Email: if the request targets email.devbox.local and at least one
+    // email account is configured, dispatch to the in-process email
+    // handler (replaces the legacy services/email_proxy/ container in
+    // rust mode).  The allowlist/alias path is bypassed — there is no
+    // upstream, the handler runs in the same process.
+    if domain.eq_ignore_ascii_case("email.devbox.local") && !config.email_accounts.is_empty() {
+        let resp = crate::email::handler::handle(req).await;
+        let status = resp.status().as_u16();
+        access_log_now(ctx(domain, &method, &path, status, start, 0, false));
+        return Ok(resp);
+    }
+
     // 1. Domain allowlist check
     if !config.is_allowed(domain) {
         access_log_now(ctx(domain, &method, &path, 403, start, 0, false));

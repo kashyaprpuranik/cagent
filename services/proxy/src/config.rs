@@ -96,6 +96,12 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub dlp: crate::dlp::DlpConfig,
 
+    /// Email accounts for the in-process IMAP/SMTP handler.  Replaces the
+    /// legacy `services/email_proxy/` Python service.  Generic password
+    /// auth only — OAuth2 accounts are rejected at config push time.
+    #[serde(default)]
+    pub email_accounts: Vec<crate::email::EmailAccount>,
+
     /// Pre-computed: domain name → index into `domains`.
     #[serde(skip)]
     pub domain_index: HashMap<String, usize>,
@@ -118,6 +124,7 @@ impl Default for ProxyConfig {
         Self {
             domains: Vec::new(),
             dlp: crate::dlp::DlpConfig::default(),
+            email_accounts: Vec::new(),
             domain_index: HashMap::new(),
             allowed_domains: HashSet::new(),
             alias_index: HashMap::new(),

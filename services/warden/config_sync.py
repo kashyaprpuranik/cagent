@@ -100,7 +100,15 @@ def reload_envoy():
 
 
 def reload_email_proxy():
-    """Tell email-proxy to reload its config from disk."""
+    """Tell email-proxy to reload its config from disk.
+
+    In rust mode the legacy email-proxy container is not running —
+    cagent-proxy handles email natively via the config push payload.
+    Skip the HTTP /reload call and return True as a no-op.
+    """
+    if PROXY_MODE == "rust":
+        logger.debug("rust mode: email handled in-process by cagent-proxy, no reload needed")
+        return True
     try:
         resp = requests.post(f"http://10.{_NET_OCTET}.2.40:8025/reload", timeout=5)
         if resp.status_code == 200:
@@ -116,11 +124,19 @@ def reload_email_proxy():
         return False
 
 
-def push_to_cagent_proxy(domain_entries: list, domain_policies: list, dlp_config: dict = None) -> bool:
+def push_to_cagent_proxy(
+    domain_entries: list,
+    domain_policies: list,
+    dlp_config: dict = None,
+    email_accounts: list = None,
+) -> bool:
     """Push config to cagent-proxy via its HTTP config API.
 
     Translates cagent.yaml-style domain entries + CP credential policies
     into the ProxyConfig JSON that cagent-proxy expects.
+
+    `email_accounts` are forwarded as-is for the in-process IMAP/SMTP
+    handler (replaces the legacy email-proxy container in rust mode).
     """
     # Build a credential lookup from CP domain policies
     cred_by_domain = {}
@@ -167,6 +183,53 @@ def push_to_cagent_proxy(domain_entries: list, domain_policies: list, dlp_config
     # Include DLP config if available
     if dlp_config:
         payload["dlp"] = dlp_config
+
+    # Include email accounts for the in-process IMAP/SMTP handler.
+    # Only generic password-auth accounts are forwarded — Gmail/Outlook
+    # OAuth2 accounts are skipped (not supported by cagent-proxy yet) and
+    # logged for operator visibility.
+    if email_accounts:
+        proxy_email_accounts: list = []
+        for acct in email_accounts:
+            provider = (acct.get("provider") or "generic").lower()
+            if provider != "generic":
+                logger.warning(
+                    "Skipping email account %r: provider %s not supported in rust proxy mode",
+                    acct.get("name"),
+                    provider,
+                )
+                continue
+            cred = acct.get("credential") or {}
+            password = cred.get("password", "")
+            if not password:
+                logger.warning(
+                    "Skipping email account %r: no password credential",
+                    acct.get("name"),
+                )
+                continue
+            entry = {
+                "name": acct.get("name", ""),
+                "email": acct.get("email", ""),
+                "imap_server": acct.get("imap_server", ""),
+                "imap_port": acct.get("imap_port", 993),
+                "smtp_server": acct.get("smtp_server", ""),
+                "smtp_port": acct.get("smtp_port", 587),
+                "credential": {
+                    "password": password,
+                    "smtp_username": cred.get("smtp_username", ""),
+                },
+            }
+            policy = acct.get("policy") or {}
+            if policy:
+                entry["policy"] = {
+                    "allowed_recipients": policy.get("allowed_recipients", ["*"]),
+                    "allowed_senders": policy.get("allowed_senders", ["*"]),
+                    "sends_per_hour": policy.get("sends_per_hour", 50),
+                    "reads_per_hour": policy.get("reads_per_hour", 200),
+                }
+            proxy_email_accounts.append(entry)
+        if proxy_email_accounts:
+            payload["email_accounts"] = proxy_email_accounts
 
     headers = {}
     if CAGENT_PROXY_TOKEN:
@@ -307,7 +370,13 @@ def regenerate_configs(
             # ── Rust proxy path: push config via HTTP instead of writing files ──
             all_domains = config_generator.get_domains()
             dlp = config_generator.get_dlp_config()
-            proxy_changed = push_to_cagent_proxy(all_domains, _synced_domain_policies, dlp_config=dlp)
+            all_email_accounts = config_generator.get_email_accounts()
+            proxy_changed = push_to_cagent_proxy(
+                all_domains,
+                _synced_domain_policies,
+                dlp_config=dlp,
+                email_accounts=all_email_accounts,
+            )
         else:
             # ── Legacy path: generate Corefile + Envoy xDS files ──
             corefile_content = config_generator.generate_corefile()

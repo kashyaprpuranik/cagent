@@ -739,6 +739,11 @@ services:
   # Supports Gmail (OAuth2), Outlook (OAuth2), and generic IMAP/SMTP
   # Optional: Only runs with --profile email
   # ===========================================================================
+  # Legacy email-proxy (Python IMAP/SMTP service).  In rust proxy mode
+  # cagent-proxy handles email in-process using the same config schema;
+  # this container is only started for legacy mode.  The profile is
+  # intentionally named `email-legacy` so rust-mode scripts that opt into
+  # email features (via --beta) don't accidentally start it.
   email-proxy:
     build:
       context: ./services/email_proxy
@@ -749,7 +754,7 @@ services:
     security_opt:
       - no-new-privileges:true
     profiles:
-      - email
+      - email-legacy
 
     environment:
       - CAGENT_CONFIG_PATH=/etc/cagent/cagent.yaml
