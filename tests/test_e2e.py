@@ -26,6 +26,7 @@ def pytest_configure(config):
 
 _NET_OCTET = os.environ.get("NET_OCTET", "200")
 _CP_PREFIX = os.environ.get("CP_PREFIX", "")
+_PROXY_MODE = os.environ.get("PROXY_MODE", "legacy")  # "legacy" or "rust"
 
 
 def _get_compose_project() -> str:
@@ -34,15 +35,32 @@ def _get_compose_project() -> str:
 
 LOCAL_ADMIN_PORT = os.environ.get("LOCAL_ADMIN_PORT", "8081")
 
-# Cell-net IPs (internal network)
-DNS_FILTER_IP = f"10.{_NET_OCTET}.1.5"
-HTTP_PROXY_IP = f"10.{_NET_OCTET}.1.10"
-MITM_PROXY_IP = f"10.{_NET_OCTET}.1.15"
+# Cell-net IPs depend on proxy mode
+if _PROXY_MODE == "rust":
+    # cagent-proxy: single binary handles HTTP, HTTPS, and DNS
+    CAGENT_PROXY_IP = f"10.{_NET_OCTET}.1.20"
+    DNS_FILTER_IP = CAGENT_PROXY_IP
+    HTTP_PROXY_IP = CAGENT_PROXY_IP
+    HTTP_PROXY_PORT = "18443"
+    MITM_PROXY_IP = CAGENT_PROXY_IP
+else:
+    # Legacy: Envoy + mitmproxy + CoreDNS
+    DNS_FILTER_IP = f"10.{_NET_OCTET}.1.5"
+    HTTP_PROXY_IP = f"10.{_NET_OCTET}.1.10"
+    HTTP_PROXY_PORT = "8443"
+    MITM_PROXY_IP = f"10.{_NET_OCTET}.1.15"
+    CAGENT_PROXY_IP = None
 
 # Infra-net IPs
 INFRA_DNS_IP = f"10.{_NET_OCTET}.2.5"
 INFRA_ENVOY_IP = f"10.{_NET_OCTET}.2.10"
 INFRA_GATEWAY_IP = f"10.{_NET_OCTET}.2.1"
+
+def is_legacy_mode():
+    return _PROXY_MODE != "rust"
+
+def is_rust_mode():
+    return _PROXY_MODE == "rust"
 
 CELL_LABEL = "cagent.role=cell"
 CELL_CONTAINER_FALLBACK = "cell"
@@ -76,15 +94,16 @@ def is_data_plane_running():
     detect containers that exist but are crash-looping (status would
     show "Restarting" or "Exited").
     """
+    proxy_name = f"{_CP_PREFIX}cagent-proxy" if is_rust_mode() else f"{_CP_PREFIX}http-proxy"
     try:
         result = subprocess.run(
-            ["docker", "ps", "-a", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Names}} {{.Status}}"],
+            ["docker", "ps", "-a", "--filter", f"name={proxy_name}", "--format", "{{.Names}} {{.Status}}"],
             capture_output=True,
             text=True,
             timeout=5,
         )
         for line in result.stdout.strip().splitlines():
-            if f"{_CP_PREFIX}http-proxy" in line and "Up" in line:
+            if proxy_name in line and "Up" in line:
                 return True
         return False
     except Exception:
@@ -97,46 +116,39 @@ def data_plane_running():
 
     Warden restarts Envoy/CoreDNS on startup (config generation), so
     even after ``test.sh``'s initial sleep services may still be
-    coming back up.  Poll until http-proxy is running (it may briefly
+    coming back up.  Poll until proxy is running (it may briefly
     restart while warden regenerates its config after a fresh start).
     """
+    proxy_name = f"{_CP_PREFIX}cagent-proxy" if is_rust_mode() else f"{_CP_PREFIX}http-proxy"
+
     # Retry for up to 30s — after a fresh start, warden regenerates
-    # the Envoy config and restarts http-proxy, causing a brief gap.
+    # the config and restarts the proxy, causing a brief gap.
     deadline = time.time() + 30
     while time.time() < deadline:
         if is_data_plane_running():
             break
         time.sleep(2)
     else:
-        # Provide diagnostic info on failure
         try:
             diag = subprocess.run(
-                [
-                    "docker",
-                    "ps",
-                    "-a",
-                    "--filter",
-                    f"name={_CP_PREFIX}http-proxy",
-                    "--format",
-                    "{{.Names}} {{.Status}}",
-                ],
+                ["docker", "ps", "-a", "--filter", f"name={proxy_name}", "--format", "{{.Names}} {{.Status}}"],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
-            status = diag.stdout.strip() or "(no http-proxy container found)"
+            status = diag.stdout.strip() or f"(no {proxy_name} container found)"
         except Exception:
             status = "(docker command failed)"
-        pytest.fail(f"Data plane not running after 30s — test.sh should have started it. http-proxy status: {status}")
+        pytest.fail(f"Data plane not running after 30s — test.sh should have started it. {proxy_name} status: {status}")
 
     cell = _discover_cell_container_name()
 
-    # Wait for Envoy proxy to accept connections
+    # Wait for HTTP proxy to accept connections
     deadline = time.time() + 60
     while time.time() < deadline:
         try:
             probe = subprocess.run(
-                ["docker", "exec", cell, "sh", "-c", f"nc -z -w 2 {HTTP_PROXY_IP} 8443 && echo OK"],
+                ["docker", "exec", cell, "sh", "-c", f"nc -z -w 2 {HTTP_PROXY_IP} {HTTP_PROXY_PORT} && echo OK"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -147,14 +159,15 @@ def data_plane_running():
             pass
         time.sleep(3)
     else:
-        pytest.fail("Envoy proxy not reachable from cell container after 60s — warden may still be restarting it")
+        pytest.fail(f"Proxy ({HTTP_PROXY_IP}:{HTTP_PROXY_PORT}) not reachable from cell after 60s")
 
-    # Wait for CoreDNS to accept connections
+    # Wait for DNS to accept queries (use dig, not nc — DNS may be UDP-only)
     deadline = time.time() + 30
     while time.time() < deadline:
         try:
             probe = subprocess.run(
-                ["docker", "exec", cell, "sh", "-c", f"nc -z -w 2 {DNS_FILTER_IP} 53 && echo OK"],
+                ["docker", "exec", cell, "sh", "-c",
+                 f"dig @{DNS_FILTER_IP} +time=2 +tries=1 localhost >/dev/null 2>&1 && echo OK"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -165,7 +178,7 @@ def data_plane_running():
             pass
         time.sleep(2)
     else:
-        pytest.fail("CoreDNS not reachable from cell container after 30s")
+        pytest.fail(f"DNS ({DNS_FILTER_IP}:53) not reachable from cell after 30s")
 
     # Wait for admin API to be ready
     admin = get_admin_url()
@@ -201,13 +214,13 @@ class TestCellNetworkIsolation:
 
     def test_cell_can_reach_envoy(self, data_plane_running):
         """Cell should be able to reach Envoy proxy."""
-        result = exec_in_cell(f"nc -z {HTTP_PROXY_IP} 8443 && echo OK")
+        result = exec_in_cell(f"nc -z {HTTP_PROXY_IP} {HTTP_PROXY_PORT} && echo OK")
         assert result.returncode == 0 or "OK" in result.stdout, f"Cell cannot reach Envoy: {result.stderr}"
 
     def test_cell_can_reach_dns(self, data_plane_running):
         """Cell should be able to reach DNS filter."""
-        result = exec_in_cell(f"nc -z {DNS_FILTER_IP} 53 && echo OK")
-        assert result.returncode == 0 or "OK" in result.stdout, f"Cell cannot reach DNS: {result.stderr}"
+        result = exec_in_cell(f"dig @{DNS_FILTER_IP} +time=2 +tries=1 localhost >/dev/null 2>&1 && echo OK")
+        assert "OK" in result.stdout, f"Cell cannot reach DNS: {result.stderr}"
 
     def test_cell_cannot_reach_external_directly(self, data_plane_running):
         """Cell should NOT be able to reach external IPs directly."""
@@ -249,13 +262,13 @@ class TestMultiCellContainers:
     def test_all_cells_can_reach_proxy(self, data_plane_running):
         """Every cell container should reach the Envoy proxy."""
         for name in self._discover_all():
-            result = exec_in_cell(f"nc -z {HTTP_PROXY_IP} 8443 && echo OK", container_name=name)
+            result = exec_in_cell(f"nc -z {HTTP_PROXY_IP} {HTTP_PROXY_PORT} && echo OK", container_name=name)
             assert "OK" in result.stdout, f"{name} cannot reach proxy: {result.stderr}"
 
     def test_all_cells_can_reach_dns(self, data_plane_running):
         """Every cell container should reach the DNS filter."""
         for name in self._discover_all():
-            result = exec_in_cell(f"nc -z {DNS_FILTER_IP} 53 && echo OK", container_name=name)
+            result = exec_in_cell(f"dig @{DNS_FILTER_IP} +time=2 +tries=1 localhost >/dev/null 2>&1 && echo OK", container_name=name)
             assert "OK" in result.stdout, f"{name} cannot reach DNS: {result.stderr}"
 
     def test_all_cells_isolated_from_external(self, data_plane_running):
@@ -300,7 +313,7 @@ class TestProxyEgress:
     def test_https_through_proxy_allowed_domain(self, data_plane_running):
         """Should successfully reach allowed domains through proxy."""
         result = exec_in_cell(
-            f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:8443 https://api.github.com"
+            f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} https://api.github.com"
         )
         # Should get some HTTP response (even 401 unauthorized is fine)
         http_code = result.stdout.strip()
@@ -310,7 +323,7 @@ class TestProxyEgress:
         """Should fail to reach blocked domains through proxy."""
         result = exec_in_cell(
             "curl -s -o /dev/null -w '%{http_code}' "
-            f"-x http://{HTTP_PROXY_IP}:8443 "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
             "--connect-timeout 5 "
             "https://evil-malware.com"
         )
@@ -320,6 +333,209 @@ class TestProxyEgress:
         assert not http_code or http_code == "000" or http_code == "403", (
             f"Request to blocked domain succeeded with: {http_code}"
         )
+
+
+@pytest.mark.e2e
+class TestPathFiltering:
+    """Test path filtering (allowed_paths on domain policies)."""
+
+    # ifconfig.me is configured with allowed_paths: [/ip, /all*]
+    DOMAIN = "ifconfig.me"
+
+    def test_allowed_path_succeeds(self, data_plane_running):
+        """Request to an allowed path should succeed."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/ip"
+        )
+        code = result.stdout.strip()
+        assert code.isdigit() and int(code) < 500, f"Allowed path /ip returned: {code}"
+
+    def test_blocked_path_returns_403(self, data_plane_running):
+        """Request to a non-allowed path should return 403."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/ua"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"Blocked path /ua should return 403, got: {code}"
+
+    def test_wildcard_path_succeeds(self, data_plane_running):
+        """Wildcard path /all* should match /all.json."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/all.json"
+        )
+        code = result.stdout.strip()
+        assert code.isdigit() and int(code) < 500, f"Wildcard path /all.json returned: {code}"
+
+
+@pytest.mark.e2e
+class TestReadOnlyEnforcement:
+    """Test read-only enforcement (block POST/PUT/DELETE on read_only domains)."""
+
+    # pypi.org is configured with read_only: true
+    DOMAIN = "pypi.org"
+
+    def test_get_allowed_on_readonly(self, data_plane_running):
+        """GET should succeed on a read-only domain."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/"
+        )
+        code = result.stdout.strip()
+        assert code.isdigit() and int(code) < 500, f"GET on read-only domain returned: {code}"
+
+    def test_post_blocked_on_readonly(self, data_plane_running):
+        """POST should be blocked (403) on a read-only domain."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-X POST -d 'test' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.DOMAIN}/"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"POST on read-only domain should return 403, got: {code}"
+
+
+@pytest.mark.e2e
+class TestDevboxLocalAlias:
+    """Test devbox.local alias resolution (DNS + HTTP rewrite)."""
+
+    # api.github.com has alias: github → github.devbox.local
+    ALIAS = "github.devbox.local"
+    REAL_DOMAIN = "api.github.com"
+
+    def test_alias_dns_resolves_to_proxy_ip(self, data_plane_running):
+        """DNS query for {alias}.devbox.local should return the proxy IP."""
+        result = exec_in_cell(f"nslookup {self.ALIAS} {DNS_FILTER_IP}")
+        # Legacy: devbox.local → Envoy IP (10.x.1.10)
+        # Rust: devbox.local → cagent-proxy IP (10.x.1.20)
+        proxy_ip = CAGENT_PROXY_IP if is_rust_mode() else f"10.{_NET_OCTET}.1.10"
+        assert proxy_ip in result.stdout, (
+            f"{self.ALIAS} should resolve to proxy IP ({proxy_ip}), got: {result.stdout}"
+        )
+
+    def test_alias_http_rewrite(self, data_plane_running):
+        """HTTP request to {alias}.devbox.local should be forwarded to the real domain."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            f"http://{self.ALIAS}/"
+        )
+        code = result.stdout.strip()
+        # api.github.com returns 301 or 200
+        assert code.isdigit() and int(code) < 500, (
+            f"Alias {self.ALIAS} should proxy to {self.REAL_DOMAIN}, got: {code}"
+        )
+
+    def test_unknown_alias_blocked(self, data_plane_running):
+        """Unknown alias should be blocked (403 or NXDOMAIN)."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            "--connect-timeout 5 "
+            "http://nonexistent.devbox.local/"
+        )
+        code = result.stdout.strip()
+        assert not code or code == "000" or code == "403", (
+            f"Unknown alias should fail, got: {code}"
+        )
+
+
+@pytest.mark.e2e
+class TestIPv6Suppression:
+    """Test IPv6 AAAA suppression on blocked domains."""
+
+    def test_aaaa_returns_empty_not_nxdomain(self, data_plane_running):
+        """AAAA query for devbox.local should return empty answer (NOERROR), not NXDOMAIN."""
+        # dig returns NOERROR with 0 answers for suppressed AAAA
+        result = exec_in_cell(f"dig @{DNS_FILTER_IP} AAAA devbox.local +short")
+        # Should be empty (no IPv6 address returned)
+        assert result.stdout.strip() == "", (
+            f"AAAA for devbox.local should be empty (suppressed), got: {result.stdout.strip()}"
+        )
+
+
+@pytest.mark.e2e
+class TestMetadataIPBlock:
+    """Test that cloud metadata endpoints are blocked."""
+
+    def test_metadata_ip_blocked(self, data_plane_running):
+        """Requests to 169.254.169.254 should return 403."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            "--connect-timeout 5 "
+            "http://169.254.169.254/latest/meta-data/"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"Metadata IP should return 403, got: {code}"
+
+    def test_metadata_hostname_blocked(self, data_plane_running):
+        """Requests to metadata.google.internal should return 403."""
+        result = exec_in_cell(
+            f"curl -s -o /dev/null -w '%{{http_code}}' "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+            "--connect-timeout 5 "
+            "http://metadata.google.internal/"
+        )
+        code = result.stdout.strip()
+        assert code == "403", f"Metadata hostname should return 403, got: {code}"
+
+
+@pytest.mark.e2e
+class TestRateLimiting:
+    """Test per-domain rate limiting.
+
+    api.openai.com is configured with rate_limit.requests_per_minute: 60.
+    We can't easily exhaust 60 RPM in a test, so we verify that normal
+    requests succeed (i.e., rate limiting doesn't false-positive).
+    Rate limiting enforcement was verified in manual testing with low RPM.
+    """
+
+    DOMAIN = "api.openai.com"
+
+    def test_normal_rate_not_blocked(self, data_plane_running):
+        """A few requests should not trigger rate limiting (60 RPM budget)."""
+        for _ in range(3):
+            result = exec_in_cell(
+                f"curl -s -o /dev/null -w '%{{http_code}}' "
+                f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
+                f"--connect-timeout 5 http://{self.DOMAIN}/"
+            )
+            code = result.stdout.strip()
+            # Should get a real response (401 auth required, 200, 301, etc.), not 429
+            assert code != "429", f"Rate limit triggered too early on request: {code}"
+
+
+@pytest.mark.e2e
+class TestProxyHealth:
+    """Test proxy health endpoint (mode-aware)."""
+
+    def test_health_endpoint(self, data_plane_running):
+        """Proxy health endpoint should return 200."""
+        if is_rust_mode():
+            # cagent-proxy config API /health on infra-net
+            result = subprocess.run(
+                ["docker", "exec", f"{_CP_PREFIX}warden", "wget", "-q", "-O", "-",
+                 f"http://10.{_NET_OCTET}.2.20:18080/health"],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert result.returncode == 0, f"cagent-proxy health check failed: {result.stderr}"
+            assert "ok" in result.stdout, f"Unexpected health response: {result.stdout}"
+        else:
+            # Envoy admin /ready on localhost (only reachable from inside the container)
+            result = subprocess.run(
+                ["docker", "exec", f"{_CP_PREFIX}http-proxy", "bash", "-c",
+                 "echo > /dev/tcp/localhost/9901"],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert result.returncode == 0, f"Envoy admin port not reachable: {result.stderr}"
 
 
 @pytest.mark.e2e
@@ -334,15 +550,6 @@ class TestCredentialInjection:
             "Cell environment should not contain API keys"
         )
 
-    def test_envoy_handles_credential_injection(self, data_plane_running):
-        """Envoy should be running (handles credential injection via ext_authz)."""
-        result = subprocess.run(
-            ["docker", "ps", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Status}}"],
-            capture_output=True,
-            text=True,
-        )
-        assert "Up" in result.stdout, "Envoy proxy is not running"
-
     def test_http_devbox_local_gets_credentials(self, data_plane_running):
         """HTTP requests to *.devbox.local should get credentials injected.
 
@@ -353,7 +560,7 @@ class TestCredentialInjection:
         # For now, just verify the devbox.local routing works
         result = exec_in_cell(
             "curl -s -o /dev/null -w '%{http_code}' "
-            f"-x http://{HTTP_PROXY_IP}:8443 "
+            f"-x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
             "--connect-timeout 5 "
             "http://openai.devbox.local/v1/models 2>&1"
         )
@@ -377,18 +584,19 @@ class TestLogging:
         )
         assert "Up" in result.stdout, "Log shipper is not running"
 
-    def test_envoy_logs_exist(self, data_plane_running):
-        """Envoy should be generating access logs (to stdout)."""
+    def test_proxy_logs_exist(self, data_plane_running):
+        """Proxy should be generating access logs (to stdout)."""
+        container = f"{_CP_PREFIX}cagent-proxy" if is_rust_mode() else f"{_CP_PREFIX}http-proxy"
         result = subprocess.run(
-            ["docker", "logs", "--tail", "5", f"{_CP_PREFIX}http-proxy"],
+            ["docker", "logs", "--tail", "5", container],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        assert result.returncode == 0, "Cannot read http-proxy container logs"
+        assert result.returncode == 0, f"Cannot read {container} container logs"
         # Should have some log output (startup or access logs)
         combined = result.stdout + result.stderr
-        assert len(combined.strip()) > 0, "No log output from http-proxy"
+        assert len(combined.strip()) > 0, f"No log output from {container}"
 
     def test_logs_reach_file_backup(self, data_plane_running):
         """Logs should be written to the file backup sink.
@@ -400,7 +608,7 @@ class TestLogging:
         marker = f"logtest-{int(time.time())}"
 
         # Generate traffic through the proxy with a unique path
-        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 http://pypi.org/{marker} || true")
+        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} http://pypi.org/{marker} || true")
 
         # Poll the file backup volume for the marker (up to 30s)
         deadline = time.time() + 30
@@ -449,15 +657,19 @@ class TestCellSecurityHardening:
         assert "NO_HOST" in result.stdout or "No such file" in result.stdout
 
     def test_proxy_env_vars_set(self, data_plane_running):
-        """Cell must have HTTP_PROXY pointing to Envoy and HTTPS_PROXY pointing to Envoy or mitmproxy."""
+        """Cell must have HTTP_PROXY and HTTPS_PROXY pointing to the proxy."""
         result = exec_in_cell("echo $HTTP_PROXY")
-        assert f"{HTTP_PROXY_IP}:8443" in result.stdout, f"HTTP_PROXY not set correctly: {result.stdout}"
+        assert f"{HTTP_PROXY_IP}:{HTTP_PROXY_PORT}" in result.stdout, f"HTTP_PROXY not set correctly: {result.stdout}"
 
         result = exec_in_cell("echo $HTTPS_PROXY")
         https_proxy = result.stdout.strip()
-        # HTTPS_PROXY points to either Envoy (no MITM) or mitmproxy (with MITM)
-        valid = f"{HTTP_PROXY_IP}:8443" in https_proxy or f"{MITM_PROXY_IP}:8080" in https_proxy
-        assert valid, f"HTTPS_PROXY not set correctly: {https_proxy}"
+        if is_rust_mode():
+            # Both HTTP and HTTPS go through cagent-proxy on the same port
+            assert f"{HTTP_PROXY_IP}:{HTTP_PROXY_PORT}" in https_proxy, f"HTTPS_PROXY not set correctly: {https_proxy}"
+        else:
+            # HTTPS_PROXY points to either Envoy (no MITM) or mitmproxy (with MITM)
+            valid = f"{HTTP_PROXY_IP}:{HTTP_PROXY_PORT}" in https_proxy or f"{MITM_PROXY_IP}:8080" in https_proxy
+            assert valid, f"HTTPS_PROXY not set correctly: {https_proxy}"
 
     def test_cannot_reach_infra_net(self, data_plane_running):
         """Cell should not be able to reach any infra-net addresses."""
@@ -469,28 +681,36 @@ class TestCellSecurityHardening:
         result = exec_in_cell(f"nc -z -w 2 {INFRA_ENVOY_IP} 8443 && echo FAIL || echo BLOCKED")
         assert "BLOCKED" in result.stdout, f"Cell can reach envoy on infra-net ({INFRA_ENVOY_IP})"
 
-    def test_envoy_admin_not_reachable(self, data_plane_running):
-        """Envoy admin API (port 9901) must not be reachable from cell-net.
+    def test_proxy_admin_not_reachable(self, data_plane_running):
+        """Proxy admin/config API must not be reachable from cell-net.
 
-        The cell has HTTP_PROXY set, so curl routes through Envoy's listener
-        on 8443 which rejects it as 'destination_not_allowed'. Even bypassing
-        the proxy, the admin binds to 127.0.0.1 so it's unreachable from
-        cell-net. Either outcome means the admin API is not exposed.
+        Envoy admin (9901) binds to 127.0.0.1 inside its container.
+        cagent-proxy config API (18080) listens on infra-net only.
+        In both cases, the cell should not be able to reach it.
         """
-        # Try via proxy (cell's default) — Envoy rejects unknown destinations
-        result = exec_in_cell(f"curl -s --connect-timeout 2 http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED")
-        assert "BLOCKED" in result.stdout or "refused" in result.stdout or "destination_not_allowed" in result.stdout, (
-            "Cell can reach Envoy admin API — config_dump would leak credentials!"
-        )
+        if is_rust_mode():
+            # cagent-proxy config API is on infra-net (10.x.2.20:18080),
+            # cell is on cell-net only — should be unreachable
+            admin_ip = f"10.{_NET_OCTET}.2.20"
+            result = exec_in_cell(
+                f"curl -s --connect-timeout 2 --noproxy '*' http://{admin_ip}:18080/health 2>&1 || echo BLOCKED"
+            )
+            assert "BLOCKED" in result.stdout or "refused" in result.stdout or "timed out" in result.stdout, (
+                "Cell can reach cagent-proxy config API — could overwrite allowlist!"
+            )
+        else:
+            # Envoy admin binds to 127.0.0.1, unreachable from cell-net
+            result = exec_in_cell(f"curl -s --connect-timeout 2 http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED")
+            assert "BLOCKED" in result.stdout or "refused" in result.stdout or "destination_not_allowed" in result.stdout, (
+                "Cell can reach Envoy admin API — config_dump would leak credentials!"
+            )
 
-        # Try bypassing the proxy — admin binds to 127.0.0.1, so direct
-        # connection to {HTTP_PROXY_IP}:9901 should be refused
-        result = exec_in_cell(
-            f"curl -s --connect-timeout 2 --noproxy '*' http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED"
-        )
-        assert "BLOCKED" in result.stdout or "refused" in result.stdout, (
-            "Cell can reach Envoy admin API directly (bypassing proxy)!"
-        )
+            result = exec_in_cell(
+                f"curl -s --connect-timeout 2 --noproxy '*' http://{HTTP_PROXY_IP}:9901/ready 2>&1 || echo BLOCKED"
+            )
+            assert "BLOCKED" in result.stdout or "refused" in result.stdout, (
+                "Cell can reach Envoy admin API directly (bypassing proxy)!"
+            )
 
     def test_raw_socket_blocked(self, data_plane_running):
         """Raw sockets should be blocked (CAP_NET_RAW dropped + seccomp)."""
@@ -626,8 +846,11 @@ class TestLocalAdminAPI:
         # Agent containers have dynamic names (e.g. cagent-cell-dev-1)
         agent_checks = [k for k in health["checks"] if "cell" in k and "manager" not in k]
         assert len(agent_checks) >= 1, f"No cell container in checks: {list(health['checks'])}"
-        assert f"{_CP_PREFIX}dns-filter" in health["checks"]
-        assert f"{_CP_PREFIX}http-proxy" in health["checks"]
+        if is_rust_mode():
+            assert f"{_CP_PREFIX}cagent-proxy" in health["checks"]
+        else:
+            assert f"{_CP_PREFIX}dns-filter" in health["checks"]
+            assert f"{_CP_PREFIX}http-proxy" in health["checks"]
 
     def test_info(self, admin_url):
         """Info endpoint should return container names and paths."""
@@ -637,8 +860,9 @@ class TestLocalAdminAPI:
         # Agent name is dynamic (label-discovered), just verify it's present
         assert "cell" in data["containers"]
         assert len(data["containers"]["cell"]) > 0
-        assert data["containers"]["dns"] == f"{_CP_PREFIX}dns-filter"
-        assert data["containers"]["http_proxy"] == f"{_CP_PREFIX}http-proxy"
+        if is_legacy_mode():
+            assert data["containers"]["dns"] == f"{_CP_PREFIX}dns-filter"
+            assert data["containers"]["http_proxy"] == f"{_CP_PREFIX}http-proxy"
 
     def test_list_containers(self, admin_url):
         """Should list managed containers with status."""
@@ -649,7 +873,11 @@ class TestLocalAdminAPI:
         # Agent containers have dynamic names; check at least one is present
         agent_containers = [k for k in data["containers"] if "cell" in k and "manager" not in k]
         assert len(agent_containers) >= 1, f"No cell container found: {list(data['containers'])}"
-        for name in (f"{_CP_PREFIX}dns-filter", f"{_CP_PREFIX}http-proxy"):
+        if is_rust_mode():
+            proxy_containers = [f"{_CP_PREFIX}cagent-proxy"]
+        else:
+            proxy_containers = [f"{_CP_PREFIX}dns-filter", f"{_CP_PREFIX}http-proxy"]
+        for name in proxy_containers:
             assert name in data["containers"]
             assert "status" in data["containers"][name]
 
@@ -673,14 +901,15 @@ class TestLocalAdminAPI:
 
     def test_container_logs(self, admin_url, data_plane_running):
         """Should return recent logs for a running container."""
+        container = f"{_CP_PREFIX}cagent-proxy" if is_rust_mode() else f"{_CP_PREFIX}http-proxy"
         r = requests.get(
-            f"{admin_url}/api/containers/{_CP_PREFIX}http-proxy/logs",
+            f"{admin_url}/api/containers/{container}/logs",
             params={"tail": 10},
             timeout=10,
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["container"] == f"{_CP_PREFIX}http-proxy"
+        assert data["container"] == container
         assert isinstance(data["lines"], list)
         assert data["count"] == len(data["lines"])
 
@@ -787,10 +1016,11 @@ class TestLocalAdminConfigPipeline:
             assert warden_ready, "Warden API did not become ready within 30s after restart"
             r = requests.post(f"{admin_url}/api/config/reload", timeout=60)
             assert r.status_code == 200
-            assert wait_for_container(f"{_CP_PREFIX}dns-filter", timeout=15), (
-                "dns-filter did not come back after reload"
-            )
-            # Wait for CoreDNS to be ready
+            if is_legacy_mode():
+                assert wait_for_container(f"{_CP_PREFIX}dns-filter", timeout=15), (
+                    "dns-filter did not come back after reload"
+                )
+            # Wait for DNS to be ready
             time.sleep(2)
 
             # -- Step 6: Verify domain now resolves from cell (poll for propagation) --
@@ -946,7 +1176,7 @@ class TestWebTerminal:
     def test_network_isolation_via_terminal(self, admin_url):
         """Direct external access should be blocked even through the terminal."""
         output = self._run("curl -s --connect-timeout 2 http://8.8.8.8 || echo BLOCKED")
-        assert "BLOCKED" in output or "not_allowed" in output, (
+        assert "BLOCKED" in output or "not_allowed" in output or "Domain not allowed" in output, (
             "Cell can reach external IPs directly through terminal — isolation broken!"
         )
 
@@ -982,13 +1212,13 @@ class TestAnalytics:
     @pytest.fixture(autouse=True)
     def _generate_blocked_traffic(self, admin_url, data_plane_running):
         """Generate blocked (403) traffic before analytics tests."""
-        # The preceding test class restarts warden (which restarts Envoy).
-        # Wait for Envoy to accept connections before sending traffic.
-        assert wait_for_container(f"{_CP_PREFIX}http-proxy", timeout=15), "http-proxy not running"
+        # Wait for the proxy to accept connections before sending traffic.
+        proxy_container = f"{_CP_PREFIX}cagent-proxy" if is_rust_mode() else f"{_CP_PREFIX}http-proxy"
+        assert wait_for_container(proxy_container, timeout=15), f"{proxy_container} not running"
         deadline = time.time() + 15
         while time.time() < deadline:
             r = exec_in_cell(
-                f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:8443 --connect-timeout 2 http://{self.BLOCKED_DOMAIN}/test"
+                f"curl -s -o /dev/null -w '%{{http_code}}' -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} --connect-timeout 2 http://{self.BLOCKED_DOMAIN}/test"
             )
             if r.returncode == 0 and "403" in r.stdout:
                 break
@@ -997,7 +1227,7 @@ class TestAnalytics:
         # Fire additional requests to ensure enough data for analytics
         for _ in range(2):
             exec_in_cell(
-                f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 --connect-timeout 5 http://{self.BLOCKED_DOMAIN}/test"
+                f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} --connect-timeout 5 http://{self.BLOCKED_DOMAIN}/test"
             )
         # Give Envoy a moment to flush logs
         time.sleep(2)
@@ -1029,7 +1259,7 @@ class TestAnalytics:
     def test_bandwidth_endpoint(self, admin_url, data_plane_running):
         """Widget query for bandwidth_by_domain returns bandwidth data."""
         # Generate some traffic to an allowed domain (may already exist from fixture)
-        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 http://ifconfig.me/")
+        exec_in_cell(f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} http://ifconfig.me/")
         time.sleep(2)
 
         r = requests.post(
@@ -1135,13 +1365,14 @@ class TestDeepHealth:
         checks = health["checks"]
         # Should include log_store and at least one proxy/DNS check
         assert "log_store" in checks
-        assert "envoy_ready" in checks
+        if is_legacy_mode():
+            assert "envoy_ready" in checks
         assert "dns_resolution" in checks
 
 
 @pytest.mark.e2e
 class TestLogIngestionPipeline:
-    """End-to-end test: traffic -> Envoy logs -> Vector -> VictoriaLogs -> warden search.
+    """End-to-end test: traffic -> proxy logs -> Vector -> VictoriaLogs -> warden search.
 
     Validates that logs generated by proxy requests flow all the way through
     the pipeline and become queryable via the warden /api/logs/search endpoint.
@@ -1180,7 +1411,7 @@ class TestLogIngestionPipeline:
 
         # Generate traffic through the proxy — the marker appears in the request path
         exec_in_cell(
-            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 --connect-timeout 5 http://pypi.org/{marker} || true"
+            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} --connect-timeout 5 http://pypi.org/{marker} || true"
         )
 
         # Poll warden search until the marker appears (Vector flush + VL index)
@@ -1208,7 +1439,7 @@ class TestLogIngestionPipeline:
         """Search filtered by source should return matching logs."""
         # Generate some traffic first
         exec_in_cell(
-            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:8443 "
+            f"curl -s -o /dev/null -x http://{HTTP_PROXY_IP}:{HTTP_PROXY_PORT} "
             "--connect-timeout 5 http://pypi.org/search-filter-test || true"
         )
         time.sleep(5)
@@ -1467,44 +1698,8 @@ class TestWardenAuthE2E:
 
 
 @pytest.mark.e2e
-class TestMITMProxyHTTPS:
-    """Test HTTPS egress through MITM proxy."""
-
-    @pytest.fixture(autouse=True)
-    def _wait_for_mitm(self, data_plane_running):
-        """Wait for mitmproxy to be reachable from cell."""
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            probe = exec_in_cell("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 https://pypi.org/ 2>&1")
-            if probe.stdout.strip() not in ("", "000"):
-                break
-            time.sleep(2)
-
-    def test_https_to_allowed_domain_succeeds(self, data_plane_running):
-        """HTTPS request to an allowed domain should succeed through mitmproxy."""
-        result = exec_in_cell("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 https://pypi.org/ 2>&1")
-        http_code = result.stdout.strip()
-        assert http_code in ("200", "301", "302"), f"HTTPS to allowed domain failed with {http_code}: {result.stderr}"
-
-    def test_https_to_blocked_domain_fails(self, data_plane_running):
-        """HTTPS request to a blocked domain should be rejected."""
-        result = exec_in_cell(
-            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 https://evil.example.com/ 2>&1"
-        )
-        http_code = result.stdout.strip()
-        # Should get 403 from Envoy or 000 (connection failed, DNS blocked)
-        assert http_code in ("403", "000"), f"HTTPS to blocked domain should fail but got {http_code}"
-
-    def test_https_credential_injection(self, data_plane_running):
-        """HTTPS requests should have credentials injected (via mitmproxy -> Envoy ext_authz)."""
-        # Verify Envoy ext_authz is running (handles credential injection for both HTTP and HTTPS)
-        result = subprocess.run(
-            ["docker", "ps", "--filter", f"name={_CP_PREFIX}http-proxy", "--format", "{{.Status}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        assert "Up" in result.stdout, "Envoy proxy must be running for credential injection"
+class TestHTTPSProxyConfig:
+    """Test HTTPS proxy configuration and CA trust (both modes)."""
 
     def test_cell_trusts_mitm_ca(self, data_plane_running):
         """Cell should have the MITM CA cert in its trust store."""
@@ -1519,12 +1714,18 @@ class TestMITMProxyHTTPS:
         cert_count = int(result.stdout.strip()) if result.stdout.strip().isdigit() else 0
         assert cert_count > 1, "Combined CA bundle should contain multiple certificates"
 
-    def test_cell_https_proxy_points_to_mitmproxy(self, data_plane_running):
-        """Cell HTTPS_PROXY should point to mitmproxy when MITM is active."""
+    def test_cell_https_proxy_configured(self, data_plane_running):
+        """Cell HTTPS_PROXY should point to the correct proxy."""
         result = exec_in_cell("echo $HTTPS_PROXY")
-        assert f"{MITM_PROXY_IP}:8080" in result.stdout, (
-            f"HTTPS_PROXY should point to mitmproxy, got: {result.stdout.strip()}"
-        )
+        proxy_val = result.stdout.strip()
+        if is_rust_mode():
+            assert f"{CAGENT_PROXY_IP}:18443" in proxy_val, (
+                f"HTTPS_PROXY should point to cagent-proxy, got: {proxy_val}"
+            )
+        else:
+            assert f"{MITM_PROXY_IP}:8080" in proxy_val, (
+                f"HTTPS_PROXY should point to mitmproxy, got: {proxy_val}"
+            )
 
 
 # =============================================================================

@@ -12,10 +12,12 @@ import runtime_config
 import yaml
 from config_sync import (
     ENV_FILE_PATH,
+    PROXY_MODE,
     _atomic_write,
     _stable_hash,
     config_generator,
     config_state,
+    push_to_cagent_proxy,
     reload_envoy,
     restart_coredns,
     sync_config,
@@ -367,25 +369,33 @@ def main_loop(stop_event: Optional[threading.Event] = None):
     logger.info(f"  Discovered {len(agents)} cell container(s): {[c.name for c in agents]}")
 
     # Initial config generation from cagent.yaml (always write on startup)
-    # Uses xDS mode (bootstrap + CDS/RDS) consistent with regenerate_configs().
     logger.info("Generating initial configs from cagent.yaml...")
     config_generator.load_config()
-    config_generator.write_corefile(COREDNS_COREFILE_PATH)
-    # Write CDS + RDS before bootstrap so Envoy finds them on startup
-    cds_yaml = yaml.dump(config_generator.generate_envoy_cds(), default_flow_style=False, sort_keys=False)
-    _atomic_write(ENVOY_CDS_PATH, cds_yaml)
-    rds_yaml = yaml.dump(config_generator.generate_envoy_rds(), default_flow_style=False, sort_keys=False)
-    _atomic_write(ENVOY_RDS_PATH, rds_yaml)
-    config_generator.write_envoy_bootstrap(ENVOY_CONFIG_PATH)
+
+    if PROXY_MODE == "rust":
+        # Push config to cagent-proxy via HTTP
+        logger.info("Pushing initial config to cagent-proxy (PROXY_MODE=rust)...")
+        all_domains = config_generator.get_domains()
+        dlp = config_generator.get_dlp_config()
+        push_to_cagent_proxy(all_domains, [], dlp_config=dlp)
+    else:
+        # Legacy: write Corefile + Envoy xDS files
+        config_generator.write_corefile(COREDNS_COREFILE_PATH)
+        cds_yaml = yaml.dump(config_generator.generate_envoy_cds(), default_flow_style=False, sort_keys=False)
+        _atomic_write(ENVOY_CDS_PATH, cds_yaml)
+        rds_yaml = yaml.dump(config_generator.generate_envoy_rds(), default_flow_style=False, sort_keys=False)
+        _atomic_write(ENVOY_RDS_PATH, rds_yaml)
+        config_generator.write_envoy_bootstrap(ENVOY_CONFIG_PATH)
+        restart_coredns()
+        reload_envoy()
+        # Snapshot current state so regenerate_configs() can detect changes
+        config_state.corefile_hash = _stable_hash(config_generator.generate_corefile())
+        bootstrap_yaml = yaml.dump(config_generator.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False)
+        config_state.envoy_bootstrap_hash = _stable_hash(bootstrap_yaml)
+        config_state.envoy_cds_hash = _stable_hash(cds_yaml)
+        config_state.envoy_rds_hash = _stable_hash(rds_yaml)
+
     config_generator.write_resource_env(ENV_FILE_PATH)
-    restart_coredns()
-    reload_envoy()
-    # Snapshot current state so regenerate_configs() can detect changes
-    config_state.corefile_hash = _stable_hash(config_generator.generate_corefile())
-    bootstrap_yaml = yaml.dump(config_generator.generate_envoy_bootstrap(), default_flow_style=False, sort_keys=False)
-    config_state.envoy_bootstrap_hash = _stable_hash(bootstrap_yaml)
-    config_state.envoy_cds_hash = _stable_hash(cds_yaml)
-    config_state.envoy_rds_hash = _stable_hash(rds_yaml)
     config_state.email_hash = _stable_hash(config_generator.generate_email_config())
     config_state.dlp_hash = _stable_hash(config_generator.generate_dlp_config())
     logger.info("Initial config generation complete")

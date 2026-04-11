@@ -35,6 +35,14 @@ from constants import (
 logger = logging.getLogger(__name__)
 _NET_OCTET = os.environ.get("NET_OCTET", "200")
 
+# Proxy mode: "legacy" (Envoy+mitmproxy+CoreDNS) or "rust" (cagent-proxy)
+PROXY_MODE = os.environ.get("PROXY_MODE", "legacy")
+CAGENT_PROXY_URL = os.environ.get("CAGENT_PROXY_URL", f"http://10.{_NET_OCTET}.2.20:18080")
+# Shared secret for authenticated POST /config to cagent-proxy.  Must match
+# the CAGENT_PROXY_TOKEN env var on the cagent-proxy container.  Empty in
+# dev/standalone — cagent-proxy logs a warning on startup when unset.
+CAGENT_PROXY_TOKEN = os.environ.get("CAGENT_PROXY_TOKEN", "")
+
 # Path to .env file for docker-compose resource overrides
 ENV_FILE_PATH = os.path.join(DATA_PLANE_DIR, ".env")
 
@@ -105,6 +113,88 @@ def reload_email_proxy():
         return False
     except Exception as e:
         logger.error(f"Failed to reload email-proxy: {e}")
+        return False
+
+
+def push_to_cagent_proxy(domain_entries: list, domain_policies: list, dlp_config: dict = None) -> bool:
+    """Push config to cagent-proxy via its HTTP config API.
+
+    Translates cagent.yaml-style domain entries + CP credential policies
+    into the ProxyConfig JSON that cagent-proxy expects.
+    """
+    # Build a credential lookup from CP domain policies
+    cred_by_domain = {}
+    for p in domain_policies:
+        if p.get("credential_header") and p.get("credential_value"):
+            cred_by_domain[p["domain"]] = p
+
+    proxy_domains = []
+    for entry in domain_entries:
+        domain = entry.get("domain", "")
+        pd = {
+            "domain": domain,
+            # tls defaults to True (HTTPS upstream); explicit `tls: false`
+            # in cagent.yaml is for HTTP-only upstreams.
+            "tls": bool(entry.get("tls", True)),
+            "read_only": entry.get("read_only", False),
+            "allowed_paths": entry.get("allowed_paths", []),
+        }
+        # Alias: creates {alias}.devbox.local shortcut
+        if entry.get("alias"):
+            pd["alias"] = entry["alias"]
+        # Rate limit (rpm + optional explicit burst override)
+        rl = entry.get("rate_limit", {})
+        if rl.get("requests_per_minute"):
+            pd["rate_limit_rpm"] = rl["requests_per_minute"]
+        if rl.get("burst_size"):
+            pd["burst_size"] = rl["burst_size"]
+        # Per-domain upstream timeout (e.g. "30s", "120s", "5m")
+        if entry.get("timeout"):
+            pd["timeout"] = entry["timeout"]
+        # Credentials from CP policies (injected in-process by cagent-proxy)
+        cred = cred_by_domain.get(domain, {})
+        if cred.get("credential_header"):
+            pd["credential_header"] = cred["credential_header"]
+        if cred.get("credential_format"):
+            pd["credential_format"] = cred["credential_format"]
+        if cred.get("credential_value"):
+            pd["credential_value"] = cred["credential_value"]
+
+        proxy_domains.append(pd)
+
+    payload = {"domains": proxy_domains}
+
+    # Include DLP config if available
+    if dlp_config:
+        payload["dlp"] = dlp_config
+
+    headers = {}
+    if CAGENT_PROXY_TOKEN:
+        headers["X-Config-Token"] = CAGENT_PROXY_TOKEN
+
+    try:
+        resp = requests.post(
+            f"{CAGENT_PROXY_URL}/config",
+            json=payload,
+            headers=headers,
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            logger.info("Pushed config to cagent-proxy: %s", resp.json())
+            return True
+        if resp.status_code == 401:
+            logger.error(
+                "cagent-proxy rejected config push (401): CAGENT_PROXY_TOKEN "
+                "missing or does not match the one set on cagent-proxy"
+            )
+            return False
+        logger.warning("cagent-proxy config push returned %s: %s", resp.status_code, resp.text)
+        return False
+    except requests.exceptions.ConnectionError:
+        logger.warning("cagent-proxy not reachable at %s", CAGENT_PROXY_URL)
+        return False
+    except Exception as e:
+        logger.error("Failed to push config to cagent-proxy: %s", e)
         return False
 
 
@@ -205,76 +295,76 @@ def regenerate_configs(
         config_generator.set_additional_email_accounts(additional_email_accounts or [])
         config_generator.set_additional_dlp_config(additional_dlp_config)
 
-        # Generate configs and compute stable hashes (ignoring timestamps)
-        corefile_content = config_generator.generate_corefile()
+        # Generate email/DLP configs (always needed regardless of proxy mode)
         email_config = config_generator.generate_email_config()
         dlp_config = config_generator.generate_dlp_config()
-
-        # Envoy xDS: bootstrap (static) + CDS/RDS (dynamic, hot-reloaded)
-        bootstrap = config_generator.generate_envoy_bootstrap()
-        bootstrap_yaml = yaml.dump(bootstrap, default_flow_style=False, sort_keys=False)
-        cds = config_generator.generate_envoy_cds()
-        cds_yaml = yaml.dump(cds, default_flow_style=False, sort_keys=False)
-        rds = config_generator.generate_envoy_rds()
-        rds_yaml = yaml.dump(rds, default_flow_style=False, sort_keys=False)
-
-        corefile_hash = _stable_hash(corefile_content)
-        bootstrap_hash = _stable_hash(bootstrap_yaml)
-        cds_hash = _stable_hash(cds_yaml)
-        rds_hash = _stable_hash(rds_yaml)
         email_hash = _stable_hash(email_config)
         dlp_hash = _stable_hash(dlp_config)
-
-        corefile_changed = corefile_hash != config_state.corefile_hash
-        bootstrap_changed = bootstrap_hash != config_state.envoy_bootstrap_hash
-        cds_changed = cds_hash != config_state.envoy_cds_hash
-        rds_changed = rds_hash != config_state.envoy_rds_hash
-        envoy_changed = cds_changed or rds_changed
         email_changed = email_hash != config_state.email_hash
         dlp_changed = dlp_hash != config_state.dlp_hash
 
-        if corefile_changed:
-            config_generator.write_corefile(COREDNS_COREFILE_PATH)
-            # CoreDNS auto-reloads via the `reload` plugin — no restart needed
-            config_state.corefile_hash = corefile_hash
+        if PROXY_MODE == "rust":
+            # ── Rust proxy path: push config via HTTP instead of writing files ──
+            all_domains = config_generator.get_domains()
+            dlp = config_generator.get_dlp_config()
+            proxy_changed = push_to_cagent_proxy(all_domains, _synced_domain_policies, dlp_config=dlp)
+        else:
+            # ── Legacy path: generate Corefile + Envoy xDS files ──
+            corefile_content = config_generator.generate_corefile()
+            bootstrap = config_generator.generate_envoy_bootstrap()
+            bootstrap_yaml = yaml.dump(bootstrap, default_flow_style=False, sort_keys=False)
+            cds = config_generator.generate_envoy_cds()
+            cds_yaml = yaml.dump(cds, default_flow_style=False, sort_keys=False)
+            rds = config_generator.generate_envoy_rds()
+            rds_yaml = yaml.dump(rds, default_flow_style=False, sort_keys=False)
 
-        # Write CDS + RDS first so files exist before any bootstrap restart.
-        # Envoy watches these via inotify — no container restart needed.
-        if cds_changed:
-            _atomic_write(ENVOY_CDS_PATH, cds_yaml)
-            config_state.envoy_cds_hash = cds_hash
+            corefile_hash = _stable_hash(corefile_content)
+            bootstrap_hash = _stable_hash(bootstrap_yaml)
+            cds_hash = _stable_hash(cds_yaml)
+            rds_hash = _stable_hash(rds_yaml)
 
-        if rds_changed:
-            _atomic_write(ENVOY_RDS_PATH, rds_yaml)
-            config_state.envoy_rds_hash = rds_hash
+            corefile_changed = corefile_hash != config_state.corefile_hash
+            bootstrap_changed = bootstrap_hash != config_state.envoy_bootstrap_hash
+            cds_changed = cds_hash != config_state.envoy_cds_hash
+            rds_changed = rds_hash != config_state.envoy_rds_hash
 
-        # Bootstrap only changes on first boot or when listener-level config
-        # changes (rate limit defaults, admin port).  Requires Envoy restart.
-        if bootstrap_changed:
-            config_generator.write_envoy_bootstrap(ENVOY_CONFIG_PATH)
-            reload_envoy()
-            config_state.envoy_bootstrap_hash = bootstrap_hash
+            if corefile_changed:
+                config_generator.write_corefile(COREDNS_COREFILE_PATH)
+                config_state.corefile_hash = corefile_hash
+
+            if cds_changed:
+                _atomic_write(ENVOY_CDS_PATH, cds_yaml)
+                config_state.envoy_cds_hash = cds_hash
+
+            if rds_changed:
+                _atomic_write(ENVOY_RDS_PATH, rds_yaml)
+                config_state.envoy_rds_hash = rds_hash
+
+            if bootstrap_changed:
+                config_generator.write_envoy_bootstrap(ENVOY_CONFIG_PATH)
+                reload_envoy()
+                config_state.envoy_bootstrap_hash = bootstrap_hash
+
+            if dlp_changed:
+                config_generator.write_dlp_config(DLP_CONFIG_PATH)
+                reload_mitm_proxy()
+                config_state.dlp_hash = dlp_hash
+
+            proxy_changed = corefile_changed or cds_changed or rds_changed or bootstrap_changed
 
         if email_changed:
             config_generator.write_email_config(EMAIL_CONFIG_PATH)
             reload_email_proxy()
             config_state.email_hash = email_hash
 
-        if dlp_changed:
-            config_generator.write_dlp_config(DLP_CONFIG_PATH)
-            reload_mitm_proxy()
-            config_state.dlp_hash = dlp_hash
-
         # Always update resource env vars when config changes
         if config_changed:
             config_generator.write_resource_env(ENV_FILE_PATH)
 
-        any_changed = corefile_changed or envoy_changed or bootstrap_changed or email_changed or dlp_changed
+        any_changed = proxy_changed or email_changed or dlp_changed
         if any_changed:
             logger.info("Regenerated configs from cagent.yaml")
-            # Invalidate domain policy caches only when domain configs changed
-            domain_configs_changed = corefile_changed or envoy_changed
-            if domain_configs_changed:
+            if proxy_changed:
                 from routers.domain_policy import invalidate_cache
                 from routers.ext_authz import invalidate_cache as invalidate_ext_authz_cache
 
@@ -312,6 +402,9 @@ def _cp_policy_to_domain_entry(policy: dict) -> dict:
         entry["timeout"] = policy["timeout"]
     if policy.get("read_only"):
         entry["read_only"] = True
+    # tls flag: HTTPS upstream is the default, only set if explicitly disabled
+    if policy.get("tls") is False:
+        entry["tls"] = False
     # Note: credentials are NOT included — ext_authz handles them dynamically
     return entry
 
