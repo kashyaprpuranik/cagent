@@ -163,7 +163,7 @@ Use `tokio-rustls` (pure Rust) for MITM layer — trivial cross-compile. Target 
 | Rate limiting (per-domain RPM) | local_ratelimit filter, token bucket | Token bucket per domain | ✅ Phase 1b |
 | Circuit breakers (max connections) | Per-cluster config | TODO | Future |
 | Retry logic | Per-route retry_policy | TODO | Future |
-| Email proxy routing (email.devbox.local) | Virtual host → email-proxy | TODO | Future |
+| Email backend (email.devbox.local) | Python email-proxy container | In-process IMAP/SMTP via async-imap + lettre | ✅ Phase 6 (generic password auth; OAuth2 deferred) |
 
 ### mitmproxy Features
 

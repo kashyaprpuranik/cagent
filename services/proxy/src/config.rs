@@ -96,9 +96,9 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub dlp: crate::dlp::DlpConfig,
 
-    /// Email accounts for the in-process IMAP/SMTP handler.  Replaces the
-    /// legacy `services/email_proxy/` Python service.  Generic password
-    /// auth only — OAuth2 accounts are rejected at config push time.
+    /// Email accounts for the in-process IMAP/SMTP handler.  Generic
+    /// password auth only — OAuth2 accounts are rejected at config push
+    /// time (warden filters them out before sending).
     #[serde(default)]
     pub email_accounts: Vec<crate::email::EmailAccount>,
 

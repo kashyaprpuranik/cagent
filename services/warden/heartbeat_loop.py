@@ -396,7 +396,6 @@ def main_loop(stop_event: Optional[threading.Event] = None):
         config_state.envoy_rds_hash = _stable_hash(rds_yaml)
 
     config_generator.write_resource_env(ENV_FILE_PATH)
-    config_state.email_hash = _stable_hash(config_generator.generate_email_config())
     config_state.dlp_hash = _stable_hash(config_generator.generate_dlp_config())
     logger.info("Initial config generation complete")
 

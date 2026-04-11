@@ -41,7 +41,6 @@ COREDNS_CONTAINER_NAME = f"{_CP_PREFIX}dns-filter"
 ENVOY_CONTAINER_NAME = f"{_CP_PREFIX}http-proxy"
 MITM_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}mitm-proxy"
 CAGENT_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}cagent-proxy"
-EMAIL_PROXY_CONTAINER_NAME = f"{_CP_PREFIX}email-proxy"
 WARDEN_CONTAINER_NAME = f"{_CP_PREFIX}warden"
 
 # ---------------------------------------------------------------------------
@@ -63,7 +62,6 @@ COREDNS_COREFILE_PATH = os.environ.get("COREDNS_COREFILE_PATH", "/etc/coredns/Co
 ENVOY_CONFIG_PATH = os.environ.get("ENVOY_CONFIG_PATH", "/etc/envoy/envoy.yaml")
 ENVOY_CDS_PATH = os.environ.get("ENVOY_CDS_PATH", "/etc/envoy/cds.yaml")
 ENVOY_RDS_PATH = os.environ.get("ENVOY_RDS_PATH", "/etc/envoy/rds.yaml")
-EMAIL_CONFIG_PATH = os.environ.get("EMAIL_CONFIG_PATH", "/etc/cagent/email/accounts.json")
 DATA_PLANE_DIR = os.environ.get("DATA_PLANE_DIR", "/app/cagent")
 DLP_CONFIG_PATH = os.path.join(DATA_PLANE_DIR, "configs", "mitm", "dlp_config.json")
 
@@ -297,8 +295,8 @@ def get_managed_containers() -> List[str]:
     """Build the managed-container list dynamically.
 
     Cell containers are discovered by label; infrastructure containers
-    depend on the proxy mode.  Optional containers (warden, email-proxy)
-    are included only when they actually exist.
+    depend on the proxy mode.  Email is handled in-process by
+    cagent-proxy when enabled (no separate container).
     """
     proxy_mode = os.environ.get("PROXY_MODE", "legacy")
     names = discover_cell_container_names()
@@ -308,8 +306,6 @@ def get_managed_containers() -> List[str]:
         names.extend([COREDNS_CONTAINER_NAME, ENVOY_CONTAINER_NAME, MITM_PROXY_CONTAINER_NAME])
     if _container_exists(WARDEN_CONTAINER_NAME):
         names.append(WARDEN_CONTAINER_NAME)
-    if "email" in BETA_FEATURES:
-        names.append(EMAIL_PROXY_CONTAINER_NAME)
     return names
 
 

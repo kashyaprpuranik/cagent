@@ -32,8 +32,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install ruff
-      - run: ruff check services/warden/ services/email_proxy/ tests/
-      - run: ruff format --check services/warden/ services/email_proxy/ tests/
+      - run: ruff check services/warden/ tests/
+      - run: ruff format --check services/warden/ tests/
 
   python-tests:
     runs-on: ubuntu-latest

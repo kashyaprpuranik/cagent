@@ -74,8 +74,7 @@ pub async fn handle_request(
 
     // Email: if the request targets email.devbox.local and at least one
     // email account is configured, dispatch to the in-process email
-    // handler (replaces the legacy services/email_proxy/ container in
-    // rust mode).  The allowlist/alias path is bypassed — there is no
+    // handler.  The allowlist/alias path is bypassed — there is no
     // upstream, the handler runs in the same process.
     if domain.eq_ignore_ascii_case("email.devbox.local") && !config.email_accounts.is_empty() {
         let resp = crate::email::handler::handle(req).await;

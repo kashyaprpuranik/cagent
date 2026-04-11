@@ -235,18 +235,6 @@ class ConfigGenerator:
                 ]
             )
 
-        # Email proxy internal DNS (if email accounts configured)
-        if self.get_email_accounts():
-            lines.extend(
-                [
-                    "email-proxy {",
-                    "    forward . 127.0.0.11",
-                    "    log",
-                    "}",
-                    "",
-                ]
-            )
-
         # Catch-all block (single . {} block: health, metrics, logging, and NXDOMAIN)
         lines.extend(
             [
@@ -425,12 +413,6 @@ class ConfigGenerator:
 
                 clusters.append(self._generate_cluster(cluster_name, actual_host, tls=use_tls))
 
-        # Add email proxy route if email accounts are configured
-        email_vhost, email_cluster = self._generate_email_envoy_config()
-        if email_vhost:
-            virtual_hosts.append(email_vhost)
-            clusters.append(email_cluster)
-
         # Add catch-all block
         virtual_hosts.append(
             {
@@ -572,51 +554,6 @@ class ConfigGenerator:
             "filter_enforced": {"default_value": _RATELIMIT_PERCENTAGE},
             "status": {"code": "TooManyRequests"},
         }
-
-    def _generate_email_envoy_config(self) -> tuple:
-        """Generate Envoy virtual host + cluster for email proxy if email accounts exist."""
-        email_accounts = self.get_email_accounts()
-        if not email_accounts:
-            return None, None
-
-        virtual_host = {
-            "name": "devbox_email",
-            "domains": ["email.devbox.local", "email.devbox.local:*"],
-            "routes": [
-                {
-                    "match": {"prefix": "/"},
-                    "route": {
-                        "cluster": "email_proxy",
-                        "timeout": "60s",
-                    },
-                }
-            ],
-        }
-
-        cluster = {
-            "name": "email_proxy",
-            "type": "STRICT_DNS",
-            "connect_timeout": "5s",
-            "lb_policy": "ROUND_ROBIN",
-            "load_assignment": {
-                "cluster_name": "email_proxy",
-                "endpoints": [
-                    {
-                        "lb_endpoints": [
-                            {
-                                "endpoint": {
-                                    "address": {
-                                        "socket_address": {"address": f"10.{_NET_OCTET}.2.40", "port_value": 8025}
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                ],
-            },
-        }
-
-        return virtual_host, cluster
 
     def _domain_to_cluster_name(self, domain: str) -> str:
         """Convert domain to valid cluster name."""
@@ -895,22 +832,6 @@ class ConfigGenerator:
             "tokens_per_fill": tokens_per_fill,
             "fill_interval": fill_interval,
         }
-
-    # =========================================================================
-    # Email Config Generation
-    # =========================================================================
-
-    def generate_email_config(self) -> str:
-        """Generate email accounts JSON config from merged accounts.
-
-        Returns a JSON string of the account list. Each entry includes
-        connection details, credentials, and policy settings.
-        """
-        return json.dumps(self.get_email_accounts(), indent=2, default=str)
-
-    def write_email_config(self, output_path: str) -> bool:
-        """Write generated email accounts config as JSON."""
-        return self._write_file(output_path, self.generate_email_config(), "email config")
 
     # =========================================================================
     # DLP Config Generation

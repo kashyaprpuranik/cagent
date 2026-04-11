@@ -113,7 +113,7 @@ cd "$ROOT_DIR"
 # --- Handle 'down' action ---
 if [ "$ACTION" = "down" ]; then
     echo "Stopping Data Plane..."
-    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile email-legacy --profile proxy-rust --profile proxy-legacy down --remove-orphans 2>/dev/null || true
+    docker compose --profile dev --profile standard --profile admin --profile managed --profile auditing --profile proxy-rust --profile proxy-legacy down --remove-orphans 2>/dev/null || true
     echo ""
     echo "=== All services stopped ==="
     exit 0
@@ -140,10 +140,12 @@ else
         export CELL_HTTPS_PROXY="${CELL_HTTPS_PROXY:-http://10.${NET_OCTET:-200}.1.15:8080}"
         echo "MITM proxy enabled (HTTPS via mitmproxy -> Envoy)"
     fi
-    # Beta email: legacy mode starts the Python email-proxy container via
-    # `email-legacy` profile.  Rust mode handles email in-process.
+    # Email is only available in rust proxy mode (cagent-proxy handles
+    # IMAP/SMTP in-process).  --beta in legacy mode is a no-op for email
+    # but still sets BETA_FEATURES for any other beta gates.
     if [ "${BETA_ENABLED:-false}" = true ]; then
-        DP_PROFILES="$DP_PROFILES --profile email-legacy"
+        echo "Note: --beta enables BETA_FEATURES=email but email backend is rust-only;" \
+             "use --proxy-rust for email features."
     fi
 fi
 
