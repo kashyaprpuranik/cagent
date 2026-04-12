@@ -8,6 +8,7 @@ mod config;
 mod config_api;
 mod dlp;
 mod dns;
+mod email;
 mod mitm;
 mod proxy;
 mod util;

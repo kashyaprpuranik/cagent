@@ -41,7 +41,7 @@ This guide covers local development setup, testing, and Docker workflows for the
 │   │   ├── models.py               # Pydantic schemas
 │   │   └── routers/                # API endpoints
 │   │   └── frontend/               # React admin UI (TypeScript + Vite)
-│   └── email_proxy/                # Email proxy (beta)
+│   └── proxy/                      # cagent-proxy: Rust HTTP/HTTPS/DNS proxy + email backend
 ├── tests/                          # pytest tests
 ├── docs/
 │   └── configuration.md            # Config guide
@@ -94,7 +94,8 @@ Tests include:
 | `admin` | Warden with admin UI |
 | `managed` | Warden without admin UI (connected mode) |
 | `auditing` | Log shipper (Vector) |
-| `email` | Email proxy (beta) |
+| `proxy-rust` | cagent-proxy (Rust HTTP/HTTPS/DNS + email backend) |
+| `proxy-legacy` | Envoy + mitmproxy + CoreDNS |
 
 ```bash
 # Minimal (just proxy + DNS + cell)

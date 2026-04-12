@@ -13,12 +13,12 @@ The control plane (centralized multi-tenant management) lives in a separate priv
 This repo contains the **data plane** — the secure agent execution environment:
 
 - **Cell**: Network-isolated sandbox where AI agents run
-- **MITM Proxy** (mitmproxy): TLS-terminating proxy for HTTPS egress — decrypts HTTPS so Envoy can apply security controls
-- **HTTP Proxy** (Envoy): Egress gateway with domain allowlist, rate limiting, path filtering, and credential injection
-- **DNS Filter** (CoreDNS): Domain allowlist enforcement at DNS level
+- **cagent-proxy** (Rust): Unified HTTP/HTTPS/DNS forward proxy (`PROXY_MODE=rust`) with built-in IMAP/SMTP backend for email (generic password auth, with `allowed_recipients`/`allowed_senders` and per-account rate limits)
+- **MITM Proxy** (mitmproxy, legacy): TLS-terminating proxy for HTTPS egress — used when `PROXY_MODE=legacy`
+- **HTTP Proxy** (Envoy, legacy): Egress gateway with domain allowlist, rate limiting, path filtering, and credential injection — used when `PROXY_MODE=legacy`
+- **DNS Filter** (CoreDNS, legacy): Domain allowlist enforcement at DNS level — used when `PROXY_MODE=legacy`
 - **Warden**: Config sync daemon + local admin UI (FastAPI + React)
 - **Log Shipper** (Vector): Log collection with mode-specific sinks (file, S3, Elasticsearch, or CP)
-- **Email Proxy**: IMAP/SMTP proxy with per-recipient policies (beta)
 
 ### Related Repos
 
@@ -36,7 +36,7 @@ This repo contains the **data plane** — the secure agent execution environment
 
 ```
 .
-├── docker-compose.yml              # DP services (cell, envoy, coredns, vector, warden, email-proxy)
+├── docker-compose.yml              # DP services (cell, envoy, coredns, vector, warden, cagent-proxy)
 ├── cell.Dockerfile                 # Cell container image
 ├── configs/
 │   ├── cagent.yaml                 # Unified config (source of truth for DNS + proxy)
@@ -50,7 +50,7 @@ This repo contains the **data plane** — the secure agent execution environment
 ├── services/
 │   ├── warden/               # Config sync, admin UI, domain policy API
 │   │   └── frontend/               # React admin UI (built into warden image)
-│   └── email_proxy/                # Email egress control (beta)
+│   └── proxy/                      # cagent-proxy: unified Rust proxy + email backend
 ├── tests/                          # Unit and E2E tests
 ├── scripts/
 │   ├── local.sh                    # Dev environment orchestration
@@ -163,7 +163,7 @@ npm run lint
 
 - **Networks**: `cell-net` (10.200.1.0/24, internal, no external access) and `infra-net` (10.200.2.0/24, can reach external). IPv6 disabled to prevent bypass
 - **Static IPs**: dns-filter=10.200.1.5, http-proxy=10.200.1.10, mitm-proxy=10.200.1.15, cell=10.200.1.20
-- **Profiles**: `dev` (runc), `standard` (gVisor), `admin` (admin UI via warden), `managed` (warden without UI), `auditing` (log shipping), `email` (email proxy - beta)
+- **Profiles**: `dev` (runc), `standard` (gVisor), `admin` (admin UI via warden), `managed` (warden without UI), `auditing` (log shipping), `proxy-rust` (cagent-proxy), `proxy-legacy` (Envoy + mitmproxy + CoreDNS). Email is rust-only — `--beta` sets `BETA_FEATURES=email` and the cagent-proxy in-process backend handles IMAP/SMTP.
 - **Config generation**: `cagent.yaml` is the primary source. In connected mode, warden merges CP domain policies into config generation (see Config Sources below)
 - **Security layers**: Seccomp profile blocks raw sockets, gVisor intercepts syscalls, mitmproxy decrypts HTTPS for inspection, Envoy enforces domain allowlist/rate limits/path filtering, CoreDNS blocks unauthorized DNS
 - **Vector sinks**: `configs/vector/sinks/standalone.yaml` (file backup + optional S3/ES) or `sinks/connected.yaml` (CP API + file backup), selected via `DATAPLANE_MODE` env var

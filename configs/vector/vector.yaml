@@ -16,7 +16,7 @@ api:
 # SOURCES
 # =============================================================================
 sources:
-  # Docker container logs (cell(s), envoy, coredns, warden, email-proxy)
+  # Docker container logs (cell(s), envoy, coredns, warden, cagent-proxy)
   # Vector's docker_logs source passes include_labels to the Docker API for
   # container discovery.  Docker API ANDs multiple label filters, so containers
   # must match ALL labels.  The compose project filter ensures isolation when
@@ -60,8 +60,6 @@ transforms:
         "envoy"
       } else if contains(container, "mitm-proxy") {
         "mitmproxy"
-      } else if contains(container, "email-proxy") {
-        "email-proxy"
       } else if contains(container, "warden") {
         "warden"
       } else if contains(container, "cell") && !contains(container, "warden") {

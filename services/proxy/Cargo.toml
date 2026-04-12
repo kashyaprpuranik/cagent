@@ -51,3 +51,12 @@ base64 = "0.22"
 hickory-server = "0.25"
 hickory-resolver = "0.25"
 hickory-proto = "0.25"
+
+# Phase 6: Email (IMAP/SMTP with generic password auth + policy enforcement)
+async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "ring"] }
+mail-parser = "0.11"
+wildmatch = "2"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+percent-encoding = "2"

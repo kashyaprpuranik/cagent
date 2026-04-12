@@ -102,7 +102,7 @@ if [ "$RUN_E2E" = true ]; then
         CELL_SERVICE=$(docker inspect "$CELL_CID" --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null || true)
         if [ "$CELL_SERVICE" = "cell" ]; then
             echo "Cell is running with standard profile (gVisor), tearing down to restart with dev profile..."
-            docker compose --profile standard --profile admin --profile email --profile auditing --profile proxy-rust down 2>/dev/null || true
+            docker compose --profile standard --profile admin --profile auditing --profile proxy-rust down 2>/dev/null || true
             NEED_RESTART=true
         fi
     else
@@ -124,7 +124,7 @@ if [ "$RUN_E2E" = true ]; then
         ADMIN_MODE=$(curl -sf http://localhost:${LOCAL_ADMIN_PORT}/api/info 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode',''))" 2>/dev/null || true)
         if [ "$ADMIN_MODE" = "connected" ]; then
             echo "Data plane is running in connected mode, restarting in standalone mode..."
-            docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down 2>/dev/null || true
+            docker compose --profile dev --profile admin --profile auditing --profile proxy-rust --profile proxy-legacy down 2>/dev/null || true
             NEED_RESTART=true
         fi
     fi
@@ -168,8 +168,8 @@ if [ "$RUN_E2E" = true ]; then
         # Use -v to remove volumes (proxy-config may have stale envoy config from
         # a prior connected-mode run, e.g. CP+DP e2e) and --remove-orphans to catch
         # containers started with a different compose file (e.g. e2e override).
-        docker compose --profile dev --profile admin --profile managed --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down -v --remove-orphans 2>/dev/null || true
-        docker compose --profile standard --profile admin --profile managed --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile managed --profile auditing --profile proxy-rust --profile proxy-legacy down -v --remove-orphans 2>/dev/null || true
+        docker compose --profile standard --profile admin --profile managed --profile auditing --profile proxy-rust --profile proxy-legacy down -v --remove-orphans 2>/dev/null || true
 
         # Clean up stale networks (may have wrong labels or orphan endpoints)
         for net in "$INFRA_NET_NAME" "$CELL_NET_NAME"; do
@@ -227,7 +227,7 @@ if [ "$RUN_E2E" = true ]; then
     if [ "$CONTAINERS_STARTED" = true ] && [ "$NO_TEARDOWN" = false ]; then
         echo ""
         echo "Stopping containers started by this script..."
-        docker compose --profile dev --profile admin --profile email --profile auditing --profile proxy-rust --profile proxy-legacy down 2>/dev/null || true
+        docker compose --profile dev --profile admin --profile auditing --profile proxy-rust --profile proxy-legacy down 2>/dev/null || true
     elif [ "$NO_TEARDOWN" = true ]; then
         echo ""
         echo "Keeping containers running (--no-teardown)"

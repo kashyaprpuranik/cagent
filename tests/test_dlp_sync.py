@@ -166,15 +166,13 @@ class TestRegenerateConfigsDlp:
         self.envoy_path = tmp_path / "envoy.yaml"
         self.cds_path = tmp_path / "cds.yaml"
         self.rds_path = tmp_path / "rds.yaml"
-        self.email_path = tmp_path / "accounts.json"
         self.dlp_path = tmp_path / "dlp_config.json"
         self.env_path = tmp_path / ".env"
 
     @patch("config_sync.reload_mitm_proxy")
-    @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
-    def test_dlp_config_triggers_mitm_restart(self, mock_dns, mock_envoy, mock_email, mock_mitm):
+    def test_dlp_config_triggers_mitm_restart(self, mock_dns, mock_envoy, mock_mitm):
         from config_sync import ConfigState, config_generator, regenerate_configs
 
         # Point generator at our temp yaml
@@ -185,7 +183,6 @@ class TestRegenerateConfigsDlp:
              patch("config_sync.ENVOY_CONFIG_PATH", str(self.envoy_path)), \
              patch("config_sync.ENVOY_CDS_PATH", str(self.cds_path)), \
              patch("config_sync.ENVOY_RDS_PATH", str(self.rds_path)), \
-             patch("config_sync.EMAIL_CONFIG_PATH", str(self.email_path)), \
              patch("config_sync.DLP_CONFIG_PATH", str(self.dlp_path)), \
              patch("config_sync.ENV_FILE_PATH", str(self.env_path)), \
              patch("config_sync.config_state", ConfigState()), \
@@ -203,10 +200,9 @@ class TestRegenerateConfigsDlp:
             assert written["mode"] == "block"
 
     @patch("config_sync.reload_mitm_proxy")
-    @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
-    def test_dlp_no_restart_when_unchanged(self, mock_dns, mock_envoy, mock_email, mock_mitm):
+    def test_dlp_no_restart_when_unchanged(self, mock_dns, mock_envoy, mock_mitm):
         from config_sync import ConfigState, config_generator, regenerate_configs, _stable_hash
 
         config_generator.config_path = self.yaml_path
@@ -217,7 +213,6 @@ class TestRegenerateConfigsDlp:
              patch("config_sync.ENVOY_CONFIG_PATH", str(self.envoy_path)), \
              patch("config_sync.ENVOY_CDS_PATH", str(self.cds_path)), \
              patch("config_sync.ENVOY_RDS_PATH", str(self.rds_path)), \
-             patch("config_sync.EMAIL_CONFIG_PATH", str(self.email_path)), \
              patch("config_sync.DLP_CONFIG_PATH", str(self.dlp_path)), \
              patch("config_sync.ENV_FILE_PATH", str(self.env_path)), \
              patch("config_sync.config_state", state), \
@@ -236,10 +231,9 @@ class TestRegenerateConfigsDlp:
             mock_mitm.assert_not_called()
 
     @patch("config_sync.reload_mitm_proxy")
-    @patch("config_sync.reload_email_proxy")
     @patch("config_sync.reload_envoy")
     @patch("config_sync.restart_coredns")
-    def test_standalone_mode_no_dlp_override(self, mock_dns, mock_envoy, mock_email, mock_mitm):
+    def test_standalone_mode_no_dlp_override(self, mock_dns, mock_envoy, mock_mitm):
         from config_sync import ConfigState, config_generator, regenerate_configs
 
         config_generator.config_path = self.yaml_path
@@ -248,7 +242,6 @@ class TestRegenerateConfigsDlp:
              patch("config_sync.ENVOY_CONFIG_PATH", str(self.envoy_path)), \
              patch("config_sync.ENVOY_CDS_PATH", str(self.cds_path)), \
              patch("config_sync.ENVOY_RDS_PATH", str(self.rds_path)), \
-             patch("config_sync.EMAIL_CONFIG_PATH", str(self.email_path)), \
              patch("config_sync.DLP_CONFIG_PATH", str(self.dlp_path)), \
              patch("config_sync.ENV_FILE_PATH", str(self.env_path)), \
              patch("config_sync.config_state", ConfigState()), \

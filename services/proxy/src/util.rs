@@ -85,6 +85,29 @@ pub fn error_response(status: StatusCode, body: &str) -> ProxyResponse {
 /// proxy (which has a 32 MB memory limit).
 pub const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
+/// Sanitize an attachment filename for safe use in HTTP
+/// `Content-Disposition` headers and as a MIME attachment filename.
+///
+/// - strips `\r`, `\n`, `\0` (header injection)
+/// - strips `/` and `\` (path traversal)
+/// - strips `"` (would terminate the quoted filename in
+///   `Content-Disposition: attachment; filename="..."`)
+/// - truncates to 255 *chars* (not bytes — taking by byte index would
+///   split a multi-byte UTF-8 sequence and panic)
+/// - returns `"attachment"` if the result is empty
+pub fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .filter(|c| !matches!(c, '\r' | '\n' | '\0' | '/' | '\\' | '"'))
+        .take(255)
+        .collect();
+    if cleaned.is_empty() {
+        "attachment".to_string()
+    } else {
+        cleaned
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Streaming response body with deferred access logging
 // ---------------------------------------------------------------------------
