@@ -410,42 +410,24 @@ fn parse_query(q: &str) -> std::collections::HashMap<String, String> {
 }
 
 fn url_decode(s: &str) -> String {
-    // Minimal percent-decoding without pulling in urlencoding crate
-    let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'+' {
-            out.push(' ');
-            i += 1;
-        } else if b == b'%' && i + 2 < bytes.len() {
-            let hi = (bytes[i + 1] as char).to_digit(16);
-            let lo = (bytes[i + 2] as char).to_digit(16);
-            if let (Some(h), Some(l)) = (hi, lo) {
-                out.push((h * 16 + l) as u8 as char);
-                i += 3;
-                continue;
-            }
-            out.push('%');
-            i += 1;
-        } else {
-            out.push(b as char);
-            i += 1;
-        }
-    }
-    out
+    // application/x-www-form-urlencoded: + → space, then percent-decode.
+    // Use percent-encoding crate so multi-byte UTF-8 sequences are
+    // decoded correctly and invalid sequences pass through as the raw
+    // replacement character.
+    let plus_to_space: String = s.chars().map(|c| if c == '+' { ' ' } else { c }).collect();
+    percent_encoding::percent_decode_str(&plus_to_space)
+        .decode_utf8_lossy()
+        .into_owned()
 }
 
 fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .filter(|c| !matches!(c, '\r' | '\n' | '\0' | '/' | '\\' | '"'))
+        .take(255)
         .collect();
     if cleaned.is_empty() {
         "attachment".to_string()
-    } else if cleaned.len() > 255 {
-        cleaned[..255].to_string()
     } else {
         cleaned
     }
@@ -464,8 +446,8 @@ fn json_response(status: StatusCode, body: &str) -> ProxyResponse {
 
 fn json_error(status: StatusCode, msg: &str) -> ProxyResponse {
     // Match FastAPI's {"detail": "..."} error shape for compatibility with
-    // the Python service's clients.
-    let escaped = msg.replace('\\', "\\\\").replace('"', "\\\"");
-    let body = format!(r#"{{"detail":"{}"}}"#, escaped);
+    // the Python service's clients.  Use serde_json so control chars,
+    // backslashes, and unicode in error messages are escaped correctly.
+    let body = serde_json::json!({ "detail": msg }).to_string();
     json_response(status, &body)
 }

@@ -153,32 +153,55 @@ pub async fn list_messages(
     let start = uids.len().saturating_sub(limit);
     let selected: Vec<u32> = uids.drain(start..).collect();
 
+    // Bulk FETCH all selected sequence numbers in a single round trip.
+    // The previous implementation issued one FETCH per message (O(N)
+    // round trips); IMAP supports comma-separated sequence sets so the
+    // server can stream all headers in one response.
     let mut summaries: Vec<MessageSummary> = Vec::new();
-    // Process newest first
-    for &seq in selected.iter().rev() {
+    if !selected.is_empty() {
+        let seq_set: String = selected
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        // Collect into a temporary map keyed by sequence number so we can
+        // re-order to newest-first regardless of the order the server returns.
+        let mut by_seq: std::collections::HashMap<u32, MessageSummary> =
+            std::collections::HashMap::with_capacity(selected.len());
+
         let mut fetch_stream = session
-            .fetch(seq.to_string(), "(RFC822.HEADER)")
+            .fetch(&seq_set, "(RFC822.HEADER)")
             .await
-            .map_err(|e| EmailError::Upstream(format!("FETCH header {}: {}", seq, e)))?;
+            .map_err(|e| EmailError::Upstream(format!("FETCH headers: {}", e)))?;
         while let Some(item) = fetch_stream.next().await {
             let fetch = item.map_err(|e| EmailError::Upstream(format!("FETCH parse: {}", e)))?;
+            let seq = fetch.message;
             let header_bytes: &[u8] = fetch.header().unwrap_or(&[]);
             let parser = MessageParser::new();
             if let Some(parsed) = parser.parse(header_bytes) {
                 let (from, to, subject, date) = extract_headers(&parsed);
-                summaries.push(MessageSummary {
-                    uid: seq.to_string(),
-                    snippet: truncate(&subject, 100),
-                    from,
-                    to,
-                    subject,
-                    date,
-                });
+                by_seq.insert(
+                    seq,
+                    MessageSummary {
+                        uid: seq.to_string(),
+                        snippet: truncate(&subject, 100),
+                        from,
+                        to,
+                        subject,
+                        date,
+                    },
+                );
             }
-            break;
         }
-        // Drain any remaining items so the next FETCH can run
-        while fetch_stream.next().await.is_some() {}
+        drop(fetch_stream);
+
+        // Re-order newest-first using the original selected order.
+        for &seq in selected.iter().rev() {
+            if let Some(s) = by_seq.remove(&seq) {
+                summaries.push(s);
+            }
+        }
     }
 
     disconnect(session).await;
@@ -401,12 +424,10 @@ fn part_content_len(part: &mail_parser::MessagePart<'_>) -> usize {
     }
 }
 
+/// Truncate a string to at most `max` chars (not bytes — chars), so we
+/// never split a multi-byte UTF-8 sequence.
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        s[..max].to_string()
-    }
+    s.chars().take(max).collect()
 }
 
 fn escape_imap_string(s: &str) -> String {

@@ -59,3 +59,4 @@ mail-parser = "0.11"
 wildmatch = "2"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+percent-encoding = "2"

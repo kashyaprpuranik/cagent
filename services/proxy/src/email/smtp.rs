@@ -130,30 +130,15 @@ pub async fn send(req: SendRequest<'_>) -> Result<String, EmailError> {
         .await
         .map_err(|e| EmailError::Upstream(format!("SMTP send: {}", e)))?;
 
-    // Message-ID is set by lettre during send.  We extract from the Message
-    // headers if present; otherwise return a synthetic id.
-    let id = extract_message_id(&msg)
+    // Message-ID is set by lettre during build.  Pull it from the
+    // typed Headers map (handles header folding and case-insensitivity
+    // properly — manual line parsing would not).
+    let id = msg
+        .headers()
+        .get_raw("Message-ID")
+        .map(|s| s.to_string())
         .unwrap_or_else(|| format!("<{}-{}@cagent-proxy>", acct.name, now_millis()));
     Ok(id)
-}
-
-fn extract_message_id(msg: &Message) -> Option<String> {
-    // lettre 0.11 doesn't expose Message-ID directly; rely on the
-    // formatted message bytes and regex-free line scan.
-    let bytes = msg.formatted();
-    let text = std::str::from_utf8(&bytes).ok()?;
-    for line in text.lines() {
-        if line.is_empty() {
-            break; // end of headers
-        }
-        if let Some(rest) = line.strip_prefix("Message-ID:") {
-            return Some(rest.trim().to_string());
-        }
-        if let Some(rest) = line.strip_prefix("Message-Id:") {
-            return Some(rest.trim().to_string());
-        }
-    }
-    None
 }
 
 fn now_millis() -> u128 {
@@ -164,15 +149,14 @@ fn now_millis() -> u128 {
 }
 
 fn sanitize_filename(name: &str) -> String {
-    let stripped: String = name
+    // Strip control + path-traversal chars, then take at most 255 chars
+    // (not bytes — taking by byte index would split a multi-byte UTF-8
+    // sequence and panic).
+    let trimmed: String = name
         .chars()
         .filter(|c| !matches!(c, '\r' | '\n' | '\0' | '/' | '\\'))
+        .take(255)
         .collect();
-    let trimmed = if stripped.len() > 255 {
-        stripped[..255].to_string()
-    } else {
-        stripped
-    };
     if trimmed.is_empty() {
         "attachment".to_string()
     } else {
