@@ -15,7 +15,7 @@ use crate::config::CONFIG;
 use crate::email::config::EmailAccount;
 use crate::email::policy::{check_rate_limit, check_recipients_allowed, check_sender_allowed, RateAction};
 use crate::email::{imap, smtp};
-use crate::util::{error_response, ProxyBody, ProxyResponse};
+use crate::util::{error_response, sanitize_filename, ProxyBody, ProxyResponse};
 
 /// Error shared by smtp/imap modules.  Converted to ProxyResponse via `into_response`.
 ///
@@ -418,19 +418,6 @@ fn url_decode(s: &str) -> String {
     percent_encoding::percent_decode_str(&plus_to_space)
         .decode_utf8_lossy()
         .into_owned()
-}
-
-fn sanitize_filename(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .filter(|c| !matches!(c, '\r' | '\n' | '\0' | '/' | '\\' | '"'))
-        .take(255)
-        .collect();
-    if cleaned.is_empty() {
-        "attachment".to_string()
-    } else {
-        cleaned
-    }
 }
 
 fn json_response(status: StatusCode, body: &str) -> ProxyResponse {

@@ -411,7 +411,9 @@ fn part_content_bytes(part: &mail_parser::MessagePart<'_>) -> Vec<u8> {
     match &part.body {
         PartType::Text(s) | PartType::Html(s) => s.as_bytes().to_vec(),
         PartType::Binary(b) | PartType::InlineBinary(b) => b.to_vec(),
-        // Nested RFC822 message as attachment — serialize headers+body
+        // Nested RFC822 messages and multipart wrappers are not exposed
+        // as downloadable attachments — they don't have a single byte
+        // payload we can stream back via /attachment/{uid}/{part_id}.
         PartType::Message(_) | PartType::Multipart(_) => Vec::new(),
     }
 }

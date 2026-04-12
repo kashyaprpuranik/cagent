@@ -11,6 +11,7 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 use crate::email::config::EmailAccount;
 use crate::email::handler::EmailError;
+use crate::util::sanitize_filename;
 
 /// Attachment body as base64-encoded content + filename + content type.
 pub struct SendAttachment {
@@ -148,18 +149,3 @@ fn now_millis() -> u128 {
         .unwrap_or(0)
 }
 
-fn sanitize_filename(name: &str) -> String {
-    // Strip control + path-traversal chars, then take at most 255 chars
-    // (not bytes — taking by byte index would split a multi-byte UTF-8
-    // sequence and panic).
-    let trimmed: String = name
-        .chars()
-        .filter(|c| !matches!(c, '\r' | '\n' | '\0' | '/' | '\\'))
-        .take(255)
-        .collect();
-    if trimmed.is_empty() {
-        "attachment".to_string()
-    } else {
-        trimmed
-    }
-}
